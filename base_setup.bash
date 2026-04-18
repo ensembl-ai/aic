@@ -52,9 +52,12 @@ git config --global init.defaultBranch main
 mkdir -p ~/.ssh
 chmod 700 ~/.ssh
 
-
-ssh-keygen -t ed25519 -C "rmalhan0112@gmail.com" -f ~/.ssh/id_ed25519 -N ""
-echo "New SSH key created. Add this to GitHub:"
+if [[ -f ~/.ssh/id_ed25519 ]]; then
+  echo "SSH key ~/.ssh/id_ed25519 already exists; reusing it."
+else
+  ssh-keygen -t ed25519 -C "rmalhan0112@gmail.com" -f ~/.ssh/id_ed25519 -N ""
+  echo "New SSH key created. Add this to GitHub:"
+fi
 cat ~/.ssh/id_ed25519.pub
 
 ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
