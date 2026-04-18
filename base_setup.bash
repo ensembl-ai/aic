@@ -42,20 +42,8 @@ grep -q '^ListenAddress 0.0.0.0$' /etc/ssh/sshd_config || echo "ListenAddress 0.
 
 persist_env
 
-# Optional browser desktop for cloud GPU visualization.
-if [[ "${AIC_ENABLE_BROWSER_DESKTOP:-0}" == "1" || "${AIC_ENABLE_BROWSER_DESKTOP:-false}" == "true" ]]; then
-  BROWSER_DESKTOP_HTTP_PORT="${AIC_BROWSER_DESKTOP_HTTP_PORT:-6080}"
-  "${SCRIPT_DIR}/browser_desktop_setup.bash" "${BROWSER_DESKTOP_HTTP_PORT}"
-fi
-
-# Running a script cannot modify the parent shell, so replace this process
-# with a fresh login shell that picks up /etc/profile.d/*.sh and keeps the
-# current SSH session interactive.
-if [[ -t 0 && -t 1 && "${AIC_SKIP_LOGIN_SHELL:-0}" != "1" ]]; then
-  echo "Opening a fresh login shell with the configured environment..."
-  exec bash -l
-fi
-
+BROWSER_DESKTOP_HTTP_PORT="${AIC_BROWSER_DESKTOP_HTTP_PORT:-6080}"
+"${SCRIPT_DIR}/browser_desktop_setup.bash" "${BROWSER_DESKTOP_HTTP_PORT}"
 
 git config --global user.name "rishimalhan"
 git config --global user.email "rmalhan0112@gmail.com"
@@ -64,13 +52,20 @@ git config --global init.defaultBranch main
 mkdir -p ~/.ssh
 chmod 700 ~/.ssh
 
-if [ ! -f ~/.ssh/id_ed25519 ]; then
-  ssh-keygen -t ed25519 -C "rmalhan0112@gmail.com" -f ~/.ssh/id_ed25519 -N ""
-  echo "New SSH key created. Add this to GitHub:"
-  cat ~/.ssh/id_ed25519.pub
-fi
+
+ssh-keygen -t ed25519 -C "rmalhan0112@gmail.com" -f ~/.ssh/id_ed25519 -N ""
+echo "New SSH key created. Add this to GitHub:"
+cat ~/.ssh/id_ed25519.pub
 
 ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
 chmod 644 ~/.ssh/known_hosts
 
 git config --global core.sshCommand "ssh -i ~/.ssh/id_ed25519"
+
+# Running a script cannot modify the parent shell, so replace this process
+# with a fresh login shell that picks up /etc/profile.d/*.sh and keeps the
+# current SSH session interactive.
+if [[ -t 0 && -t 1 && "${AIC_SKIP_LOGIN_SHELL:-0}" != "1" ]]; then
+  echo "Opening a fresh login shell with the configured environment..."
+  exec bash -l
+fi
