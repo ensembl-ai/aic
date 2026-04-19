@@ -1,21 +1,14 @@
 import numpy as np
 
+from aic_control_interfaces.msg import JointMotionUpdate, TrajectoryGenerationMode
 from aic_model.policy import (
     GetObservationCallback,
     MoveRobotCallback,
     Policy,
     SendFeedbackCallback,
 )
-from aic_control_interfaces.msg import (
-    MotionUpdate,
-    TrajectoryGenerationMode,
-)
-from aic_model_interfaces.msg import Observation
+from aic_model.robot import EnsemblRobot
 from aic_task_interfaces.msg import Task
-from geometry_msgs.msg import Point, Pose, Quaternion, Vector3, Wrench
-from rclpy.duration import Duration
-from rclpy.time import Time
-from tf2_ros import TransformException
 
 
 class TestMove(Policy):
@@ -30,48 +23,57 @@ class TestMove(Policy):
         move_robot: MoveRobotCallback,
         send_feedback: SendFeedbackCallback,
     ):
-        self.get_logger().info(f"WaveArm.insert_cable() enter. Task: {task}")
-        start_time = self.time_now()
-        timeout = Duration(seconds=10.0)
-        send_feedback("Testing the arm motion")
-        while (self.time_now() - start_time) < timeout:
-            self.sleep_for(0.25)
-            observation = get_observation()
-            if observation is None:
-                self.get_logger().info("No observation received.")
-                continue
-            self.get_logger().info(f"observation wrench: {observation.wrist_wrench}")
-            t = (
-                observation.wrist_wrench.header.stamp.sec
-                + observation.wrist_wrench.header.stamp.nanosec / 1e9
-            )
-            self.get_logger().info(f"observation wrench time: {t}")
+        self.get_logger().info(f"TestMove.insert_cable() enter. Task: {task}")
+        send_feedback("Testing waypoint joint motion with EnsemblRobot")
 
-            try:
-                tcp_tf = self._parent_node._tf_buffer.lookup_transform(
-                    "base_link",
-                    "gripper/tcp",
-                    Time(),
-                )
-            except TransformException as ex:
-                self.get_logger().error(
-                    f"Failed to get gripper/tcp orientation in base_link: {ex}"
-                )
-                continue
+        robot = EnsemblRobot(get_observation)
+        robot = EnsemblRobot()
+        robot.SetActiveDOFValues(robot.GetActiveDOFValues())
 
-            pose_in_base_link = Pose(
-                position=Point(x=-0.63381193, y=0.2899951, z=0.05814897),
-                orientation=Quaternion(
-                    x=tcp_tf.transform.rotation.x,
-                    y=tcp_tf.transform.rotation.y,
-                    z=tcp_tf.transform.rotation.z,
-                    w=tcp_tf.transform.rotation.w,
-                ),
+        current_transform = robot.ComputeFK()
+        target_transform = current_transform.copy()
+        target_transform[:3, 3] = np.array(
+            [-0.63381193, 0.2899951, 0.05814897],
+            dtype=np.float64,
+        )
+
+        waypoint_positions = np.linspace(
+            current_transform[:3, 3],
+            target_transform[:3, 3],
+            num=11,
+            dtype=np.float64,
+        )[1:]
+        planner_joint_group = robot.GetEnv().getJointGroup(robot.MANIPULATOR_GROUP_NAME)
+        planner_joint_names = list(planner_joint_group.getJointNames())
+
+        joint_waypoints = []
+        for position in waypoint_positions:
+            waypoint_transform = target_transform.copy()
+            waypoint_transform[:3, 3] = position
+            joint_positions = robot.ComputeIK(waypoint_transform)
+            joint_waypoints.append(joint_positions.tolist())
+            robot.GetEnv().setState(planner_joint_names, joint_positions)
+
+        joint_motion_update = JointMotionUpdate(
+            target_stiffness=[120.0, 120.0, 120.0, 50.0, 50.0, 50.0],
+            target_damping=[40.0, 40.0, 40.0, 15.0, 15.0, 15.0],
+            trajectory_generation_mode=TrajectoryGenerationMode(
+                mode=TrajectoryGenerationMode.MODE_POSITION
+            ),
+        )
+
+        for index, joint_positions in enumerate(joint_waypoints, start=1):
+            self.get_logger().info(
+                f"Commanding waypoint {index}/{len(joint_waypoints)}"
             )
-            self.set_pose_target(
-                move_robot=move_robot,
-                pose=pose_in_base_link,
-                frame_id="base_link",
-            )
+            joint_motion_update.target_state.positions = joint_positions
+            for _ in range(5):
+                move_robot(joint_motion_update=joint_motion_update)
+                self.sleep_for(0.05)
+
+        for _ in range(10):
+            move_robot(joint_motion_update=joint_motion_update)
+            self.sleep_for(0.05)
+
         self.get_logger().info("TestMove.insert_cable() exiting...")
         return True
