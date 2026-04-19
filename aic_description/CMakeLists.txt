@@ -9,7 +9,7 @@ endif()
 find_package(ament_cmake REQUIRED)
 
 install(
-  DIRECTORY urdf world
+  DIRECTORY srdf urdf world
   DESTINATION share/${PROJECT_NAME}
 )
 

@@ -11,6 +11,7 @@ preview = ["pixi-build"]
 evdev = ">=1.9.2,<2"
 
 [dependencies]
+pip = "*"
 isort = "==5.13.2"                                                                     # version bundled by the vscode extension
 json5 = ">=0.13.0,<0.14"                                                               # version bundled by the vscode extension
 numpy = "<2.3.0"
@@ -34,6 +35,7 @@ ros-kilted-sensor-msgs = "*"                                                    
 ros-kilted-std-msgs = "*"                                                              # lerobot_robot_ros
 ros-kilted-std-srvs = "*"
 ros-kilted-tf2-ros-py = "*"
+ros-kilted-ur-description = "*"
 setuptools = ">=71.0.0,<81.0.0"                                                        # required by lerobot==0.4.3
 
 [pypi-dependencies]
