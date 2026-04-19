@@ -14,8 +14,11 @@
 #  limitations under the License.
 #
 
+from collections.abc import Callable
+from functools import wraps
 import logging
 import os
+import numpy as np
 
 # External
 
@@ -24,18 +27,59 @@ from launch_ros.substitutions import FindPackageShare
 from tesseract_robotics.tesseract_common import (
     FilesystemPath,
     GeneralResourceLocator,
+    Isometry3d,
 )
 from tesseract_robotics.tesseract_environment import Environment
+from tesseract_robotics.tesseract_kinematics import KinGroupIKInput, KinGroupIKInputs
 import xacro
+
+# Internal
+
+from aic_model_interfaces.msg import Observation
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
+
+def with_latest_state(method):
+    """Refresh the Tesseract environment from the latest observation."""
+
+    @wraps(method)
+    def wrapper(self, *args, **kwargs):
+        if not self.simulated:
+            obs = self._get_observation()
+            if obs is None:
+                raise RuntimeError("Observation is unavailable.")
+            self.env.setState(
+                dict(zip(obs.joint_states.name, obs.joint_states.position))
+            )
+        return method(self, *args, **kwargs)
+
+    return wrapper
 
 
 class EnsemblRobot:
-    def __init__(self):
-        self.logger = logging.getLogger(__name__)
+    """Wrap the AIC robot model in a Tesseract environment."""
+
+    MANIPULATOR_GROUP_NAME = "manipulator"
+    MANIPULATOR_BASE_FRAME = "base_link"
+    MANIPULATOR_TIP_FRAME = "gripper/tcp"
+
+    def __init__(self, get_observation: Callable[[], Observation] | None = None):
+        """Initialize the robot model.
+
+        If ``get_observation`` is ``None``, the robot runs in simulated mode and
+        all active joints are initialized to zero.
+        """
+        self._get_observation = get_observation
+        self.simulated = get_observation is None
+
         self.locator = self._create_resource_locator()
         self.env = Environment()
         context = LaunchContext()
-        self.aic_description_share = FindPackageShare("aic_description").perform(context)
+        self.aic_description_share = FindPackageShare("aic_description").perform(
+            context
+        )
         self.urdf_xacro_path = f"{self.aic_description_share}/urdf/ur_gz.urdf.xacro"
         self.srdf_path = f"{self.aic_description_share}/srdf/ur_gz.srdf"
         urdf_xml = self._expand_xacro(self.urdf_xacro_path)
@@ -47,10 +91,80 @@ class EnsemblRobot:
         )
         if not ok:
             raise RuntimeError("Failed to initialize tesseract environment")
-        else:
-            self.logger.info("Tesseract environment initialized successfully")
+        logger.info("Tesseract environment initialized successfully")
+
+        self._active_joint_names = list(self.env.getStateSolver().getActiveJointNames())
+        self._joint_group = self.env.getJointGroup(self.MANIPULATOR_GROUP_NAME)
+        self._manipulator_joint_names = list(self._joint_group.getJointNames())
+        self._manipulator_target_frames = set(self._joint_group.getActiveLinkNames())
+
+        if self.simulated:
+            self.SetActiveDOFValues(
+                np.zeros(len(self._active_joint_names), dtype=np.float64)
+            )
+
+    def _coerce_vector(
+        self,
+        values: np.ndarray | list[float],
+        expected_size: int,
+        label: str,
+    ) -> np.ndarray:
+        """Return a flat float vector with the expected size."""
+        values = np.asarray(values, dtype=np.float64).reshape(-1)
+        if values.size != expected_size:
+            raise ValueError(
+                f"Expected {expected_size} {label} values, got {values.size}."
+            )
+        return values
+
+    def _get_current_manipulator_joint_values(self) -> np.ndarray:
+        """Return the current manipulator joint values as a flat array."""
+        return np.asarray(
+            self.env.getCurrentJointValues(self._manipulator_joint_names),
+            dtype=np.float64,
+        ).reshape(-1)
+
+    def _compute_relative_transform_matrix(
+        self,
+        joint_positions: np.ndarray,
+        target_frame: str,
+    ) -> np.ndarray:
+        """Return the transform matrix of ``target_frame`` relative to ``base_link``."""
+        link_transforms = self._joint_group.calcFwdKin(joint_positions)
+        if self.MANIPULATOR_BASE_FRAME not in link_transforms:
+            raise KeyError(f"Unknown base frame: {self.MANIPULATOR_BASE_FRAME}")
+        if target_frame not in link_transforms:
+            raise KeyError(f"Unknown target frame: {target_frame}")
+
+        transform = (
+            link_transforms[self.MANIPULATOR_BASE_FRAME].inverse()
+            * link_transforms[target_frame]
+        )
+        return np.asarray(transform.matrix(), dtype=np.float64)
+
+    def _coerce_transform_matrix(
+        self,
+        transform: np.ndarray | list[list[float]],
+    ) -> np.ndarray:
+        """Return a 4x4 homogeneous transform matrix."""
+        transform = np.asarray(transform, dtype=np.float64)
+        if transform.shape != (4, 4):
+            raise ValueError(
+                f"Expected transform with shape (4, 4), got {transform.shape}."
+            )
+        return transform
+
+    def _require_supported_target_frame(self, target_frame: str) -> str:
+        """Return a target frame that belongs to the configured manipulator chain."""
+        if target_frame not in self._manipulator_target_frames:
+            raise ValueError(
+                f"Target frame '{target_frame}' is not on the configured "
+                f"manipulator chain."
+            )
+        return target_frame
 
     def _create_resource_locator(self) -> GeneralResourceLocator:
+        """Create a Tesseract resource locator from the ROS prefix path."""
         locator = GeneralResourceLocator()
         for prefix in os.environ.get("AMENT_PREFIX_PATH", "").split(os.pathsep):
             if not prefix:
@@ -61,13 +175,242 @@ class EnsemblRobot:
         return locator
 
     def _expand_xacro(self, xacro_path: str) -> str:
+        """Expand the robot xacro into a URDF XML string."""
         doc = xacro.process_file(xacro_path, mappings={"name": "ur"})
         return doc.toxml()
 
     def _read_srdf(self, srdf_path: str) -> str:
+        """Read the SRDF file into a string."""
         with open(srdf_path, encoding="utf-8") as f:
             return f.read()
+
+    @with_latest_state
+    def GetActiveDOFValues(self) -> np.ndarray:
+        """Return the current active joint values in Tesseract active-joint order."""
+        return np.asarray(self.env.getCurrentJointValues(), dtype=np.float64).reshape(
+            -1
+        )
+
+    def SetActiveDOFValues(self, joint_values: np.ndarray | list[float]) -> None:
+        """Set the active joint values when the robot is running in simulated mode."""
+        if not self.simulated:
+            raise RuntimeError(
+                "SetActiveDOFValues is only available when get_observation is None."
+            )
+
+        joint_values = self._coerce_vector(
+            joint_values,
+            len(self._active_joint_names),
+            "active joint",
+        )
+        self.env.setState(self._active_joint_names, joint_values)
+
+    @with_latest_state
+    def GetEnv(self) -> Environment:
+        """Return the refreshed Tesseract environment."""
+        return self.env
+
+    @with_latest_state
+    def ComputeFK(
+        self,
+        target_frame: str = MANIPULATOR_TIP_FRAME,
+    ) -> np.ndarray:
+        """Return the current 4x4 transform of ``target_frame`` relative to ``base_link``."""
+        return self._compute_relative_transform_matrix(
+            self._get_current_manipulator_joint_values(),
+            self._require_supported_target_frame(target_frame),
+        )
+
+    @with_latest_state
+    def ComputeJacobianGeomtric(
+        self,
+        target_frame: str = MANIPULATOR_TIP_FRAME,
+    ) -> np.ndarray:
+        """Return the current geometric Jacobian in Tesseract's row ordering."""
+        joint_positions = self._get_current_manipulator_joint_values()
+        target_frame = self._require_supported_target_frame(target_frame)
+        return np.asarray(
+            self._joint_group.calcJacobian(
+                joint_positions,
+                self.MANIPULATOR_BASE_FRAME,
+                target_frame,
+                np.zeros(3, dtype=np.float64),
+            ),
+            dtype=np.float64,
+        )
+
+    @with_latest_state
+    def ComputeJacobianAnalytical(
+        self,
+        target_frame: str = MANIPULATOR_TIP_FRAME,
+    ) -> np.ndarray:
+        """Return the current analytical Jacobian for XYZ plus roll/pitch/yaw."""
+        joint_positions = self._get_current_manipulator_joint_values()
+        target_frame = self._require_supported_target_frame(target_frame)
+        jacobian_geometric = np.asarray(
+            self._joint_group.calcJacobian(
+                joint_positions,
+                self.MANIPULATOR_BASE_FRAME,
+                target_frame,
+                np.zeros(3, dtype=np.float64),
+            ),
+            dtype=np.float64,
+        )
+        rotation = self._compute_relative_transform_matrix(
+            joint_positions,
+            target_frame,
+        )[:3, :3]
+
+        pitch = np.arctan2(
+            -rotation[2, 0],
+            np.hypot(rotation[0, 0], rotation[1, 0]),
+        )
+        cos_pitch = np.cos(pitch)
+        if np.isclose(cos_pitch, 0.0):
+            raise RuntimeError(
+                "ComputeJacobianAnalytical is singular at pitch = +/- pi/2."
+            )
+        roll = np.arctan2(rotation[2, 1], rotation[2, 2])
+
+        angular_velocity_to_rpy_rates = np.array(
+            [
+                [1.0, np.sin(roll) * np.tan(pitch), np.cos(roll) * np.tan(pitch)],
+                [0.0, np.cos(roll), -np.sin(roll)],
+                [0.0, np.sin(roll) / cos_pitch, np.cos(roll) / cos_pitch],
+            ],
+            dtype=np.float64,
+        )
+        return np.vstack(
+            [
+                jacobian_geometric[:3, :],
+                angular_velocity_to_rpy_rates @ jacobian_geometric[3:, :],
+            ]
+        )
+
+    @with_latest_state
+    def ComputeHessian(
+        self,
+        target_frame: str = MANIPULATOR_TIP_FRAME,
+    ) -> np.ndarray:
+        """Return the current numerical geometric Hessian relative to ``base_link``."""
+        joint_positions = self._get_current_manipulator_joint_values()
+        target_frame = self._require_supported_target_frame(target_frame)
+        link_point = np.zeros(3, dtype=np.float64)
+        step = 1e-6
+        hessian = np.zeros(
+            (6, joint_positions.size, joint_positions.size),
+            dtype=np.float64,
+        )
+
+        for i in range(joint_positions.size):
+            q_plus = joint_positions.copy()
+            q_plus[i] += step
+            q_minus = joint_positions.copy()
+            q_minus[i] -= step
+            jac_plus = np.asarray(
+                self._joint_group.calcJacobian(
+                    q_plus,
+                    self.MANIPULATOR_BASE_FRAME,
+                    target_frame,
+                    link_point,
+                ),
+                dtype=np.float64,
+            )
+            jac_minus = np.asarray(
+                self._joint_group.calcJacobian(
+                    q_minus,
+                    self.MANIPULATOR_BASE_FRAME,
+                    target_frame,
+                    link_point,
+                ),
+                dtype=np.float64,
+            )
+            hessian[:, :, i] = (jac_plus - jac_minus) / (2.0 * step)
+
+        return hessian
+
+    @with_latest_state
+    def ComputeIK(
+        self,
+        transform: np.ndarray | list[list[float]],
+        return_all: bool = False,
+    ) -> np.ndarray | list[np.ndarray]:
+        """Return IK solutions for the configured manipulator tip in ``base_link``.
+
+        When ``return_all`` is ``False``, the solution closest to the current
+        manipulator state is returned. Otherwise all solutions are returned.
+        """
+        try:
+            kin_group = self.env.getKinematicGroup(self.MANIPULATOR_GROUP_NAME)
+        except RuntimeError as exc:
+            raise RuntimeError(
+                "ComputeIK requires a kinematics plugin configured for the "
+                "'manipulator' group."
+            ) from exc
+
+        transform_matrix = self._coerce_transform_matrix(transform)
+        transform_isometry = Isometry3d()
+        transform_isometry.setMatrix(transform_matrix)
+
+        ik_input = KinGroupIKInput()
+        ik_input.pose = transform_isometry
+        ik_input.tip_link_name = self.MANIPULATOR_TIP_FRAME
+        ik_input.working_frame = self.MANIPULATOR_BASE_FRAME
+        ik_inputs = KinGroupIKInputs()
+        ik_inputs.append(ik_input)
+
+        seed = self._get_current_manipulator_joint_values()
+        raw_solutions = kin_group.calcInvKin(ik_inputs, seed)
+        solutions = [
+            np.asarray(raw_solutions[i], dtype=np.float64).reshape(-1)
+            for i in range(len(raw_solutions))
+        ]
+        if not solutions:
+            raise RuntimeError("No IK solutions found.")
+
+        if return_all:
+            return solutions
+
+        solution_array = np.stack(solutions, axis=0)
+        wrapped_delta = ((solution_array - seed + np.pi) % (2.0 * np.pi)) - np.pi
+        return solution_array[np.argmin(np.linalg.norm(wrapped_delta, axis=1))]
 
 
 if __name__ == "__main__":
     robot = EnsemblRobot()
+
+    arm_joint_positions = np.array(
+        [0.25, -1.10, 1.35, -1.55, -1.20, 0.45],
+        dtype=np.float64,
+    )
+    active_joint_positions = np.concatenate(
+        [arm_joint_positions, np.array([0.01, 0.01], dtype=np.float64)]
+    )
+
+    robot.SetActiveDOFValues(active_joint_positions)
+    measured_active_joint_positions = robot.GetActiveDOFValues()
+    assert np.allclose(measured_active_joint_positions, active_joint_positions)
+
+    tool_transform = robot.ComputeFK()
+    hessian = robot.ComputeHessian()
+    assert hessian.shape == (6, 6, 6)
+    assert np.all(np.isfinite(hessian))
+
+    ik_solutions = robot.ComputeIK(tool_transform, return_all=True)
+    assert ik_solutions
+
+    ik_solution_array = np.stack(ik_solutions, axis=0)
+    wrapped_delta = (
+        (ik_solution_array - arm_joint_positions + np.pi) % (2.0 * np.pi)
+    ) - np.pi
+    closest_index = np.argmin(np.linalg.norm(wrapped_delta, axis=1))
+    closest_distance = np.linalg.norm(wrapped_delta[closest_index])
+    assert closest_distance < 1e-4
+
+    closest_solution = robot.ComputeIK(tool_transform)
+    assert np.allclose(closest_solution, ik_solution_array[closest_index])
+
+    print("GetActiveDOFValues passed.")
+    print("ComputeFK passed.")
+    print("ComputeHessian passed.")
+    print("ComputeIK passed.")

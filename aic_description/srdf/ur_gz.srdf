@@ -10,6 +10,8 @@
     <chain base_link="base_link" tip_link="gripper/tcp"/>
   </group>
 
+  <kinematics_plugin_config filename="package://aic_description/srdf/ur_gz_plugins.yaml" />
+
   <!-- Adjacent / fixed-link collision disables -->
   <disable_collisions link1="base_link" link2="shoulder_link" reason="Adjacent"/>
   <disable_collisions link1="shoulder_link" link2="upper_arm_link" reason="Adjacent"/>
