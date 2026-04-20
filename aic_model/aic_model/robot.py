@@ -116,6 +116,7 @@ class EnsemblRobot:
         self._collision_request.calculate_distance = True
         self._collision_request.calculate_penetration = True
         self._collision_request.contact_limit = 100
+        self._collision_checker_warning_emitted = False
         self._has_discrete_contact_manager = self._initialize_discrete_contact_manager()
 
         if self.simulated:
@@ -179,10 +180,43 @@ class EnsemblRobot:
     def _initialize_discrete_contact_manager(self) -> bool:
         """Return whether collision checking is supported in this environment."""
         try:
-            self.env.getDiscreteContactManager()
+            manager = self.env.getDiscreteContactManager()
         except RuntimeError:
-            return False
-        return self._collision_link_transforms_supported
+            manager = None
+        return bool(manager) and self._collision_link_transforms_supported
+
+    def _disable_collision_checker(self, reason: str) -> None:
+        """Disable collision checks after a plugin lookup or runtime failure."""
+        self._has_discrete_contact_manager = False
+        if not self._collision_checker_warning_emitted:
+            logger.warning(
+                "Collision checking is unavailable in this Tesseract environment; "
+                "continuing without collision filtering. Reason: %s",
+                reason,
+            )
+            self._collision_checker_warning_emitted = True
+
+    def _get_discrete_contact_manager(self):
+        """Return the discrete contact manager, disabling checks if unavailable."""
+        if not self._has_discrete_contact_manager:
+            self._disable_collision_checker(
+                "no discrete contact manager plugin is configured"
+            )
+            return None
+
+        try:
+            manager = self.env.getDiscreteContactManager()
+        except RuntimeError as exc:
+            self._disable_collision_checker(str(exc))
+            return None
+
+        if not manager:
+            self._disable_collision_checker(
+                "no discrete contact manager plugin is configured"
+            )
+            return None
+
+        return manager
 
     def _require_kinematics_plugin(self) -> None:
         """Raise if no kinematics plugin is configured for the manipulator."""
@@ -190,14 +224,6 @@ class EnsemblRobot:
             raise RuntimeError(
                 "This operation requires a kinematics plugin configured for the "
                 f"'{self.MANIPULATOR_GROUP_NAME}' group."
-            )
-
-    def _require_collision_checker(self) -> None:
-        """Raise if no discrete contact manager is configured."""
-        if not self._has_discrete_contact_manager:
-            raise RuntimeError(
-                "This operation requires a discrete contact manager plugin with "
-                "link transforms exposed by the current Tesseract Python bindings."
             )
 
     def _get_current_link_transforms(self):
@@ -247,7 +273,16 @@ class EnsemblRobot:
 
     def _expand_xacro(self, xacro_path: str) -> str:
         """Expand the robot xacro into a URDF XML string."""
-        doc = xacro.process_file(xacro_path, mappings={"name": "ur"})
+        try:
+            doc = xacro.process_file(xacro_path, mappings={"name": "ur"})
+        except Exception as exc:
+            raise RuntimeError(
+                "Failed to expand robot xacro "
+                f"'{xacro_path}'. This usually means a missing ROS package, "
+                "an undefined xacro argument, or a bad include path. "
+                "The current setup passes the mapping {'name': 'ur'}. "
+                f"Original error: {exc}"
+            ) from exc
         return doc.toxml()
 
     def _read_srdf(self, srdf_path: str) -> str:
@@ -436,21 +471,25 @@ class EnsemblRobot:
             raise RuntimeError("No IK solutions found.")
 
         if check_collision:
-            current_active_joint_values = np.asarray(
-                self.env.getCurrentJointValues(),
-                dtype=np.float64,
-            ).reshape(-1)
-            collision_free_solutions = []
-            try:
-                for solution in solutions:
-                    self.env.setState(self._manipulator_joint_names, solution)
-                    if not EnsemblRobot.CheckCollision.__wrapped__(self):
-                        collision_free_solutions.append(solution)
-            finally:
-                self.env.setState(self._active_joint_names, current_active_joint_values)
-            solutions = collision_free_solutions
-            if not solutions:
-                raise RuntimeError("No collision-free IK solutions found.")
+            manager = self._get_discrete_contact_manager()
+            if manager is not None:
+                current_active_joint_values = np.asarray(
+                    self.env.getCurrentJointValues(),
+                    dtype=np.float64,
+                ).reshape(-1)
+                collision_free_solutions = []
+                try:
+                    for solution in solutions:
+                        self.env.setState(self._manipulator_joint_names, solution)
+                        if not EnsemblRobot.CheckCollision.__wrapped__(self):
+                            collision_free_solutions.append(solution)
+                finally:
+                    self.env.setState(
+                        self._active_joint_names, current_active_joint_values
+                    )
+                solutions = collision_free_solutions
+                if not solutions:
+                    raise RuntimeError("No collision-free IK solutions found.")
 
         if return_all:
             return solutions
@@ -474,8 +513,11 @@ class EnsemblRobot:
         - ``type_id``: the Tesseract contact type id
         - ``single_contact_point``: whether the result is a single-point contact
         """
-        self._require_collision_checker()
-        manager = self.env.getDiscreteContactManager()
+        manager = self._get_discrete_contact_manager()
+        if manager is None:
+            if not report:
+                return False
+            return False, []
         manager.setCollisionObjectsTransform(self._get_current_link_transforms())
         # This cached config is fast, but if ACM or margins change later
         # (for example after attaching an object), it must be refreshed.

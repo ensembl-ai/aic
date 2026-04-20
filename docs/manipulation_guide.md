@@ -4,10 +4,9 @@ cd ws_aic/src/aic
 # Tesseract Installation
 
 source /opt/ros/kilted/setup.bash
-pixi shell
 colcon build --packages-select aic_assets aic_description --executor sequential
 source install/setup.bash
-python -m pip install tesseract-robotics==0.5.1
+pixi run python -m pip install tesseract-robotics==0.5.1
 
 # For indexing in vscode
 
