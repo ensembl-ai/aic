@@ -27,8 +27,6 @@ class TestMove(Policy):
         send_feedback("Testing waypoint joint motion with EnsemblRobot")
 
         robot = EnsemblRobot(get_observation)
-        robot = EnsemblRobot()
-        robot.SetActiveDOFValues(robot.GetActiveDOFValues())
 
         current_transform = robot.ComputeFK()
         target_transform = current_transform.copy()
@@ -43,16 +41,21 @@ class TestMove(Policy):
             num=11,
             dtype=np.float64,
         )[1:]
-        planner_joint_group = robot.GetEnv().getJointGroup(robot.MANIPULATOR_GROUP_NAME)
-        planner_joint_names = list(planner_joint_group.getJointNames())
+        planner_env = robot.GetEnv()
+        planner_joint_names = list(
+            planner_env.getJointGroup(robot.MANIPULATOR_GROUP_NAME).getJointNames()
+        )
 
         joint_waypoints = []
         for position in waypoint_positions:
             waypoint_transform = target_transform.copy()
             waypoint_transform[:3, 3] = position
-            joint_positions = robot.ComputeIK(waypoint_transform)
+            joint_positions = robot.ComputeIK(
+                waypoint_transform,
+                check_collision=True,
+            )
             joint_waypoints.append(joint_positions.tolist())
-            robot.GetEnv().setState(planner_joint_names, joint_positions)
+            planner_env.setState(planner_joint_names, joint_positions)
 
         joint_motion_update = JointMotionUpdate(
             target_stiffness=[120.0, 120.0, 120.0, 50.0, 50.0, 50.0],
@@ -67,13 +70,7 @@ class TestMove(Policy):
                 f"Commanding waypoint {index}/{len(joint_waypoints)}"
             )
             joint_motion_update.target_state.positions = joint_positions
-            for _ in range(5):
-                move_robot(joint_motion_update=joint_motion_update)
-                self.sleep_for(0.05)
-
-        for _ in range(10):
             move_robot(joint_motion_update=joint_motion_update)
-            self.sleep_for(0.05)
 
         self.get_logger().info("TestMove.insert_cable() exiting...")
         return True

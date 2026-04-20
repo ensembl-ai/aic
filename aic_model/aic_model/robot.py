@@ -29,6 +29,13 @@ from tesseract_robotics.tesseract_common import (
     GeneralResourceLocator,
     Isometry3d,
 )
+from tesseract_robotics.tesseract_collision import (
+    ContactManagerConfig,
+    ContactRequest,
+    ContactResultMap,
+    ContactResultVector,
+    ContactTestType_ALL,
+)
 from tesseract_robotics.tesseract_environment import Environment
 from tesseract_robotics.tesseract_kinematics import KinGroupIKInput, KinGroupIKInputs
 import xacro
@@ -97,6 +104,19 @@ class EnsemblRobot:
         self._joint_group = self.env.getJointGroup(self.MANIPULATOR_GROUP_NAME)
         self._manipulator_joint_names = list(self._joint_group.getJointNames())
         self._manipulator_target_frames = set(self._joint_group.getActiveLinkNames())
+        self._kin_group = self._initialize_kinematic_group()
+        self._collision_link_transforms_supported = hasattr(
+            self.env.getState(), "link_transforms"
+        )
+        self._collision_manager_config = ContactManagerConfig()
+        self._collision_manager_config.acm = self.env.getAllowedCollisionMatrix()
+        self._collision_manager_config.margin_data = self.env.getCollisionMarginData()
+        self._collision_request = ContactRequest()
+        self._collision_request.type = ContactTestType_ALL
+        self._collision_request.calculate_distance = True
+        self._collision_request.calculate_penetration = True
+        self._collision_request.contact_limit = 100
+        self._has_discrete_contact_manager = self._initialize_discrete_contact_manager()
 
         if self.simulated:
             self.SetActiveDOFValues(
@@ -124,35 +144,21 @@ class EnsemblRobot:
             dtype=np.float64,
         ).reshape(-1)
 
-    def _compute_relative_transform_matrix(
+    def _compute_geometric_jacobian(
         self,
         joint_positions: np.ndarray,
         target_frame: str,
     ) -> np.ndarray:
-        """Return the transform matrix of ``target_frame`` relative to ``base_link``."""
-        link_transforms = self._joint_group.calcFwdKin(joint_positions)
-        if self.MANIPULATOR_BASE_FRAME not in link_transforms:
-            raise KeyError(f"Unknown base frame: {self.MANIPULATOR_BASE_FRAME}")
-        if target_frame not in link_transforms:
-            raise KeyError(f"Unknown target frame: {target_frame}")
-
-        transform = (
-            link_transforms[self.MANIPULATOR_BASE_FRAME].inverse()
-            * link_transforms[target_frame]
+        """Return the geometric Jacobian in Tesseract's row ordering."""
+        return np.asarray(
+            self._joint_group.calcJacobian(
+                joint_positions,
+                self.MANIPULATOR_BASE_FRAME,
+                target_frame,
+                np.zeros(3, dtype=np.float64),
+            ),
+            dtype=np.float64,
         )
-        return np.asarray(transform.matrix(), dtype=np.float64)
-
-    def _coerce_transform_matrix(
-        self,
-        transform: np.ndarray | list[list[float]],
-    ) -> np.ndarray:
-        """Return a 4x4 homogeneous transform matrix."""
-        transform = np.asarray(transform, dtype=np.float64)
-        if transform.shape != (4, 4):
-            raise ValueError(
-                f"Expected transform with shape (4, 4), got {transform.shape}."
-            )
-        return transform
 
     def _require_supported_target_frame(self, target_frame: str) -> str:
         """Return a target frame that belongs to the configured manipulator chain."""
@@ -162,6 +168,71 @@ class EnsemblRobot:
                 f"manipulator chain."
             )
         return target_frame
+
+    def _initialize_kinematic_group(self):
+        """Return the configured kinematics group, if available."""
+        try:
+            return self.env.getKinematicGroup(self.MANIPULATOR_GROUP_NAME)
+        except RuntimeError:
+            return None
+
+    def _initialize_discrete_contact_manager(self) -> bool:
+        """Return whether collision checking is supported in this environment."""
+        try:
+            self.env.getDiscreteContactManager()
+        except RuntimeError:
+            return False
+        return self._collision_link_transforms_supported
+
+    def _require_kinematics_plugin(self) -> None:
+        """Raise if no kinematics plugin is configured for the manipulator."""
+        if self._kin_group is None:
+            raise RuntimeError(
+                "This operation requires a kinematics plugin configured for the "
+                f"'{self.MANIPULATOR_GROUP_NAME}' group."
+            )
+
+    def _require_collision_checker(self) -> None:
+        """Raise if no discrete contact manager is configured."""
+        if not self._has_discrete_contact_manager:
+            raise RuntimeError(
+                "This operation requires a discrete contact manager plugin with "
+                "link transforms exposed by the current Tesseract Python bindings."
+            )
+
+    def _get_current_link_transforms(self):
+        """Return the environment's current link transform map."""
+        return self.env.getState().link_transforms
+
+    def _flatten_contact_results(self, collisions: ContactResultMap) -> list:
+        """Return contact results as a Python list."""
+        flattened = ContactResultVector()
+        collisions.flattenCopyResults(flattened)
+        return [flattened[i] for i in range(flattened.size())]
+
+    def _get_actual_collision_contacts(self, collisions: ContactResultMap) -> list:
+        """Return only contacts that are touching or penetrating."""
+        return [
+            contact
+            for contact in self._flatten_contact_results(collisions)
+            if contact.distance <= 0.0
+        ]
+
+    def _build_collision_report(self, contacts: list) -> list[dict]:
+        """Convert actual collision contacts into a compact Python report."""
+        report = []
+        for contact in contacts:
+            link_names = tuple(str(name) for name in contact.link_names)
+            report.append(
+                {
+                    "pair": link_names,
+                    "distance": float(contact.distance),
+                    "type_id": int(contact.type_id),
+                    "single_contact_point": bool(contact.single_contact_point),
+                }
+            )
+        report.sort(key=lambda item: (item["distance"], item["pair"]))
+        return report
 
     def _create_resource_locator(self) -> GeneralResourceLocator:
         """Create a Tesseract resource locator from the ROS prefix path."""
@@ -216,9 +287,15 @@ class EnsemblRobot:
         target_frame: str = MANIPULATOR_TIP_FRAME,
     ) -> np.ndarray:
         """Return the current 4x4 transform of ``target_frame`` relative to ``base_link``."""
-        return self._compute_relative_transform_matrix(
-            self._get_current_manipulator_joint_values(),
-            self._require_supported_target_frame(target_frame),
+        joint_positions = self._get_current_manipulator_joint_values()
+        target_frame = self._require_supported_target_frame(target_frame)
+        link_transforms = self._joint_group.calcFwdKin(joint_positions)
+        return np.asarray(
+            (
+                link_transforms[self.MANIPULATOR_BASE_FRAME].inverse()
+                * link_transforms[target_frame]
+            ).matrix(),
+            dtype=np.float64,
         )
 
     @with_latest_state
@@ -229,15 +306,7 @@ class EnsemblRobot:
         """Return the current geometric Jacobian in Tesseract's row ordering."""
         joint_positions = self._get_current_manipulator_joint_values()
         target_frame = self._require_supported_target_frame(target_frame)
-        return np.asarray(
-            self._joint_group.calcJacobian(
-                joint_positions,
-                self.MANIPULATOR_BASE_FRAME,
-                target_frame,
-                np.zeros(3, dtype=np.float64),
-            ),
-            dtype=np.float64,
-        )
+        return self._compute_geometric_jacobian(joint_positions, target_frame)
 
     @with_latest_state
     def ComputeJacobianAnalytical(
@@ -247,18 +316,16 @@ class EnsemblRobot:
         """Return the current analytical Jacobian for XYZ plus roll/pitch/yaw."""
         joint_positions = self._get_current_manipulator_joint_values()
         target_frame = self._require_supported_target_frame(target_frame)
-        jacobian_geometric = np.asarray(
-            self._joint_group.calcJacobian(
-                joint_positions,
-                self.MANIPULATOR_BASE_FRAME,
-                target_frame,
-                np.zeros(3, dtype=np.float64),
-            ),
-            dtype=np.float64,
+        jacobian_geometric = self._compute_geometric_jacobian(
+            joint_positions, target_frame
         )
-        rotation = self._compute_relative_transform_matrix(
-            joint_positions,
-            target_frame,
+        link_transforms = self._joint_group.calcFwdKin(joint_positions)
+        rotation = np.asarray(
+            (
+                link_transforms[self.MANIPULATOR_BASE_FRAME].inverse()
+                * link_transforms[target_frame]
+            ).matrix(),
+            dtype=np.float64,
         )[:3, :3]
 
         pitch = np.arctan2(
@@ -334,21 +401,21 @@ class EnsemblRobot:
         self,
         transform: np.ndarray | list[list[float]],
         return_all: bool = False,
+        check_collision: bool = True,
     ) -> np.ndarray | list[np.ndarray]:
         """Return IK solutions for the configured manipulator tip in ``base_link``.
 
         When ``return_all`` is ``False``, the solution closest to the current
         manipulator state is returned. Otherwise all solutions are returned.
+        When ``check_collision`` is ``True``, colliding IK solutions are filtered out.
         """
-        try:
-            kin_group = self.env.getKinematicGroup(self.MANIPULATOR_GROUP_NAME)
-        except RuntimeError as exc:
-            raise RuntimeError(
-                "ComputeIK requires a kinematics plugin configured for the "
-                "'manipulator' group."
-            ) from exc
+        self._require_kinematics_plugin()
 
-        transform_matrix = self._coerce_transform_matrix(transform)
+        transform_matrix = np.asarray(transform, dtype=np.float64)
+        if transform_matrix.shape != (4, 4):
+            raise ValueError(
+                f"Expected transform with shape (4, 4), got {transform_matrix.shape}."
+            )
         transform_isometry = Isometry3d()
         transform_isometry.setMatrix(transform_matrix)
 
@@ -360,7 +427,7 @@ class EnsemblRobot:
         ik_inputs.append(ik_input)
 
         seed = self._get_current_manipulator_joint_values()
-        raw_solutions = kin_group.calcInvKin(ik_inputs, seed)
+        raw_solutions = self._kin_group.calcInvKin(ik_inputs, seed)
         solutions = [
             np.asarray(raw_solutions[i], dtype=np.float64).reshape(-1)
             for i in range(len(raw_solutions))
@@ -368,12 +435,61 @@ class EnsemblRobot:
         if not solutions:
             raise RuntimeError("No IK solutions found.")
 
+        if check_collision:
+            current_active_joint_values = np.asarray(
+                self.env.getCurrentJointValues(),
+                dtype=np.float64,
+            ).reshape(-1)
+            collision_free_solutions = []
+            try:
+                for solution in solutions:
+                    self.env.setState(self._manipulator_joint_names, solution)
+                    if not EnsemblRobot.CheckCollision.__wrapped__(self):
+                        collision_free_solutions.append(solution)
+            finally:
+                self.env.setState(self._active_joint_names, current_active_joint_values)
+            solutions = collision_free_solutions
+            if not solutions:
+                raise RuntimeError("No collision-free IK solutions found.")
+
         if return_all:
             return solutions
 
         solution_array = np.stack(solutions, axis=0)
         wrapped_delta = ((solution_array - seed + np.pi) % (2.0 * np.pi)) - np.pi
         return solution_array[np.argmin(np.linalg.norm(wrapped_delta, axis=1))]
+
+    @with_latest_state
+    def CheckCollision(self, report: bool = False) -> bool | tuple[bool, list[dict]]:
+        """Check the current state for self and environment collisions.
+
+        When ``report`` is ``False``, return ``True`` if any actual collisions are
+        present and ``False`` otherwise.
+
+        When ``report`` is ``True``, return ``(in_collision, collision_report)``
+        where ``collision_report`` is a list of dictionaries. Each dictionary
+        includes:
+        - ``pair``: a tuple of colliding link names
+        - ``distance``: signed contact distance (penetration is <= 0)
+        - ``type_id``: the Tesseract contact type id
+        - ``single_contact_point``: whether the result is a single-point contact
+        """
+        self._require_collision_checker()
+        manager = self.env.getDiscreteContactManager()
+        manager.setCollisionObjectsTransform(self._get_current_link_transforms())
+        # This cached config is fast, but if ACM or margins change later
+        # (for example after attaching an object), it must be refreshed.
+        manager.applyContactManagerConfig(self._collision_manager_config)
+
+        collisions = ContactResultMap()
+        manager.contactTest(collisions, self._collision_request)
+
+        actual_collision_contacts = self._get_actual_collision_contacts(collisions)
+        if not report:
+            return bool(actual_collision_contacts)
+
+        collision_report = self._build_collision_report(actual_collision_contacts)
+        return bool(collision_report), collision_report
 
 
 if __name__ == "__main__":
@@ -396,8 +512,19 @@ if __name__ == "__main__":
     assert hessian.shape == (6, 6, 6)
     assert np.all(np.isfinite(hessian))
 
-    ik_solutions = robot.ComputeIK(tool_transform, return_all=True)
+    ik_solutions = robot.ComputeIK(
+        tool_transform,
+        return_all=True,
+        check_collision=False,
+    )
     assert ik_solutions
+
+    for ik_solution in ik_solutions:
+        robot.env.setState(robot._manipulator_joint_names, ik_solution)
+        solution_fk = robot.ComputeFK()
+        assert np.allclose(solution_fk, tool_transform, atol=1e-4)
+
+    robot.SetActiveDOFValues(active_joint_positions)
 
     ik_solution_array = np.stack(ik_solutions, axis=0)
     wrapped_delta = (
@@ -407,7 +534,7 @@ if __name__ == "__main__":
     closest_distance = np.linalg.norm(wrapped_delta[closest_index])
     assert closest_distance < 1e-4
 
-    closest_solution = robot.ComputeIK(tool_transform)
+    closest_solution = robot.ComputeIK(tool_transform, check_collision=False)
     assert np.allclose(closest_solution, ik_solution_array[closest_index])
 
     print("GetActiveDOFValues passed.")
