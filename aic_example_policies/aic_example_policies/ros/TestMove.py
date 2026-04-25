@@ -28,7 +28,7 @@ class TestMove(Policy):
 
         robot = EnsemblRobot(get_observation)
 
-        current_transform = robot.ComputeFK()
+        current_transform = robot.ComputeFK(robot.manipulator_tip_frame)
         target_transform = current_transform.copy()
         target_transform[:3, 3] = np.array(
             [-0.63381193, 0.2899951, 0.05814897],
@@ -43,7 +43,7 @@ class TestMove(Policy):
         )[1:]
         planner_env = robot.GetEnv()
         planner_joint_names = list(
-            planner_env.getJointGroup(robot.MANIPULATOR_GROUP_NAME).getJointNames()
+            planner_env.getJointGroup(robot.manipulator_group_name).getJointNames()
         )
 
         joint_waypoints = []

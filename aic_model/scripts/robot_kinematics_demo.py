@@ -31,7 +31,7 @@ class RobotKinematicsDemo(Node):
         transforms = []
         for parent_frame, child_frame in [
             ("world", "map"),
-            ("map", self.robot.MANIPULATOR_BASE_FRAME),
+            ("map", self.robot.manipulator_base_frame),
         ]:
             transform = TransformStamped()
             transform.header.stamp = self.get_clock().now().to_msg()
@@ -65,7 +65,7 @@ class RobotKinematicsDemo(Node):
         markers = MarkerArray()
         for axis_idx in range(3):
             marker = Marker()
-            marker.header.frame_id = self.robot.MANIPULATOR_BASE_FRAME
+            marker.header.frame_id = self.robot.manipulator_base_frame
             marker.header.stamp = self.get_clock().now().to_msg()
             marker.ns = namespace
             marker.id = marker_id_offset + axis_idx
@@ -93,12 +93,33 @@ class RobotKinematicsDemo(Node):
             rclpy.spin_once(self, timeout_sec=0.01)
 
     def sample_joint_configuration(self) -> np.ndarray:
-        arm = self.rng.uniform(
-            low=np.array([-math.pi, -2.0, -2.0, -math.pi, -math.pi, -math.pi]),
-            high=np.array([math.pi, 0.0, 2.0, math.pi, math.pi, math.pi]),
+        arm_low = np.array([-math.pi, -2.0, -2.0, -math.pi, -math.pi, -math.pi])
+        arm_high = np.array([math.pi, 0.0, 2.0, math.pi, math.pi, math.pi])
+        if len(self.robot._manipulator_joint_indices) != arm_low.size:
+            raise RuntimeError(
+                "The kinematics demo sampling limits expect a 6-DOF manipulator, "
+                f"got {len(self.robot._manipulator_joint_indices)} joints."
+            )
+
+        joint_values = np.zeros(len(self.robot._active_joint_names), dtype=np.float64)
+        joint_values[self.robot._manipulator_joint_indices] = self.rng.uniform(
+            low=arm_low,
+            high=arm_high,
         )
-        fingers = self.rng.uniform(low=0.0, high=0.02, size=2)
-        return np.concatenate([arm, fingers]).astype(np.float64)
+
+        manipulator_indices = set(self.robot._manipulator_joint_indices)
+        non_manipulator_indices = [
+            index
+            for index in range(len(self.robot._active_joint_names))
+            if index not in manipulator_indices
+        ]
+        if non_manipulator_indices:
+            joint_values[non_manipulator_indices] = self.rng.uniform(
+                low=0.0,
+                high=0.02,
+                size=len(non_manipulator_indices),
+            )
+        return joint_values
 
     def sample_collision_free_configuration(
         self,
@@ -117,15 +138,17 @@ class RobotKinematicsDemo(Node):
                     "collision_free": True,
                     "collision_report": report,
                 }
-        raise RuntimeError(f"Failed to sample a collision-free configuration for {label}.")
+        raise RuntimeError(
+            f"Failed to sample a collision-free configuration for {label}."
+        )
 
     def report_collision_state(self, label: str) -> dict[str, Any]:
         in_collision, report = self.robot.CheckCollision(report=True)
-        current_joints = self.robot.GetActiveDOFValues()
-        fk = self.robot.ComputeFK()
+        manipulator_joints = self.robot.GetActiveDOFValues()
+        fk = self.robot.ComputeFK(self.robot.manipulator_tip_frame)
         return {
             "label": label,
-            "joint_values": current_joints.tolist(),
+            "manipulator_joint_values": manipulator_joints.tolist(),
             "fk_translation": fk[:3, 3].tolist(),
             "in_collision": in_collision,
             "collision_report": report,
@@ -142,7 +165,7 @@ class RobotKinematicsDemo(Node):
         reports["samples"].append(start_sample)
         self.robot.SetActiveDOFValues(start_config)
         self.publish_joint_state(start_config)
-        start_fk = self.robot.ComputeFK()
+        start_fk = self.robot.ComputeFK(self.robot.manipulator_tip_frame)
         self.publish_axis_markers(start_fk, namespace="start_fk", marker_id_offset=0)
         self.get_logger().info(f"Start FK:\n{start_fk}")
         self.sleep_with_spin(0.5)
@@ -151,7 +174,7 @@ class RobotKinematicsDemo(Node):
         reports["samples"].append(target_sample)
         self.robot.SetActiveDOFValues(target_config)
         self.publish_joint_state(target_config)
-        target_fk = self.robot.ComputeFK()
+        target_fk = self.robot.ComputeFK(self.robot.manipulator_tip_frame)
         self.publish_axis_markers(target_fk, namespace="target_fk", marker_id_offset=10)
         self.get_logger().info(f"Target FK:\n{target_fk}")
         self.sleep_with_spin(0.5)
@@ -165,13 +188,15 @@ class RobotKinematicsDemo(Node):
             return_all=True,
             check_collision=False,
         )
+        if ik_solutions is None:
+            raise RuntimeError("No IK solutions found for the sampled target pose.")
         self.get_logger().info(f"Found {len(ik_solutions)} IK solution(s).")
 
         chosen_solution = None
         for index, solution in enumerate(ik_solutions):
-            self.robot.SetActiveDOFValues(
-                np.concatenate([solution, start_config[len(solution):]])
-            )
+            candidate_active = start_config.copy()
+            candidate_active[self.robot._manipulator_joint_indices] = solution
+            self.robot.SetActiveDOFValues(candidate_active)
             solution_report = self.report_collision_state(f"ik_solution_{index}")
             solution_report["ik_solution_index"] = index
             solution_report["ik_solution_joint_values"] = solution.tolist()
@@ -180,11 +205,12 @@ class RobotKinematicsDemo(Node):
                 chosen_solution = solution.copy()
 
         if chosen_solution is None:
-            raise RuntimeError("No collision-free IK solution found for the sampled target pose.")
+            raise RuntimeError(
+                "No collision-free IK solution found for the sampled target pose."
+            )
 
-        chosen_active = np.concatenate(
-            [chosen_solution, start_config[len(chosen_solution):]]
-        ).astype(np.float64)
+        chosen_active = start_config.copy()
+        chosen_active[self.robot._manipulator_joint_indices] = chosen_solution
 
         num_steps = 75
         for step_index, alpha in enumerate(np.linspace(0.0, 1.0, num_steps)):
@@ -193,7 +219,7 @@ class RobotKinematicsDemo(Node):
             self.publish_joint_state(joint_values)
             if step_index in (0, num_steps - 1):
                 self.publish_axis_markers(
-                    self.robot.ComputeFK(),
+                    self.robot.ComputeFK(self.robot.manipulator_tip_frame),
                     namespace="motion_fk",
                     marker_id_offset=20 + 10 * step_index,
                 )
@@ -202,10 +228,8 @@ class RobotKinematicsDemo(Node):
             reports["motion_steps"].append(motion_report)
             self.sleep_with_spin(0.04)
 
-        jacobian = self.robot.ComputeJacobianGeomtric()
-        hessian = self.robot.ComputeHessian()
+        jacobian = self.robot.ComputeJacobianGeometric(self.robot.manipulator_tip_frame)
         self.get_logger().info(f"Geometric Jacobian:\n{jacobian}")
-        self.get_logger().info(f"Hessian:\n{hessian}")
 
         print("\n=== Collision / Kinematics Report ===")
         print(f"Start sample: {reports['samples'][0]}")
@@ -218,8 +242,6 @@ class RobotKinematicsDemo(Node):
             print(motion_report)
         print("Jacobian:")
         print(jacobian)
-        print("Hessian:")
-        print(hessian)
 
 
 def main() -> None:

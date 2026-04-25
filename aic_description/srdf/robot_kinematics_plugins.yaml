@@ -25,6 +25,10 @@ kinematic_plugins:
             base_link: base_link
             tip_link: gripper/tcp
 
+collision_checking:
+  bool_contact_limit: 1
+  report_contact_limit: 100
+
 contact_manager_plugins:
   search_paths:
     - __TESSERACT_PYTHON_LIBS__

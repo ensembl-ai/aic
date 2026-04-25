@@ -136,7 +136,7 @@ distrobox create -r --nvidia -i ghcr.io/intrinsic-dev/aic/aic_eval:latest aic_ev
 distrobox enter -r aic_eval
 
 # Inside the container, start the environment
-/entrypoint.sh ground_truth:=false start_aic_engine:=true
+/entrypoint.sh ground_truth:=false start_aic_engine:=true gazebo_gui:=false
 ```
 
 The [`entrypoint.sh`](../docker/aic_eval/Dockerfile) script runs a Zenoh router and the [`aic_gz_bringup.launch.py`](../aic_bringup/README.md#1-aic_gz_bringuplaunchpy) launch file with `aic_engine`.
