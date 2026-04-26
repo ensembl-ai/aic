@@ -128,8 +128,9 @@ class EnsemblRobot:
                     self.locator.addPath(FilesystemPath(share_dir))
 
             self.env = Environment()
+            urdf_xml = self._expand_xacro(self.urdf_xacro_path)
             ok = self.env.init(
-                self._expand_xacro(self.urdf_xacro_path),
+                urdf_xml,
                 self._read_srdf(self.srdf_path),
                 self.locator,
             )
@@ -146,6 +147,10 @@ class EnsemblRobot:
                 [self.manipulator_base_frame, self.manipulator_tip_frame]
             )
             self._manipulator_joint_names = list(self._joint_group.getJointNames())
+            self._active_dof_limits = np.asarray(
+                self._joint_group.getLimits().joint_limits,
+                dtype=np.float64,
+            ).T
             active_joint_index = {
                 joint_name: index
                 for index, joint_name in enumerate(self._active_joint_names)
@@ -155,7 +160,8 @@ class EnsemblRobot:
                 for joint_name in self._manipulator_joint_names
             ]
             if self.simulated:
-                self.SetActiveDOFValues(
+                self.env.setState(
+                    self._active_joint_names,
                     np.zeros(len(self._active_joint_names), dtype=np.float64)
                 )
 
@@ -225,6 +231,14 @@ class EnsemblRobot:
         ).reshape(-1)
         return joint_values[self._manipulator_joint_indices]
 
+    def GetActiveDOFLimits(self) -> np.ndarray:
+        """
+        Return active DOF position limits in the same order as ``GetActiveDOFValues``.
+        Row 0 contains lower bounds and row 1 contains upper bounds.
+        """
+
+        return self._active_dof_limits.copy()
+
     def SetActiveDOFValues(self, joint_values: np.ndarray | list[float]) -> None:
         """
         Set the active joint values when the robot is running in simulated mode.
@@ -235,12 +249,12 @@ class EnsemblRobot:
                 "SetActiveDOFValues is only available when get_observation is None."
             )
         joint_values = np.asarray(joint_values, dtype=np.float64).reshape(-1)
-        if joint_values.size != len(self._active_joint_names):
+        if joint_values.size != len(self._manipulator_joint_names):
             raise ValueError(
-                f"Expected {len(self._active_joint_names)} active joint values, "
+                f"Expected {len(self._manipulator_joint_names)} active joint values, "
                 f"got {joint_values.size}."
             )
-        self.env.setState(self._active_joint_names, joint_values)
+        self.env.setState(self._manipulator_joint_names, joint_values)
 
     @with_latest_state
     def GetEnv(self) -> Environment:
