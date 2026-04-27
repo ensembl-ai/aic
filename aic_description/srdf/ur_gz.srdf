@@ -11,6 +11,7 @@
   </group>
 
   <kinematics_plugin_config filename="package://aic_description/srdf/robot_kinematics_plugins.yaml" />
+  <contact_managers_plugin_config filename="package://aic_description/srdf/robot_kinematics_plugins.yaml" />
 
   <!-- Adjacent / fixed-link collision disables -->
   <disable_collisions link1="base_link" link2="shoulder_link" reason="Adjacent"/>

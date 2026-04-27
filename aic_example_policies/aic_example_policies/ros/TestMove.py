@@ -29,47 +29,39 @@ class TestMove(Policy):
         robot = EnsemblRobot(get_observation)
 
         current_transform = robot.ComputeFK(robot.manipulator_tip_frame)
-        target_transform = current_transform.copy()
-        target_transform[:3, 3] = np.array(
+        target_position = np.array(
             [-0.63381193, 0.2899951, 0.05814897],
             dtype=np.float64,
         )
 
         waypoint_positions = np.linspace(
             current_transform[:3, 3],
-            target_transform[:3, 3],
-            num=11,
+            target_position,
+            num=5,
             dtype=np.float64,
-        )[1:]
-        planner_env = robot.GetEnv()
-        planner_joint_names = list(
-            planner_env.getJointGroup(robot.manipulator_group_name).getJointNames()
         )
 
-        joint_waypoints = []
-        for position in waypoint_positions:
-            waypoint_transform = target_transform.copy()
-            waypoint_transform[:3, 3] = position
-            joint_positions = robot.ComputeIK(
-                waypoint_transform,
-                check_collision=True,
-            )
-            joint_waypoints.append(joint_positions.tolist())
-            planner_env.setState(planner_joint_names, joint_positions)
-
         joint_motion_update = JointMotionUpdate(
-            target_stiffness=[120.0, 120.0, 120.0, 50.0, 50.0, 50.0],
-            target_damping=[40.0, 40.0, 40.0, 15.0, 15.0, 15.0],
+            target_stiffness=[500.0, 500.0, 500.0, 200.0, 200.0, 200.0],
+            target_damping=[5.0, 5.0, 5.0, 2.0, 2.0, 2.0],
             trajectory_generation_mode=TrajectoryGenerationMode(
                 mode=TrajectoryGenerationMode.MODE_POSITION
             ),
         )
 
-        for index, joint_positions in enumerate(joint_waypoints, start=1):
+        for index, position in enumerate(waypoint_positions[1:], start=1):
             self.get_logger().info(
-                f"Commanding waypoint {index}/{len(joint_waypoints)}"
+                f"Commanding waypoint {index}/{len(waypoint_positions) - 1}"
             )
-            joint_motion_update.target_state.positions = joint_positions
+
+            waypoint_transform = current_transform.copy()
+            waypoint_transform[:3, 3] = position
+            joint_positions = robot.ComputeIK(waypoint_transform, check_collision=False)
+            if joint_positions is None:
+                self.get_logger().error(f"IK failed for waypoint {index}")
+                return False
+
+            joint_motion_update.target_state.positions = joint_positions.tolist()
             move_robot(joint_motion_update=joint_motion_update)
 
         self.get_logger().info("TestMove.insert_cable() exiting...")
