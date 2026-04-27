@@ -4,9 +4,13 @@ import time
 import argparse
 from collections import defaultdict
 from functools import wraps
+from pathlib import Path
+import sys
 import tqdm
 import numpy as np
 from transforms3d.euler import euler2mat, mat2euler
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from aic_model.robot import EnsemblRobot
 from tesseract_robotics.tesseract_common import Isometry3d
@@ -121,11 +125,22 @@ def main():
         solutions = robot.ComputeIK(
             target_transform,
             return_all=True,
-            check_collision=args.check_collision,
+            check_collision=False,
         )
         if solutions is None:
             ik_failures += 1
             continue
+
+        if args.check_collision:
+            collision_free_solutions = []
+            for solution in np.atleast_2d(solutions):
+                robot.SetActiveDOFValues(solution)
+                if not robot.CheckCollision():
+                    collision_free_solutions.append(solution)
+            if not collision_free_solutions:
+                ik_failures += 1
+                continue
+            solutions = np.vstack(collision_free_solutions)
 
         for solution_index, solution in enumerate(np.atleast_2d(solutions)):
             robot.SetActiveDOFValues(solution)
