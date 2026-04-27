@@ -15,10 +15,6 @@ pixi run python -m pip install tesseract-robotics==0.5.1
 
 pixi reinstall ros-kilted-aic-model
 
-# No Gazebo gui
-
-/entrypoint.sh ground_truth:=false start_aic_engine:=true gazebo_gui:=false
-
 # Test policy without gazebo gui
 /entrypoint.sh ground_truth:=false start_aic_engine:=true gazebo_gui:=false
 pixi run ros2 run aic_model aic_model --ros-args -p use_sim_time:=true -p policy:=aic_example_policies.ros.TestMove

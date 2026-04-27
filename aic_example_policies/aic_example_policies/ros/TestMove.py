@@ -56,7 +56,7 @@ class TestMove(Policy):
 
             waypoint_transform = current_transform.copy()
             waypoint_transform[:3, 3] = position
-            joint_positions = robot.ComputeIK(waypoint_transform, check_collision=False)
+            joint_positions = robot.ComputeIK(waypoint_transform)
             if joint_positions is None:
                 self.get_logger().error(f"IK failed for waypoint {index}")
                 return False
