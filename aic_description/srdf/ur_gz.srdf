@@ -15,6 +15,7 @@
 
   <!-- Adjacent / fixed-link collision disables -->
   <disable_collisions link1="base_link" link2="shoulder_link" reason="Adjacent"/>
+  <disable_collisions link1="base_link_inertia" link2="shoulder_link" reason="Adjacent"/>
   <disable_collisions link1="shoulder_link" link2="upper_arm_link" reason="Adjacent"/>
   <disable_collisions link1="upper_arm_link" link2="forearm_link" reason="Adjacent"/>
   <disable_collisions link1="forearm_link" link2="wrist_1_link" reason="Adjacent"/>
@@ -23,9 +24,12 @@
   <disable_collisions link1="wrist_3_link" link2="flange" reason="Adjacent"/>
   <disable_collisions link1="flange" link2="tool0" reason="Adjacent"/>
   <disable_collisions link1="tool0" link2="cam_mount/cam_mount_link" reason="Adjacent"/>
+  <disable_collisions link1="wrist_3_link" link2="cam_mount/cam_mount_link" reason="Adjacent"/>
+  <disable_collisions link1="wrist_3_link" link2="ati/base_link" reason="Adjacent"/>
   <disable_collisions link1="cam_mount/cam_mount_link" link2="ati/base_link" reason="Adjacent"/>
   <disable_collisions link1="ati/base_link" link2="ati/tool_link" reason="Adjacent"/>
   <disable_collisions link1="ati/tool_link" link2="gripper/hande_base_link" reason="Adjacent"/>
+  <disable_collisions link1="ati/base_link" link2="gripper/hande_base_link" reason="Adjacent"/>
   <disable_collisions link1="gripper/hande_base_link" link2="gripper/hande_finger_link_l" reason="Adjacent"/>
   <disable_collisions link1="gripper/hande_base_link" link2="gripper/hande_finger_link_r" reason="Adjacent"/>
   <disable_collisions link1="gripper/hande_base_link" link2="gripper/tcp" reason="Adjacent"/>

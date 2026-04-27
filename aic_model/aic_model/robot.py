@@ -29,6 +29,7 @@ from tesseract_robotics.tesseract_common import (
     FilesystemPath,
     GeneralResourceLocator,
     Isometry3d,
+    VectorIsometry3d,
 )
 from tesseract_robotics.tesseract_collision import (
     ContactManagerConfig,
@@ -159,6 +160,28 @@ class EnsemblRobot:
                 active_joint_index[joint_name]
                 for joint_name in self._manipulator_joint_names
             ]
+            self._collision_manager = self.env.getDiscreteContactManager()
+            self._collision_object_names = list(
+                self._collision_manager.getCollisionObjects()
+            )
+            self._collision_manager.setActiveCollisionObjects(
+                self._collision_object_names
+            )
+            self._collision_object_poses = VectorIsometry3d()
+            self._collision_config = ContactManagerConfig()
+            self._collision_config.acm = self.env.getAllowedCollisionMatrix()
+            self._collision_config.margin_data = self.env.getCollisionMarginData()
+            self._collision_manager.applyContactManagerConfig(self._collision_config)
+            self._bool_contact_request = ContactRequest()
+            self._bool_contact_request.type = ContactTestType_FIRST
+            self._bool_contact_request.calculate_distance = False
+            self._bool_contact_request.calculate_penetration = False
+            self._bool_contact_request.contact_limit = self.bool_contact_limit
+            self._report_contact_request = ContactRequest()
+            self._report_contact_request.type = ContactTestType_ALL
+            self._report_contact_request.calculate_distance = True
+            self._report_contact_request.calculate_penetration = True
+            self._report_contact_request.contact_limit = self.report_contact_limit
             if self.simulated:
                 self.env.setState(
                     self._active_joint_names,
@@ -285,6 +308,22 @@ class EnsemblRobot:
         """
 
         return self.env
+
+    def _update_collision_manager_state(self) -> None:
+        state_solver = self.env.getStateSolver()
+        state_solver.setState(
+            self._active_joint_names,
+            np.asarray(self.env.getCurrentJointValues(), dtype=np.float64).reshape(-1),
+        )
+        scene_state = state_solver.getState()
+        link_transforms = scene_state.link_transforms
+        self._collision_object_poses.clear()
+        for name in self._collision_object_names:
+            self._collision_object_poses.append(link_transforms[name])
+        self._collision_manager.setCollisionObjectsTransform(
+            self._collision_object_names,
+            self._collision_object_poses,
+        )
 
     @with_latest_state
     @with_resolved_frames
@@ -419,29 +458,21 @@ class EnsemblRobot:
         - ``single_contact_point``: whether the result is a single-point contact
         """
 
-        manager = self.env.getDiscreteContactManager()
-        manager.setCollisionObjectsTransform(self.env.getState().link_transforms)
-        config = ContactManagerConfig()
-        config.acm = self.env.getAllowedCollisionMatrix()
-        config.margin_data = self.env.getCollisionMarginData()
-        manager.applyContactManagerConfig(config)
-        request = ContactRequest()
+        self._update_collision_manager_state()
         if not report:
-            request.type = ContactTestType_FIRST
-            request.calculate_distance = False
-            request.calculate_penetration = False
-            request.contact_limit = self.bool_contact_limit
             collisions = ContactResultMap()
-            manager.contactTest(collisions, request)
+            self._collision_manager.contactTest(
+                collisions,
+                self._bool_contact_request,
+            )
             contacts = ContactResultVector()
             collisions.flattenCopyResults(contacts)
             return contacts.size() > 0
-        request.type = ContactTestType_ALL
-        request.calculate_distance = True
-        request.calculate_penetration = True
-        request.contact_limit = self.report_contact_limit
         collisions = ContactResultMap()
-        manager.contactTest(collisions, request)
+        self._collision_manager.contactTest(
+            collisions,
+            self._report_contact_request,
+        )
         contacts = ContactResultVector()
         collisions.flattenCopyResults(contacts)
         collision_report = []
@@ -451,7 +482,10 @@ class EnsemblRobot:
                 {
                     "pair": tuple(str(name) for name in contact.link_names),
                     "distance": float(contact.distance),
-                    "type_id": int(contact.type_id),
+                    "type_id": (
+                        int(contact.type_id.front()),
+                        int(contact.type_id.back()),
+                    ),
                     "single_contact_point": bool(contact.single_contact_point),
                 }
             )

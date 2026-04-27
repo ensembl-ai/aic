@@ -99,7 +99,9 @@ def main():
 
     rng = np.random.default_rng(args.seed)
     robot = EnsemblRobot()
-    trace_stats = trace_robot_methods(robot, ("ComputeFK", "ComputeIK"))
+    trace_stats = trace_robot_methods(
+        robot, ("ComputeFK", "ComputeIK", "CheckCollision")
+    )
     limits = robot.GetActiveDOFLimits()
 
     ik_failures = 0
@@ -128,9 +130,7 @@ def main():
         for solution_index, solution in enumerate(np.atleast_2d(solutions)):
             robot.SetActiveDOFValues(solution)
             fk = robot.ComputeFK()
-            position_error = float(
-                np.linalg.norm(fk[:3, 3] - target_transform[:3, 3])
-            )
+            position_error = float(np.linalg.norm(fk[:3, 3] - target_transform[:3, 3]))
             orientation_error = rotation_error_radians(fk, target_transform)
             checked_solutions += 1
             if (
@@ -155,9 +155,12 @@ def main():
 
     if bad_solutions:
         print("\nFirst bad FK matches:")
-        for sample_index, solution_index, position_error, orientation_error in bad_solutions[
-            :20
-        ]:
+        for (
+            sample_index,
+            solution_index,
+            position_error,
+            orientation_error,
+        ) in bad_solutions[:20]:
             print(
                 f"  sample={sample_index} solution={solution_index} "
                 f"pos_err={position_error:.3e} rot_err={orientation_error:.3e}"
