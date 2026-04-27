@@ -133,10 +133,55 @@ if [[ "$(id -u)" -ne 0 ]]; then
   die "Run this as root inside the RunPod container."
 fi
 
-exec 9>/tmp/aic_runpod_setup.lock
-if ! flock -n 9; then
-  die "Another setup run is already active. Refusing to run concurrently."
-fi
+# ------------------------------------------------------------------
+# Repeatable setup lock.
+#
+# Do NOT use flock FD inheritance here. The previous FD-9 lock could
+# survive into the interactive shell after `exec bash -l`, which made
+# every later run think setup was still active.
+#
+# This directory lock is process/PID based:
+#   - active runpod_setup.bash process => refuse
+#   - stale/dead PID => remove and continue
+#   - unrelated PID reuse => remove and continue
+# ------------------------------------------------------------------
+
+SETUP_LOCK_DIR="/tmp/aic_runpod_setup.lock.d"
+SETUP_LOCK_PID_FILE="${SETUP_LOCK_DIR}/pid"
+
+is_setup_pid_active() {
+  local pid="$1"
+  local cmd=""
+
+  [[ "${pid}" =~ ^[0-9]+$ ]] || return 1
+  [[ -d "/proc/${pid}" ]] || return 1
+
+  cmd="$(tr '\0' ' ' < "/proc/${pid}/cmdline" 2>/dev/null || true)"
+
+  [[ "${cmd}" == *"runpod_setup.bash"* ]]
+}
+
+acquire_setup_lock() {
+  local pid=""
+  local cmd=""
+
+  while ! mkdir "${SETUP_LOCK_DIR}" 2>/dev/null; do
+    pid="$(cat "${SETUP_LOCK_PID_FILE}" 2>/dev/null || true)"
+
+    if is_setup_pid_active "${pid}"; then
+      cmd="$(tr '\0' ' ' < "/proc/${pid}/cmdline" 2>/dev/null || true)"
+      die "Another runpod_setup.bash is actively running. PID=${pid}. CMD=${cmd}"
+    fi
+
+    log "Removing stale setup lock: ${SETUP_LOCK_DIR}"
+    rm -rf "${SETUP_LOCK_DIR:?}"
+  done
+
+  echo "$$" > "${SETUP_LOCK_PID_FILE}"
+}
+
+acquire_setup_lock
+trap release_setup_lock EXIT
 
 source_ros_if_present() {
   if [[ ! -f "${ROS_SETUP}" ]]; then
@@ -798,10 +843,7 @@ Browser desktop is ready.
   VNC:    localhost:${VNC_PORT}
   Backend: NVIDIA Xorg only
 
-Use this in terminals:
-
-  source ${PROFILE_ENV_FILE}
-  source ${DESKTOP_ENV_FILE}
+Shell environment is installed automatically by this script.
 
 Verify:
 
@@ -816,6 +858,91 @@ Logs:
   x11vnc: ${X11VNC_LOG}
 
 EOF
+}
+
+install_shell_env_hooks() {
+  local bashrc="/root/.bashrc"
+  local start_marker="# >>> AIC RUNPOD ENV >>>"
+  local end_marker="# <<< AIC RUNPOD ENV <<<"
+
+  touch "${bashrc}"
+
+  python3 - <<PY2
+from pathlib import Path
+
+bashrc = Path("${bashrc}")
+text = bashrc.read_text() if bashrc.exists() else ""
+
+start = "${start_marker}"
+end = "${end_marker}"
+
+block = f"""{start}
+# Auto-installed by runpod_setup.bash
+if [ -f /etc/profile.d/aic_runpod_env.sh ]; then
+  source /etc/profile.d/aic_runpod_env.sh
+fi
+
+if [ -f /etc/profile.d/aic_browser_desktop_env.sh ]; then
+  source /etc/profile.d/aic_browser_desktop_env.sh
+fi
+{end}
+"""
+
+if start in text and end in text:
+    before = text.split(start)[0].rstrip()
+    after = text.split(end, 1)[1].lstrip()
+    new_text = before + "\n\n" + block + "\n" + after
+else:
+    new_text = text.rstrip() + "\n\n" + block + "\n"
+
+bashrc.write_text(new_text)
+PY2
+
+  log "Installed shell environment hooks into ${bashrc}."
+}
+
+load_env_into_this_script_process() {
+  if [[ -f "${PROFILE_ENV_FILE}" ]]; then
+    local had_nounset=0
+    case "$-" in
+      *u*)
+        had_nounset=1
+        set +u
+        ;;
+    esac
+
+    # shellcheck source=/dev/null
+    source "${PROFILE_ENV_FILE}"
+
+    if [[ "${had_nounset}" -eq 1 ]]; then
+      set -u
+    fi
+  fi
+
+  if [[ -f "${DESKTOP_ENV_FILE}" ]]; then
+    # shellcheck source=/dev/null
+    source "${DESKTOP_ENV_FILE}"
+  fi
+}
+
+release_setup_lock() {
+  # Release only the lock owned by this exact script process.
+  # Safe to call multiple times.
+  if [[ -n "${SETUP_LOCK_DIR:-}" && -f "${SETUP_LOCK_PID_FILE:-}" ]]; then
+    local lock_pid
+    lock_pid="$(cat "${SETUP_LOCK_PID_FILE}" 2>/dev/null || true)"
+
+    if [[ "${lock_pid}" == "$$" ]]; then
+      rm -rf "${SETUP_LOCK_DIR:?}" || true
+    fi
+  fi
+}
+open_configured_shell_if_interactive() {
+  if [[ -t 0 && -t 1 && "${AIC_SKIP_LOGIN_SHELL:-0}" != "1" ]]; then
+    log "Opening configured shell. DISPLAY/XAUTHORITY/NVIDIA env will be loaded automatically."
+    release_setup_lock
+    exec bash -l
+  fi
 }
 
 main() {
@@ -840,21 +967,34 @@ main() {
     log "Desktop startup skipped because --no-desktop was provided."
   fi
 
+  install_shell_env_hooks
+  load_env_into_this_script_process
+
   log "Done."
 
   cat <<EOF
 
-Safe ~/.bashrc lines only:
+Environment is now managed by this one file.
 
-  source ${PROFILE_ENV_FILE} 2>/dev/null || true
-  source ${DESKTOP_ENV_FILE} 2>/dev/null || true
+This script has installed the required shell hooks into:
 
-Do NOT put this in ~/.bashrc:
+  /root/.bashrc
 
-  ./aic_runpod_setup.bash
-  ./aic_runpod_setup.bash --first
+New VS Code terminals and SSH terminals will automatically load:
+
+  DISPLAY=${DISPLAY_VALUE}
+  XAUTHORITY=/root/.Xauthority
+  __GLX_VENDOR_LIBRARY_NAME=nvidia
+
+Verify in any new terminal:
+
+  echo \$DISPLAY
+  glxinfo -B
+  nvidia-smi
 
 EOF
-}
 
+  open_configured_shell_if_interactive
+  release_setup_lock
+}
 main "$@"
