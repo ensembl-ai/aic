@@ -184,13 +184,35 @@ class EnsemblRobot:
     def _sync_latest_state(self) -> None:
         if self.simulated:
             return
-        else:
-            obs = self._get_observation()
-            if obs is None:
-                raise RuntimeError("Observation is unavailable.")
-            self.env.setState(
-                dict(zip(obs.joint_states.name, obs.joint_states.position))
+
+        obs = self._get_observation()
+        if obs is None:
+            raise RuntimeError("Observation is unavailable.")
+
+        observed_joint_positions = dict(
+            zip(obs.joint_states.name, obs.joint_states.position)
+        )
+        missing_joint_names = [
+            joint_name
+            for joint_name in self._manipulator_joint_names
+            if joint_name not in observed_joint_positions
+        ]
+        if missing_joint_names:
+            raise RuntimeError(
+                "Observation is missing manipulator joints required by Tesseract: "
+                f"{missing_joint_names}."
             )
+
+        self.env.setState(
+            self._manipulator_joint_names,
+            np.asarray(
+                [
+                    observed_joint_positions[joint_name]
+                    for joint_name in self._manipulator_joint_names
+                ],
+                dtype=np.float64,
+            ),
+        )
 
     def _expand_xacro(self, xacro_path: str) -> str:
         """
