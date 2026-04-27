@@ -37,13 +37,13 @@ class TestMove(Policy):
         waypoint_positions = np.linspace(
             current_transform[:3, 3],
             target_position,
-            num=5,
+            num=10,
             dtype=np.float64,
         )
 
         joint_motion_update = JointMotionUpdate(
-            target_stiffness=[500.0, 500.0, 500.0, 200.0, 200.0, 200.0],
-            target_damping=[5.0, 5.0, 5.0, 2.0, 2.0, 2.0],
+            target_stiffness=[150.0, 150.0, 150.0, 80.0, 80.0, 80.0],
+            target_damping=[90.0, 90.0, 90.0, 45.0, 45.0, 45.0],
             trajectory_generation_mode=TrajectoryGenerationMode(
                 mode=TrajectoryGenerationMode.MODE_POSITION
             ),
@@ -63,6 +63,7 @@ class TestMove(Policy):
 
             joint_motion_update.target_state.positions = joint_positions.tolist()
             move_robot(joint_motion_update=joint_motion_update)
+            self.sleep_for(1.0)
 
         self.get_logger().info("TestMove.insert_cable() exiting...")
         return True
