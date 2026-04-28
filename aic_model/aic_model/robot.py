@@ -20,6 +20,7 @@ import inspect
 import logging
 import os
 from typing import Any, cast
+import warnings
 
 import numpy as np
 import yaml
@@ -50,21 +51,19 @@ import xacro
 # Internal
 
 from aic_model_interfaces.msg import Observation
-from aic_model.planner import (
-    EnsemblPlanner,
-)
+from aic_model.planner import EnsemblPlanner
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 
 def with_latest_state(method):
-    """
-    Refresh the Tesseract environment from the latest observation.
-    """
+    """Refresh the environment from the latest observation before a call."""
 
     @wraps(method)
     def wrapper(self, *args, **kwargs):
+        """Refresh state and then delegate to the wrapped method."""
+
         self._sync_latest_state()
         return method(self, *args, **kwargs)
 
@@ -72,14 +71,14 @@ def with_latest_state(method):
 
 
 def with_resolved_frames(method):
-    """
-    Resolve and validate base and target frames used by kinematics calls.
-    """
+    """Resolve and validate manipulator frames before a kinematics call."""
 
     signature = inspect.signature(method)
 
     @wraps(method)
     def wrapper(self, *args, **kwargs):
+        """Resolve frame defaults and validate them for the wrapped call."""
+
         bound = signature.bind_partial(self, *args, **kwargs)
         base_frame = bound.arguments.get("base_frame") or self.manipulator_base_frame
         target_frame = bound.arguments.get("target_frame") or self.manipulator_tip_frame
@@ -101,13 +100,10 @@ def with_resolved_frames(method):
 
 
 class EnsemblRobot:
+    """Robot facade around Tesseract environment, kinematics, and planning."""
 
     def __init__(self, get_observation: Callable[[], Observation] | None = None):
-        """
-        Initialize the robot model.
-        If ``get_observation`` is ``None``, the robot runs in simulated mode and
-        all active joints are initialized to zero.
-        """
+        """Initialize the robot model and optional live-observation callback."""
 
         try:
             self._get_observation = get_observation
@@ -159,6 +155,19 @@ class EnsemblRobot:
                 self._joint_group.getLimits().joint_limits,
                 dtype=np.float64,
             ).T
+            kinematic_limits = self._joint_group.getLimits()
+            self.velocity_limits = np.asarray(
+                kinematic_limits.velocity_limits,
+                dtype=np.float64,
+            )
+            self.acceleration_limits = np.asarray(
+                kinematic_limits.acceleration_limits,
+                dtype=np.float64,
+            )
+            self.jerk_limits = np.asarray(
+                kinematic_limits.jerk_limits,
+                dtype=np.float64,
+            )
             active_joint_index = {
                 joint_name: index
                 for index, joint_name in enumerate(self._active_joint_names)
@@ -201,10 +210,14 @@ class EnsemblRobot:
             raise RuntimeError("Failed to initialize EnsemblRobot.") from exc
 
     def _load_kinematics_config(self) -> dict:
+        """Load the robot kinematics configuration YAML."""
+
         with open(self.kinematics_config_path, encoding="utf-8") as f:
             return yaml.safe_load(f)
 
     def _read_manipulator_config(self) -> tuple[str, str, str]:
+        """Read manipulator, base-frame, and tip-frame names from config."""
+
         fwd_groups = self.kinematics_config["kinematic_plugins"]["fwd_kin_plugins"]
         group_name = next(iter(fwd_groups))
         group_config = fwd_groups[group_name]
@@ -213,6 +226,8 @@ class EnsemblRobot:
         return group_name, plugin_config["base_link"], plugin_config["tip_link"]
 
     def _sync_latest_state(self) -> None:
+        """Update the environment joint state from the observation callback."""
+
         if self.simulated:
             return
 
@@ -296,20 +311,25 @@ class EnsemblRobot:
     def PlanToTarget(
         self,
         transform: np.ndarray | list[list[float]],
-    ) -> PlannerResponse:
-        """
-        Plan a joint-space path from the current manipulator state to a target TCP pose.
-        """
+    ) -> PlannerResponse | None:
+        """Plan from the current manipulator state to a target TCP pose."""
 
         return self._planner.PlanToTarget(target_transform=transform)
+
+    @with_latest_state
+    def PlanToConfiguration(
+        self,
+        joint_values: np.ndarray | list[float],
+    ) -> PlannerResponse | None:
+        """Plan from the current state to a target manipulator joint state."""
+
+        return self._planner.PlanToConfiguration(target_joint_values=joint_values)
 
     def Retime(
         self,
         program: CompositeInstruction,
-    ) -> CompositeInstruction:
-        """
-        Time-parameterize a Tesseract trajectory.
-        """
+    ) -> CompositeInstruction | None:
+        """Time-parameterize a Tesseract trajectory if possible."""
 
         return self._planner.Retime(program)
 
@@ -319,9 +339,12 @@ class EnsemblRobot:
         """
 
         if not self.simulated:
-            raise RuntimeError(
-                "SetActiveDOFValues is only available when get_observation is None."
+            warnings.warn(
+                "SetActiveDOFValues is only available when get_observation is None.",
+                RuntimeWarning,
+                stacklevel=2,
             )
+            return
         joint_values = np.asarray(joint_values, dtype=np.float64).reshape(-1)
         if joint_values.size != len(self._manipulator_joint_names):
             raise ValueError(
@@ -339,6 +362,8 @@ class EnsemblRobot:
         return self.env
 
     def _update_collision_manager_state(self) -> None:
+        """Push the current environment state into the contact manager."""
+
         state_solver = self.env.getStateSolver()
         state_solver.setState(
             self._active_joint_names,
@@ -383,9 +408,6 @@ class EnsemblRobot:
     ) -> np.ndarray:
         """
         Return the current geometric Jacobian in Tesseract's row ordering.
-        The np.zeros(3, dtype=np.float64) in calcJacobian(...) is the point on the target link
-        where the Jacobian is evaluated. Zero means “at the target frame origin.”
-        For TCP Jacobian, that is the right point: the TCP frame origin.
         """
 
         joint_positions = self.GetActiveDOFValues()

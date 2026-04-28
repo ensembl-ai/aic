@@ -41,11 +41,14 @@ class TestMove(Policy):
         target_transform = current_transform.copy()
         target_transform[:3, 3] = target_position
 
-        try:
-            plan = robot.PlanToTarget(target_transform)
-            trajectory = robot.Retime(plan.results)
-        except RuntimeError as exc:
-            self.get_logger().error(f"Planning failed: {exc}")
+        plan = robot.PlanToTarget(target_transform)
+        if plan is None:
+            self.get_logger().error("Planning failed: PlanToTarget returned None")
+            return False
+
+        trajectory = robot.Retime(plan.results)
+        if trajectory is None:
+            self.get_logger().error("Planning failed: Retime returned None")
             return False
 
         self.get_logger().info("Tesseract trajectory planned and retimed")

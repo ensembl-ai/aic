@@ -6,6 +6,7 @@ from functools import wraps
 from pathlib import Path
 import sys
 import time
+from typing import Any, cast
 
 import numpy as np
 import tqdm
@@ -110,6 +111,30 @@ def sample_collision_free_config(robot, rng, limits, max_attempts=1000):
     )
 
 
+def sample_collision_free_neighbor(
+    robot,
+    rng,
+    limits,
+    anchor_config,
+    max_delta=0.35,
+    max_attempts=1000,
+):
+    anchor_config = np.asarray(anchor_config, dtype=np.float64).reshape(-1)
+    for _ in range(max_attempts):
+        candidate = anchor_config + rng.uniform(
+            -max_delta,
+            max_delta,
+            size=anchor_config.shape,
+        )
+        candidate = np.clip(candidate, limits[0], limits[1])
+        robot.SetActiveDOFValues(candidate)
+        if not robot.CheckCollision():
+            return candidate
+    raise RuntimeError(
+        f"Unable to find nearby collision-free sample after {max_attempts} attempts."
+    )
+
+
 def extract_state_waypoints(program):
     state_waypoints = []
     for instruction in program.flatten():
@@ -147,18 +172,25 @@ def main():
         default=250,
         help="Number of collision-free start/goal planning samples to validate.",
     )
+    parser.add_argument(
+        "--planner-max-delta",
+        type=float,
+        default=0.2,
+        help="Maximum per-joint delta in radians for sampled planning goals.",
+    )
     parser.add_argument("--check-collision", action="store_true")
     parser.add_argument("--seed", type=int, default=None)
     args = parser.parse_args()
 
     rng = np.random.default_rng(args.seed)
-    robot = EnsemblRobot()
+    robot = cast(Any, EnsemblRobot())
     trace_stats = trace_robot_methods(
         robot,
         (
             "ComputeFK",
             "ComputeIK",
             "CheckCollision",
+            "PlanToConfiguration",
             "PlanToTarget",
         ),
     )
@@ -228,21 +260,36 @@ def main():
     planner_collision_failures = []
     planner_goal_position_tolerance = 1e-4
     planner_goal_orientation_tolerance = 1e-3
+    planner_goal_joint_tolerance = 1e-6
     planner_step_limit = np.pi
+    planner_start_config = np.clip(
+        np.zeros_like(limits[0]),
+        limits[0],
+        limits[1],
+    )
+    robot.SetActiveDOFValues(planner_start_config)
+    if robot.CheckCollision():
+        planner_start_config = sample_collision_free_config(robot, rng, limits)
+
     for sample_index in tqdm.tqdm(
         range(args.num_planner_samples),
         desc="Motion planning",
     ):
-        start_config = sample_collision_free_config(robot, rng, limits)
-        goal_config = sample_collision_free_config(robot, rng, limits)
+        start_config = planner_start_config.copy()
+        goal_config = sample_collision_free_neighbor(
+            robot,
+            rng,
+            limits,
+            start_config,
+            max_delta=args.planner_max_delta,
+        )
 
         robot.SetActiveDOFValues(goal_config)
         goal_transform = robot.ComputeFK()
         robot.SetActiveDOFValues(start_config)
-        try:
-            plan = robot.PlanToTarget(goal_transform)
-        except Exception as exc:
-            planner_failures.append((sample_index, str(exc)))
+        plan = robot.PlanToConfiguration(goal_config)
+        if plan is None:
+            planner_failures.append((sample_index, "PlanToConfiguration returned None"))
             continue
 
         state_waypoints = extract_state_waypoints(plan.results)
@@ -266,6 +313,11 @@ def main():
                 continue
 
         final_waypoint = state_waypoints[-1]
+        joint_error = float(np.max(np.abs(final_waypoint - goal_config)))
+        if joint_error > planner_goal_joint_tolerance:
+            planner_goal_failures.append((sample_index, joint_error, None))
+            continue
+
         robot.SetActiveDOFValues(final_waypoint)
         final_transform = robot.ComputeFK()
         position_error = float(
@@ -325,10 +377,13 @@ def main():
     if planner_goal_failures:
         print("\nFirst planner goal mismatches:")
         for sample_index, position_error, orientation_error in planner_goal_failures[:20]:
-            print(
-                f"  sample={sample_index} "
-                f"pos_err={position_error:.3e} rot_err={orientation_error:.3e}"
-            )
+            if orientation_error is None:
+                print(f"  sample={sample_index} joint_err={position_error:.3e}")
+            else:
+                print(
+                    f"  sample={sample_index} "
+                    f"pos_err={position_error:.3e} rot_err={orientation_error:.3e}"
+                )
 
     if (
         bad_solutions
