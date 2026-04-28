@@ -19,12 +19,15 @@ from functools import wraps
 import inspect
 import logging
 import os
+from typing import Any, cast
+
 import numpy as np
 import yaml
 
 # External
 
 from ament_index_python.packages import get_package_share_directory
+from tesseract_robotics.tesseract_command_language import CompositeInstruction
 from tesseract_robotics.tesseract_common import (
     FilesystemPath,
     GeneralResourceLocator,
@@ -41,12 +44,15 @@ from tesseract_robotics.tesseract_collision import (
 )
 from tesseract_robotics.tesseract_environment import Environment
 from tesseract_robotics.tesseract_kinematics import KinGroupIKInput, KinGroupIKInputs
+from tesseract_robotics.tesseract_motion_planners import PlannerResponse
 import xacro
 
 # Internal
 
 from aic_model_interfaces.msg import Observation
-from aic_model.planner import EnsemblPlanner, PlannerResult, RetimedTrajectory
+from aic_model.planner import (
+    EnsemblPlanner,
+)
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -153,7 +159,6 @@ class EnsemblRobot:
                 self._joint_group.getLimits().joint_limits,
                 dtype=np.float64,
             ).T
-            kinematic_limits = self._joint_group.getLimits()
             active_joint_index = {
                 joint_name: index
                 for index, joint_name in enumerate(self._active_joint_names)
@@ -184,29 +189,11 @@ class EnsemblRobot:
             self._report_contact_request.calculate_distance = True
             self._report_contact_request.calculate_penetration = True
             self._report_contact_request.contact_limit = self.report_contact_limit
-            self._configuration_planner = EnsemblPlanner(
-                env=self.env,
-                manipulator_group_name=self.manipulator_group_name,
-                base_frame=self.manipulator_base_frame,
-                tip_frame=self.manipulator_tip_frame,
-                manipulator_joint_names=self._manipulator_joint_names,
-                velocity_limits=np.asarray(
-                    kinematic_limits.velocity_limits,
-                    dtype=np.float64,
-                ),
-                acceleration_limits=np.asarray(
-                    kinematic_limits.acceleration_limits,
-                    dtype=np.float64,
-                ),
-                jerk_limits=np.asarray(
-                    kinematic_limits.jerk_limits,
-                    dtype=np.float64,
-                ),
-            )
+            self._planner = EnsemblPlanner(self)
             if self.simulated:
                 self.env.setState(
                     self._active_joint_names,
-                    np.zeros(len(self._active_joint_names), dtype=np.float64)
+                    np.zeros(len(self._active_joint_names), dtype=np.float64),
                 )
 
             logger.info("Tesseract environment initialized successfully")
@@ -229,6 +216,7 @@ class EnsemblRobot:
         if self.simulated:
             return
 
+        assert self._get_observation is not None
         obs = self._get_observation()
         if obs is None:
             raise RuntimeError("Observation is unavailable.")
@@ -264,7 +252,7 @@ class EnsemblRobot:
         """
 
         try:
-            doc = xacro.process_file(xacro_path, mappings={"name": "ur"})
+            doc = cast(Any, xacro.process_file(xacro_path, mappings={"name": "ur"}))
         except Exception as exc:
             raise RuntimeError(
                 "Failed to expand robot xacro "
@@ -305,30 +293,25 @@ class EnsemblRobot:
 
         return self._active_dof_limits.copy()
 
-    @with_latest_state
     def PlanToTarget(
         self,
         transform: np.ndarray | list[list[float]],
-    ) -> PlannerResult:
+    ) -> PlannerResponse:
         """
         Plan a joint-space path from the current manipulator state to a target TCP pose.
         """
 
-        return self._configuration_planner.PlanToTarget(
-            start_joint_values=self.GetActiveDOFValues(),
-            target_transform=transform,
-            start_transform=EnsemblRobot.ComputeFK.__wrapped__(self),
-        )
+        return self._planner.PlanToTarget(target_transform=transform)
 
     def Retime(
         self,
-        path: np.ndarray | list[list[float]],
-    ) -> RetimedTrajectory:
+        program: CompositeInstruction,
+    ) -> CompositeInstruction:
         """
-        Time-parameterize a joint-space path.
+        Time-parameterize a Tesseract trajectory.
         """
 
-        return self._configuration_planner.Retime(path)
+        return self._planner.Retime(program)
 
     def SetActiveDOFValues(self, joint_values: np.ndarray | list[float]) -> None:
         """

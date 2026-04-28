@@ -9,6 +9,11 @@ from aic_model.policy import (
 )
 from aic_model.robot import EnsemblRobot
 from aic_task_interfaces.msg import Task
+from rclpy.duration import Duration
+from tesseract_robotics.tesseract_command_language import (
+    InstructionPoly_as_MoveInstructionPoly,
+    WaypointPoly_as_StateWaypointPoly,
+)
 
 
 class TestMove(Policy):
@@ -33,13 +38,17 @@ class TestMove(Policy):
             [-0.63381193, 0.2899951, 0.05814897],
             dtype=np.float64,
         )
+        target_transform = current_transform.copy()
+        target_transform[:3, 3] = target_position
 
-        waypoint_positions = np.linspace(
-            current_transform[:3, 3],
-            target_position,
-            num=10,
-            dtype=np.float64,
-        )
+        try:
+            plan = robot.PlanToTarget(target_transform)
+            trajectory = robot.Retime(plan.results)
+        except RuntimeError as exc:
+            self.get_logger().error(f"Planning failed: {exc}")
+            return False
+
+        self.get_logger().info("Tesseract trajectory planned and retimed")
 
         joint_motion_update = JointMotionUpdate(
             target_stiffness=[150.0, 150.0, 150.0, 80.0, 80.0, 80.0],
@@ -49,21 +58,56 @@ class TestMove(Policy):
             ),
         )
 
-        for index, position in enumerate(waypoint_positions[1:], start=1):
-            self.get_logger().info(
-                f"Commanding waypoint {index}/{len(waypoint_positions) - 1}"
+        previous_time = 0.0
+        waypoint_index = 0
+        for instruction in trajectory.flatten():
+            move = InstructionPoly_as_MoveInstructionPoly(instruction)
+            waypoint = move.getWaypoint()
+            if not waypoint.isStateWaypoint():
+                continue
+
+            state_waypoint = WaypointPoly_as_StateWaypointPoly(waypoint)
+            waypoint_time = float(state_waypoint.getTime())
+            if waypoint_index == 0:
+                previous_time = waypoint_time
+                waypoint_index += 1
+                continue
+
+            positions = np.asarray(
+                state_waypoint.getPosition(),
+                dtype=np.float64,
+            ).reshape(-1)
+            velocities = np.asarray(
+                state_waypoint.getVelocity(),
+                dtype=np.float64,
+            ).reshape(-1)
+            accelerations = np.asarray(
+                state_waypoint.getAcceleration(),
+                dtype=np.float64,
+            ).reshape(-1)
+
+            joint_motion_update.target_state.positions = positions.tolist()
+            joint_motion_update.target_state.velocities = (
+                velocities.tolist() if velocities.size == positions.size else []
             )
-
-            waypoint_transform = current_transform.copy()
-            waypoint_transform[:3, 3] = position
-            joint_positions = robot.ComputeIK(waypoint_transform)
-            if joint_positions is None:
-                self.get_logger().error(f"IK failed for waypoint {index}")
-                return False
-
-            joint_motion_update.target_state.positions = joint_positions.tolist()
+            joint_motion_update.target_state.accelerations = (
+                accelerations.tolist()
+                if accelerations.size == positions.size
+                else []
+            )
+            joint_motion_update.target_state.time_from_start = Duration(
+                seconds=waypoint_time,
+            ).to_msg()
+            self.get_logger().info(f"Commanding waypoint {waypoint_index}")
             move_robot(joint_motion_update=joint_motion_update)
-            self.sleep_for(1.0)
+            self.sleep_for(max(waypoint_time - previous_time, 0.0))
+
+            previous_time = waypoint_time
+            waypoint_index += 1
+
+        if waypoint_index < 2:
+            self.get_logger().error("Planned trajectory did not contain waypoints")
+            return False
 
         self.get_logger().info("TestMove.insert_cable() exiting...")
         return True
