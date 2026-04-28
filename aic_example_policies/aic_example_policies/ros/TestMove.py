@@ -32,6 +32,7 @@ class TestMove(Policy):
             execute_joint_motion=lambda update: move_robot(joint_motion_update=update),
             sleep_for=self.sleep_for,
             log_info=self.get_logger().info,
+            log_warn=self.get_logger().warn,
         )
 
         rng = np.random.default_rng()
@@ -51,6 +52,10 @@ class TestMove(Policy):
             self.get_logger().info(
                 "Sampled target position "
                 f"{np.array2string(target_position, precision=3)}"
+            )
+            self.get_logger().info(
+                "Current tcp position "
+                f"{np.array2string(current_transform[:3, 3], precision=3)}"
             )
 
             plan = robot.PlanToTarget(target_transform)

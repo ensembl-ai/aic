@@ -74,6 +74,8 @@ class EnsemblPlanner:
         self.jerk_limits = robot.jerk_limits
         self.num_waypoints = int(num_waypoints)
         self.timeout = float(timeout)
+        self._log_info = getattr(robot, "_log_info", None)
+        self._log_warn = getattr(robot, "_log_warn", None)
 
         self._manipulator_info = ManipulatorInfo()
         self._manipulator_info.manipulator = self.manipulator_group_name
@@ -93,6 +95,19 @@ class EnsemblPlanner:
             TrajOptDefaultCompositeProfile(),
         )
 
+    def _info(self, message: str) -> None:
+        """Emit an informational planner log when a callback is available."""
+
+        if self._log_info is not None:
+            self._log_info(f"[planner] {message}")
+
+    def _warn(self, message: str) -> None:
+        """Emit a warning planner log and mirror it to Python warnings."""
+
+        if self._log_warn is not None:
+            self._log_warn(f"[planner] {message}")
+        warnings.warn(message, RuntimeWarning, stacklevel=2)
+
     @contextmanager
     def _planning_timeout(self):
         """Apply a best-effort wall-clock timeout around a planning call."""
@@ -104,11 +119,7 @@ class EnsemblPlanner:
         try:
             previous_handler = signal.getsignal(signal.SIGALRM)
         except ValueError:
-            warnings.warn(
-                "Planning timeout is unavailable outside the main thread.",
-                RuntimeWarning,
-                stacklevel=2,
-            )
+            self._warn("Planning timeout is unavailable outside the main thread.")
             yield
             return
 
@@ -130,6 +141,11 @@ class EnsemblPlanner:
     def _solve_program(self, program: CompositeInstruction) -> PlannerResponse | None:
         """Solve a Tesseract program and return the native planner response."""
 
+        self._info(
+            "Submitting planning request "
+            f"with {len(program.flatten())} flattened instructions and "
+            f"timeout={self.timeout:.3f}s."
+        )
         request = PlannerRequest()
         request.instructions = program
         request.env = self.env
@@ -138,23 +154,18 @@ class EnsemblPlanner:
             with self._planning_timeout():
                 response = self._motion_planner.solve(request)
         except TimeoutError as exc:
-            warnings.warn(str(exc), RuntimeWarning, stacklevel=2)
+            self._warn(str(exc))
             return None
         except Exception as exc:
-            warnings.warn(
-                f"TrajOpt planning raised {exc.__class__.__name__}: {exc}",
-                RuntimeWarning,
-                stacklevel=2,
+            self._warn(
+                f"TrajOpt planning raised {exc.__class__.__name__}: {exc}"
             )
             return None
 
         if not response.successful:
-            warnings.warn(
-                f"TrajOpt failed: {response.message}",
-                RuntimeWarning,
-                stacklevel=2,
-            )
+            self._warn(f"TrajOpt failed: {response.message}")
             return None
+        self._info(f"Planning succeeded: {response.message}")
         return response
 
     def PlanToTarget(
@@ -163,6 +174,11 @@ class EnsemblPlanner:
     ) -> PlannerResponse | None:
         """Plan from the current robot state to a target TCP transform."""
 
+        target_transform = np.asarray(target_transform, dtype=np.float64)
+        self._info(
+            "PlanToTarget request "
+            f"target_position={np.array2string(target_transform[:3, 3], precision=3)}"
+        )
         return self._solve_program(self._make_target_program(target_transform))
 
     def PlanToConfiguration(
@@ -171,6 +187,13 @@ class EnsemblPlanner:
     ) -> PlannerResponse | None:
         """Plan from the current robot state to a target joint configuration."""
 
+        target_joint_values = np.asarray(target_joint_values, dtype=np.float64).reshape(
+            -1
+        )
+        self._info(
+            "PlanToConfiguration request "
+            f"target_joint_values={np.array2string(target_joint_values, precision=3)}"
+        )
         return self._solve_program(
             self._make_configuration_program(target_joint_values)
         )
@@ -181,6 +204,10 @@ class EnsemblPlanner:
     ) -> CompositeInstruction | None:
         """Apply Tesseract time-parameterization to an existing program."""
 
+        self._info(
+            "Retiming trajectory "
+            f"with {len(program.flatten())} flattened instructions."
+        )
         trajectory = InstructionsTrajectory(program)
         time_parameterization = TimeOptimalTrajectoryGeneration()
         ok = time_parameterization.compute(
@@ -190,13 +217,10 @@ class EnsemblPlanner:
             self.jerk_limits,
         )
         if not ok:
-            warnings.warn(
-                "Time optimal trajectory generation failed.",
-                RuntimeWarning,
-                stacklevel=2,
-            )
+            self._warn("Time optimal trajectory generation failed.")
             return None
 
+        self._info("Retiming succeeded.")
         return program
 
     def _make_target_program(
@@ -229,6 +253,12 @@ class EnsemblPlanner:
 
         program = CompositeInstruction(DEFAULT_PROFILE)
         program.setManipulatorInfo(self._manipulator_info)
+        self._info(
+            "Building Cartesian program "
+            f"start_position={np.array2string(current_transform[:3, 3], precision=3)} "
+            f"target_position={np.array2string(target_transform[:3, 3], precision=3)} "
+            f"num_waypoints={self.num_waypoints}"
+        )
         program.appendMoveInstruction(
             MoveInstructionPoly_wrap_MoveInstruction(
                 MoveInstruction(
@@ -301,6 +331,12 @@ class EnsemblPlanner:
 
         program = CompositeInstruction(DEFAULT_PROFILE)
         program.setManipulatorInfo(self._manipulator_info)
+        self._info(
+            "Building joint-space program "
+            f"start={np.array2string(current_joint_values, precision=3)} "
+            f"target={np.array2string(target_joint_values, precision=3)} "
+            f"num_waypoints={self.num_waypoints}"
+        )
 
         for alpha in np.linspace(0.0, 1.0, num=self.num_waypoints):
             joint_values = (

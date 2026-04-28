@@ -110,12 +110,15 @@ class EnsemblRobot:
         execute_joint_motion: Callable[[JointMotionUpdate], None] | None = None,
         sleep_for: Callable[[float], None] | None = None,
         log_info: Callable[[str], None] | None = None,
+        log_warn: Callable[[str], None] | None = None,
     ):
         """Initialize the robot model, planner, and optional trajectory executor."""
 
         try:
             self._get_observation = get_observation
             self.simulated = get_observation is None
+            self._log_info = log_info
+            self._log_warn = log_warn
 
             self.aic_description_share = get_package_share_directory("aic_description")
             self.urdf_xacro_path = f"{self.aic_description_share}/urdf/ur_gz.urdf.xacro"
@@ -211,6 +214,7 @@ class EnsemblRobot:
                 execute_joint_motion=execute_joint_motion,
                 sleep_for=sleep_for,
                 log_info=log_info,
+                log_warn=log_warn,
             )
             if self.simulated:
                 self.env.setState(

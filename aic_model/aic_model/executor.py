@@ -36,12 +36,27 @@ class EnsemblExecutor:
         execute_joint_motion: Callable[[JointMotionUpdate], None] | None = None,
         sleep_for: Callable[[float], None] | None = None,
         log_info: Callable[[str], None] | None = None,
+        log_warn: Callable[[str], None] | None = None,
     ):
         """Initialize the executor with controller and timing callbacks."""
 
         self._execute_joint_motion = execute_joint_motion
         self._sleep_for = sleep_for
         self._log_info = log_info
+        self._log_warn = log_warn
+
+    def _info(self, message: str) -> None:
+        """Emit an informational executor log when a callback is available."""
+
+        if self._log_info is not None:
+            self._log_info(f"[executor] {message}")
+
+    def _warn(self, message: str) -> None:
+        """Emit a warning executor log and mirror it to Python warnings."""
+
+        if self._log_warn is not None:
+            self._log_warn(f"[executor] {message}")
+        warnings.warn(message, RuntimeWarning, stacklevel=2)
 
     def ExecuteTrajectory(
         self,
@@ -52,12 +67,14 @@ class EnsemblExecutor:
         """Stream a retimed state-waypoint trajectory to the joint controller."""
 
         if self._execute_joint_motion is None:
-            warnings.warn(
-                "ExecuteTrajectory requires an execute_joint_motion callback.",
-                RuntimeWarning,
-                stacklevel=2,
-            )
+            self._warn("ExecuteTrajectory requires an execute_joint_motion callback.")
             return False
+
+        flattened_instructions = trajectory.flatten()
+        self._info(
+            "Executing retimed trajectory "
+            f"with {len(flattened_instructions)} flattened instructions."
+        )
 
         joint_motion_update = JointMotionUpdate(
             target_stiffness=(stiffness or [150.0, 150.0, 150.0, 80.0, 80.0, 80.0]),
@@ -69,7 +86,7 @@ class EnsemblExecutor:
 
         previous_time = 0.0
         waypoint_index = 0
-        for instruction in trajectory.flatten():
+        for instruction in flattened_instructions:
             move = InstructionPoly_as_MoveInstructionPoly(instruction)
             waypoint = move.getWaypoint()
             if not waypoint.isStateWaypoint():
@@ -109,7 +126,11 @@ class EnsemblExecutor:
             ).to_msg()
 
             if self._log_info is not None:
-                self._log_info(f"Commanding waypoint {waypoint_index}")
+                self._info(
+                    "Commanding waypoint "
+                    f"{waypoint_index} time={waypoint_time:.3f}s "
+                    f"positions={np.array2string(positions, precision=3)}"
+                )
             self._execute_joint_motion(joint_motion_update)
 
             if self._sleep_for is not None:
@@ -119,11 +140,8 @@ class EnsemblExecutor:
             waypoint_index += 1
 
         if waypoint_index < 2:
-            warnings.warn(
-                "Trajectory did not contain at least two state waypoints.",
-                RuntimeWarning,
-                stacklevel=2,
-            )
+            self._warn("Trajectory did not contain at least two state waypoints.")
             return False
 
+        self._info(f"Trajectory execution stream completed with {waypoint_index} waypoints.")
         return True
