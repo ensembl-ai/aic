@@ -58,6 +58,12 @@ class EnsemblExecutor:
             self._log_warn(f"[executor] {message}")
         warnings.warn(message, RuntimeWarning, stacklevel=2)
 
+    def _joint_summary(self, joint_values: np.ndarray | list[float]) -> str:
+        """Format joint values for compact executor logging."""
+
+        values = np.asarray(joint_values, dtype=np.float64).reshape(-1)
+        return np.array2string(values, precision=3, suppress_small=True)
+
     def ExecuteTrajectory(
         self,
         trajectory: CompositeInstruction,
@@ -129,7 +135,9 @@ class EnsemblExecutor:
                 self._info(
                     "Commanding waypoint "
                     f"{waypoint_index} time={waypoint_time:.3f}s "
-                    f"positions={np.array2string(positions, precision=3)}"
+                    f"positions={self._joint_summary(positions)} "
+                    f"velocities={self._joint_summary(velocities) if velocities.size == positions.size else '[]'} "
+                    f"accelerations={self._joint_summary(accelerations) if accelerations.size == positions.size else '[]'}"
                 )
             self._execute_joint_motion(joint_motion_update)
 

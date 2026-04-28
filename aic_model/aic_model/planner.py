@@ -16,9 +16,8 @@
 
 from __future__ import annotations
 
-from contextlib import contextmanager
 import os
-import signal
+import traceback
 import warnings
 import numpy as np
 
@@ -94,6 +93,11 @@ class EnsemblPlanner:
             DEFAULT_PROFILE,
             TrajOptDefaultCompositeProfile(),
         )
+        if self.timeout > 0.0:
+            self._info(
+                "Configured timeout is not enforced because the current Tesseract Python "
+                "binding does not expose a cancellable planner timeout."
+            )
 
     def _info(self, message: str) -> None:
         """Emit an informational planner log when a callback is available."""
@@ -108,35 +112,38 @@ class EnsemblPlanner:
             self._log_warn(f"[planner] {message}")
         warnings.warn(message, RuntimeWarning, stacklevel=2)
 
-    @contextmanager
-    def _planning_timeout(self):
-        """Apply a best-effort wall-clock timeout around a planning call."""
+    def _joint_summary(self, joint_values: np.ndarray | list[float]) -> str:
+        """Format joint values for compact planner logging."""
 
-        if self.timeout <= 0.0:
-            yield
-            return
+        values = np.asarray(joint_values, dtype=np.float64).reshape(-1)
+        return np.array2string(values, precision=3, suppress_small=True)
 
-        try:
-            previous_handler = signal.getsignal(signal.SIGALRM)
-        except ValueError:
-            self._warn("Planning timeout is unavailable outside the main thread.")
-            yield
-            return
+    def _rotation_matrix_to_euler_xyz(self, rotation: np.ndarray) -> np.ndarray:
+        """Convert a rotation matrix to XYZ Euler angles in radians."""
 
-        def _raise_timeout(_signum, _frame):
-            """Raise a Python timeout once the wall-clock alarm expires."""
+        sy = float(np.sqrt(rotation[0, 0] ** 2 + rotation[1, 0] ** 2))
+        singular = sy < 1e-9
+        if not singular:
+            roll = float(np.arctan2(rotation[2, 1], rotation[2, 2]))
+            pitch = float(np.arctan2(-rotation[2, 0], sy))
+            yaw = float(np.arctan2(rotation[1, 0], rotation[0, 0]))
+        else:
+            roll = float(np.arctan2(-rotation[1, 2], rotation[1, 1]))
+            pitch = float(np.arctan2(-rotation[2, 0], sy))
+            yaw = 0.0
+        return np.asarray([roll, pitch, yaw], dtype=np.float64)
 
-            raise TimeoutError(
-                f"Planning exceeded timeout of {self.timeout:.3f} seconds."
-            )
+    def _transform_summary(self, transform: np.ndarray | list[list[float]]) -> str:
+        """Format a transform as position and Euler angles for logging."""
 
-        signal.signal(signal.SIGALRM, _raise_timeout)
-        signal.setitimer(signal.ITIMER_REAL, self.timeout)
-        try:
-            yield
-        finally:
-            signal.setitimer(signal.ITIMER_REAL, 0.0)
-            signal.signal(signal.SIGALRM, previous_handler)
+        matrix = np.asarray(transform, dtype=np.float64)
+        position = np.array2string(matrix[:3, 3], precision=3, suppress_small=True)
+        euler = np.array2string(
+            self._rotation_matrix_to_euler_xyz(matrix[:3, :3]),
+            precision=3,
+            suppress_small=True,
+        )
+        return f"pos={position} euler_xyz={euler}"
 
     def _solve_program(self, program: CompositeInstruction) -> PlannerResponse | None:
         """Solve a Tesseract program and return the native planner response."""
@@ -151,15 +158,13 @@ class EnsemblPlanner:
         request.env = self.env
         request.profiles = self._profiles
         try:
-            with self._planning_timeout():
-                response = self._motion_planner.solve(request)
-        except TimeoutError as exc:
-            self._warn(str(exc))
-            return None
+            response = self._motion_planner.solve(request)
         except Exception as exc:
             self._warn(
-                f"TrajOpt planning raised {exc.__class__.__name__}: {exc}"
+                "Planning request failed before a planner response was produced: "
+                f"{exc.__class__.__name__}: {exc}"
             )
+            self._info(traceback.format_exc().rstrip())
             return None
 
         if not response.successful:
@@ -175,9 +180,16 @@ class EnsemblPlanner:
         """Plan from the current robot state to a target TCP transform."""
 
         target_transform = np.asarray(target_transform, dtype=np.float64)
+        current_joint_values = np.asarray(
+            self.robot.GetActiveDOFValues(),
+            dtype=np.float64,
+        ).reshape(-1)
+        current_transform = np.asarray(self.robot.ComputeFK(), dtype=np.float64)
         self._info(
             "PlanToTarget request "
-            f"target_position={np.array2string(target_transform[:3, 3], precision=3)}"
+            f"start_pose=({self._transform_summary(current_transform)}) "
+            f"target_pose=({self._transform_summary(target_transform)}) "
+            f"start_joints={self._joint_summary(current_joint_values)}"
         )
         return self._solve_program(self._make_target_program(target_transform))
 
@@ -190,9 +202,14 @@ class EnsemblPlanner:
         target_joint_values = np.asarray(target_joint_values, dtype=np.float64).reshape(
             -1
         )
+        current_joint_values = np.asarray(
+            self.robot.GetActiveDOFValues(),
+            dtype=np.float64,
+        ).reshape(-1)
         self._info(
             "PlanToConfiguration request "
-            f"target_joint_values={np.array2string(target_joint_values, precision=3)}"
+            f"start_joints={self._joint_summary(current_joint_values)} "
+            f"target_joints={self._joint_summary(target_joint_values)}"
         )
         return self._solve_program(
             self._make_configuration_program(target_joint_values)
@@ -255,8 +272,9 @@ class EnsemblPlanner:
         program.setManipulatorInfo(self._manipulator_info)
         self._info(
             "Building Cartesian program "
-            f"start_position={np.array2string(current_transform[:3, 3], precision=3)} "
-            f"target_position={np.array2string(target_transform[:3, 3], precision=3)} "
+            f"start_pose=({self._transform_summary(current_transform)}) "
+            f"target_pose=({self._transform_summary(target_transform)}) "
+            f"start_joints={self._joint_summary(current_joint_values)} "
             f"num_waypoints={self.num_waypoints}"
         )
         program.appendMoveInstruction(
@@ -333,8 +351,8 @@ class EnsemblPlanner:
         program.setManipulatorInfo(self._manipulator_info)
         self._info(
             "Building joint-space program "
-            f"start={np.array2string(current_joint_values, precision=3)} "
-            f"target={np.array2string(target_joint_values, precision=3)} "
+            f"start_joints={self._joint_summary(current_joint_values)} "
+            f"target_joints={self._joint_summary(target_joint_values)} "
             f"num_waypoints={self.num_waypoints}"
         )
 
