@@ -1,18 +1,23 @@
 #!/usr/bin/env python3
 
-import time
 import argparse
 from collections import defaultdict
 from functools import wraps
 from pathlib import Path
 import sys
-import tqdm
+import time
+
 import numpy as np
+import tqdm
 from transforms3d.euler import euler2mat, mat2euler
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from aic_model.robot import EnsemblRobot
+from tesseract_robotics.tesseract_command_language import (
+    InstructionPoly_as_MoveInstructionPoly,
+    WaypointPoly_as_StateWaypointPoly,
+)
 from tesseract_robotics.tesseract_common import Isometry3d
 
 
@@ -80,8 +85,8 @@ def trace_robot_methods(robot, method_names):
 
 
 def print_trace_summary(stats):
-    print("\nKinematics trace summary")
-    print("------------------------")
+    print("\nRobot trace summary")
+    print("-------------------")
     for method_name, method_stats in stats.items():
         calls = method_stats["calls"]
         total_seconds = method_stats["total_seconds"]
@@ -94,9 +99,54 @@ def print_trace_summary(stats):
         )
 
 
+def sample_collision_free_config(robot, rng, limits, max_attempts=1000):
+    for _ in range(max_attempts):
+        config = rng.uniform(limits[0], limits[1])
+        robot.SetActiveDOFValues(config)
+        if not robot.CheckCollision():
+            return config
+    raise RuntimeError(
+        f"Unable to find collision-free sample after {max_attempts} attempts."
+    )
+
+
+def extract_state_waypoints(program):
+    state_waypoints = []
+    for instruction in program.flatten():
+        move = InstructionPoly_as_MoveInstructionPoly(instruction)
+        waypoint = move.getWaypoint()
+        if not waypoint.isStateWaypoint():
+            continue
+        state_waypoint = WaypointPoly_as_StateWaypointPoly(waypoint)
+        state_waypoints.append(
+            np.asarray(
+                state_waypoint.getPosition(),
+                dtype=np.float64,
+            ).reshape(-1)
+        )
+    return state_waypoints
+
+
+def max_joint_step(path):
+    if len(path) < 2:
+        return 0.0
+    return float(
+        max(
+            np.max(np.abs(next_waypoint - waypoint))
+            for waypoint, next_waypoint in zip(path[:-1], path[1:])
+        )
+    )
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-n", "--num-samples", type=int, default=20000)
+    parser.add_argument(
+        "--num-planner-samples",
+        type=int,
+        default=250,
+        help="Number of collision-free start/goal planning samples to validate.",
+    )
     parser.add_argument("--check-collision", action="store_true")
     parser.add_argument("--seed", type=int, default=None)
     args = parser.parse_args()
@@ -104,7 +154,13 @@ def main():
     rng = np.random.default_rng(args.seed)
     robot = EnsemblRobot()
     trace_stats = trace_robot_methods(
-        robot, ("ComputeFK", "ComputeIK", "CheckCollision")
+        robot,
+        (
+            "ComputeFK",
+            "ComputeIK",
+            "CheckCollision",
+            "PlanToTarget",
+        ),
     )
     limits = robot.GetActiveDOFLimits()
 
@@ -113,7 +169,7 @@ def main():
     bad_solutions = []
     position_tolerance = 1e-4
     orientation_tolerance = 1e-3
-    for sample_index in tqdm.tqdm(range(args.num_samples)):
+    for sample_index in tqdm.tqdm(range(args.num_samples), desc="IK/FK"):
         config = rng.uniform(limits[0], limits[1])
         robot.SetActiveDOFValues(config)
 
@@ -166,6 +222,76 @@ def main():
     print(f"solutions checked: {checked_solutions}")
     print(f"bad FK matches:    {len(bad_solutions)}")
 
+    planner_failures = []
+    planner_path_failures = []
+    planner_goal_failures = []
+    planner_collision_failures = []
+    planner_goal_position_tolerance = 1e-4
+    planner_goal_orientation_tolerance = 1e-3
+    planner_step_limit = np.pi
+    for sample_index in tqdm.tqdm(
+        range(args.num_planner_samples),
+        desc="Motion planning",
+    ):
+        start_config = sample_collision_free_config(robot, rng, limits)
+        goal_config = sample_collision_free_config(robot, rng, limits)
+
+        robot.SetActiveDOFValues(goal_config)
+        goal_transform = robot.ComputeFK()
+        robot.SetActiveDOFValues(start_config)
+        try:
+            plan = robot.PlanToTarget(goal_transform)
+        except Exception as exc:
+            planner_failures.append((sample_index, str(exc)))
+            continue
+
+        state_waypoints = extract_state_waypoints(plan.results)
+        if len(state_waypoints) < 2:
+            planner_path_failures.append((sample_index, len(state_waypoints)))
+            continue
+
+        if max_joint_step(state_waypoints) > planner_step_limit:
+            planner_path_failures.append((sample_index, len(state_waypoints)))
+            continue
+
+        if args.check_collision:
+            in_collision = False
+            for waypoint in state_waypoints:
+                robot.SetActiveDOFValues(waypoint)
+                if robot.CheckCollision():
+                    planner_collision_failures.append(sample_index)
+                    in_collision = True
+                    break
+            if in_collision:
+                continue
+
+        final_waypoint = state_waypoints[-1]
+        robot.SetActiveDOFValues(final_waypoint)
+        final_transform = robot.ComputeFK()
+        position_error = float(
+            np.linalg.norm(final_transform[:3, 3] - goal_transform[:3, 3])
+        )
+        orientation_error = rotation_error_radians(final_transform, goal_transform)
+        if (
+            position_error > planner_goal_position_tolerance
+            or orientation_error > planner_goal_orientation_tolerance
+        ):
+            planner_goal_failures.append(
+                (
+                    sample_index,
+                    position_error,
+                    orientation_error,
+                )
+            )
+
+    print("\nMotion planner validation")
+    print("-------------------------")
+    print(f"samples:              {args.num_planner_samples}")
+    print(f"planner failures:     {len(planner_failures)}")
+    print(f"path shape failures:  {len(planner_path_failures)}")
+    print(f"collision failures:   {len(planner_collision_failures)}")
+    print(f"goal mismatch count:  {len(planner_goal_failures)}")
+
     print_trace_summary(trace_stats)
 
     if bad_solutions:
@@ -180,6 +306,37 @@ def main():
                 f"  sample={sample_index} solution={solution_index} "
                 f"pos_err={position_error:.3e} rot_err={orientation_error:.3e}"
             )
+
+    if planner_failures:
+        print("\nFirst planner failures:")
+        for sample_index, message in planner_failures[:20]:
+            print(f"  sample={sample_index} error={message}")
+
+    if planner_path_failures:
+        print("\nFirst planner path failures:")
+        for sample_index, num_waypoints in planner_path_failures[:20]:
+            print(f"  sample={sample_index} state_waypoints={num_waypoints}")
+
+    if planner_collision_failures:
+        print("\nFirst planner collision failures:")
+        for sample_index in planner_collision_failures[:20]:
+            print(f"  sample={sample_index}")
+
+    if planner_goal_failures:
+        print("\nFirst planner goal mismatches:")
+        for sample_index, position_error, orientation_error in planner_goal_failures[:20]:
+            print(
+                f"  sample={sample_index} "
+                f"pos_err={position_error:.3e} rot_err={orientation_error:.3e}"
+            )
+
+    if (
+        bad_solutions
+        or planner_failures
+        or planner_path_failures
+        or planner_collision_failures
+        or planner_goal_failures
+    ):
         raise SystemExit(1)
 
 

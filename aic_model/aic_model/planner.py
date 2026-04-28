@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-
 import numpy as np
 
 os.environ.setdefault("TRAJOPT_LOG_THRESH", "ERROR")
@@ -78,11 +77,7 @@ class EnsemblPlanner:
             TrajOptDefaultCompositeProfile(),
         )
 
-    def PlanToTarget(
-        self,
-        target_transform: np.ndarray | list[list[float]],
-    ) -> PlannerResponse:
-        program = self._make_target_program(target_transform)
+    def _solve_program(self, program: CompositeInstruction) -> PlannerResponse:
         request = PlannerRequest()
         request.instructions = program
         request.env = self.env
@@ -91,6 +86,12 @@ class EnsemblPlanner:
         if not response.successful:
             raise RuntimeError(f"TrajOpt failed: {response.message}")
         return response
+
+    def PlanToTarget(
+        self,
+        target_transform: np.ndarray | list[list[float]],
+    ) -> PlannerResponse:
+        return self._solve_program(self._make_target_program(target_transform))
 
     def Retime(
         self,
@@ -159,9 +160,8 @@ class EnsemblPlanner:
         for alpha in alphas:
             waypoint_transform = target_transform.copy()
             waypoint_transform[:3, 3] = (
-                (1.0 - alpha) * current_position
-                + alpha * target_transform[:3, 3]
-            )
+                1.0 - alpha
+            ) * current_position + alpha * target_transform[:3, 3]
             isometry = Isometry3d()
             isometry.setMatrix(waypoint_transform)
             program.appendMoveInstruction(
