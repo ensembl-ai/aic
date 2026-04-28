@@ -20,6 +20,7 @@ import os
 import traceback
 import warnings
 import numpy as np
+from transforms3d.euler import mat2euler
 
 os.environ.setdefault("TRAJOPT_LOG_THRESH", "ERROR")
 
@@ -112,39 +113,6 @@ class EnsemblPlanner:
             self._log_warn(f"[planner] {message}")
         warnings.warn(message, RuntimeWarning, stacklevel=2)
 
-    def _joint_summary(self, joint_values: np.ndarray | list[float]) -> str:
-        """Format joint values for compact planner logging."""
-
-        values = np.asarray(joint_values, dtype=np.float64).reshape(-1)
-        return np.array2string(values, precision=3, suppress_small=True)
-
-    def _rotation_matrix_to_euler_xyz(self, rotation: np.ndarray) -> np.ndarray:
-        """Convert a rotation matrix to XYZ Euler angles in radians."""
-
-        sy = float(np.sqrt(rotation[0, 0] ** 2 + rotation[1, 0] ** 2))
-        singular = sy < 1e-9
-        if not singular:
-            roll = float(np.arctan2(rotation[2, 1], rotation[2, 2]))
-            pitch = float(np.arctan2(-rotation[2, 0], sy))
-            yaw = float(np.arctan2(rotation[1, 0], rotation[0, 0]))
-        else:
-            roll = float(np.arctan2(-rotation[1, 2], rotation[1, 1]))
-            pitch = float(np.arctan2(-rotation[2, 0], sy))
-            yaw = 0.0
-        return np.asarray([roll, pitch, yaw], dtype=np.float64)
-
-    def _transform_summary(self, transform: np.ndarray | list[list[float]]) -> str:
-        """Format a transform as position and Euler angles for logging."""
-
-        matrix = np.asarray(transform, dtype=np.float64)
-        position = np.array2string(matrix[:3, 3], precision=3, suppress_small=True)
-        euler = np.array2string(
-            self._rotation_matrix_to_euler_xyz(matrix[:3, :3]),
-            precision=3,
-            suppress_small=True,
-        )
-        return f"pos={position} euler_xyz={euler}"
-
     def _solve_program(self, program: CompositeInstruction) -> PlannerResponse | None:
         """Solve a Tesseract program and return the native planner response."""
 
@@ -187,9 +155,11 @@ class EnsemblPlanner:
         current_transform = np.asarray(self.robot.ComputeFK(), dtype=np.float64)
         self._info(
             "PlanToTarget request "
-            f"start_pose=({self._transform_summary(current_transform)}) "
-            f"target_pose=({self._transform_summary(target_transform)}) "
-            f"start_joints={self._joint_summary(current_joint_values)}"
+            f"start_pose=(pos={np.array2string(current_transform[:3, 3], precision=3, suppress_small=True)} "
+            f"euler_xyz={np.array2string(np.asarray(mat2euler(current_transform[:3, :3]), dtype=np.float64), precision=3, suppress_small=True)}) "
+            f"target_pose=(pos={np.array2string(target_transform[:3, 3], precision=3, suppress_small=True)} "
+            f"euler_xyz={np.array2string(np.asarray(mat2euler(target_transform[:3, :3]), dtype=np.float64), precision=3, suppress_small=True)}) "
+            f"start_joints={np.array2string(current_joint_values, precision=3, suppress_small=True)}"
         )
         return self._solve_program(self._make_target_program(target_transform))
 
@@ -208,8 +178,8 @@ class EnsemblPlanner:
         ).reshape(-1)
         self._info(
             "PlanToConfiguration request "
-            f"start_joints={self._joint_summary(current_joint_values)} "
-            f"target_joints={self._joint_summary(target_joint_values)}"
+            f"start_joints={np.array2string(current_joint_values, precision=3, suppress_small=True)} "
+            f"target_joints={np.array2string(target_joint_values, precision=3, suppress_small=True)}"
         )
         return self._solve_program(
             self._make_configuration_program(target_joint_values)
@@ -272,9 +242,11 @@ class EnsemblPlanner:
         program.setManipulatorInfo(self._manipulator_info)
         self._info(
             "Building Cartesian program "
-            f"start_pose=({self._transform_summary(current_transform)}) "
-            f"target_pose=({self._transform_summary(target_transform)}) "
-            f"start_joints={self._joint_summary(current_joint_values)} "
+            f"start_pose=(pos={np.array2string(current_transform[:3, 3], precision=3, suppress_small=True)} "
+            f"euler_xyz={np.array2string(np.asarray(mat2euler(current_transform[:3, :3]), dtype=np.float64), precision=3, suppress_small=True)}) "
+            f"target_pose=(pos={np.array2string(target_transform[:3, 3], precision=3, suppress_small=True)} "
+            f"euler_xyz={np.array2string(np.asarray(mat2euler(target_transform[:3, :3]), dtype=np.float64), precision=3, suppress_small=True)}) "
+            f"start_joints={np.array2string(current_joint_values, precision=3, suppress_small=True)} "
             f"num_waypoints={self.num_waypoints}"
         )
         program.appendMoveInstruction(
@@ -351,8 +323,8 @@ class EnsemblPlanner:
         program.setManipulatorInfo(self._manipulator_info)
         self._info(
             "Building joint-space program "
-            f"start_joints={self._joint_summary(current_joint_values)} "
-            f"target_joints={self._joint_summary(target_joint_values)} "
+            f"start_joints={np.array2string(current_joint_values, precision=3, suppress_small=True)} "
+            f"target_joints={np.array2string(target_joint_values, precision=3, suppress_small=True)} "
             f"num_waypoints={self.num_waypoints}"
         )
 
