@@ -53,7 +53,9 @@ TRAJOPT_NAMESPACE = "TrajOptMotionPlannerTask"
 
 
 class EnsemblPlanner:
-    """Build and solve native Tesseract motion-planning programs."""
+    """
+    Build and solve native Tesseract motion-planning programs.
+    """
 
     def __init__(
         self,
@@ -61,7 +63,9 @@ class EnsemblPlanner:
         num_waypoints: int = 5,
         timeout: float = 10.0,
     ):
-        """Initialize planner state for a specific robot and manipulator."""
+        """
+        Initialize planner state for a specific robot and manipulator.
+        """
 
         self.robot = robot
         self.env = robot.env
@@ -101,20 +105,26 @@ class EnsemblPlanner:
             )
 
     def _info(self, message: str) -> None:
-        """Emit an informational planner log when a callback is available."""
+        """
+        Emit an informational planner log when a callback is available.
+        """
 
         if self._log_info is not None:
             self._log_info(f"[planner] {message}")
 
     def _warn(self, message: str) -> None:
-        """Emit a warning planner log and mirror it to Python warnings."""
+        """
+        Emit a warning planner log and mirror it to Python warnings.
+        """
 
         if self._log_warn is not None:
             self._log_warn(f"[planner] {message}")
         warnings.warn(message, RuntimeWarning, stacklevel=2)
 
     def _solve_program(self, program: CompositeInstruction) -> PlannerResponse | None:
-        """Solve a Tesseract program and return the native planner response."""
+        """
+        Solve a Tesseract program and return the native planner response.
+        """
 
         self._info(
             "Submitting planning request "
@@ -145,7 +155,9 @@ class EnsemblPlanner:
         self,
         target_transform: np.ndarray | list[list[float]],
     ) -> PlannerResponse | None:
-        """Plan from the current robot state to a target TCP transform."""
+        """
+        Plan from the current robot state to a target TCP transform.
+        """
 
         target_transform = np.asarray(target_transform, dtype=np.float64)
         current_joint_values = np.asarray(
@@ -167,7 +179,9 @@ class EnsemblPlanner:
         self,
         target_joint_values: np.ndarray | list[float],
     ) -> PlannerResponse | None:
-        """Plan from the current robot state to a target joint configuration."""
+        """
+        Plan from the current robot state to a target joint configuration.
+        """
 
         target_joint_values = np.asarray(target_joint_values, dtype=np.float64).reshape(
             -1
@@ -189,7 +203,9 @@ class EnsemblPlanner:
         self,
         program: CompositeInstruction,
     ) -> CompositeInstruction | None:
-        """Apply Tesseract time-parameterization to an existing program."""
+        """
+        Apply Tesseract time-parameterization to an existing program.
+        """
 
         self._info(
             "Retiming trajectory "
@@ -214,7 +230,9 @@ class EnsemblPlanner:
         self,
         target_transform: np.ndarray | list[list[float]],
     ) -> CompositeInstruction:
-        """Create a Cartesian planning program from the current state to a pose."""
+        """
+        Create a Cartesian planning program from the current state to a pose.
+        """
 
         current_joint_values = np.asarray(
             self.robot.GetActiveDOFValues(),
@@ -295,7 +313,9 @@ class EnsemblPlanner:
         self,
         target_joint_values: np.ndarray | list[float],
     ) -> CompositeInstruction:
-        """Create a joint-space planning program from the current state."""
+        """
+        Create a joint-space planning program from the current state.
+        """
 
         current_joint_values = np.asarray(
             self.robot.GetActiveDOFValues(),

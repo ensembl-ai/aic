@@ -29,7 +29,9 @@ from tesseract_robotics.tesseract_command_language import (
 
 
 class EnsemblExecutor:
-    """Convert a retimed Tesseract trajectory into controller joint commands."""
+    """
+    Convert a retimed Tesseract trajectory into controller joint commands.
+    """
 
     def __init__(
         self,
@@ -38,7 +40,9 @@ class EnsemblExecutor:
         log_info: Callable[[str], None] | None = None,
         log_warn: Callable[[str], None] | None = None,
     ):
-        """Initialize the executor with controller and timing callbacks."""
+        """
+        Initialize the executor with controller and timing callbacks.
+        """
 
         self._execute_joint_motion = execute_joint_motion
         self._sleep_for = sleep_for
@@ -46,20 +50,26 @@ class EnsemblExecutor:
         self._log_warn = log_warn
 
     def _info(self, message: str) -> None:
-        """Emit an informational executor log when a callback is available."""
+        """
+        Emit an informational executor log when a callback is available.
+        """
 
         if self._log_info is not None:
             self._log_info(f"[executor] {message}")
 
     def _warn(self, message: str) -> None:
-        """Emit a warning executor log and mirror it to Python warnings."""
+        """
+        Emit a warning executor log and mirror it to Python warnings.
+        """
 
         if self._log_warn is not None:
             self._log_warn(f"[executor] {message}")
         warnings.warn(message, RuntimeWarning, stacklevel=2)
 
     def _joint_summary(self, joint_values: np.ndarray | list[float]) -> str:
-        """Format joint values for compact executor logging."""
+        """
+        Format joint values for compact executor logging.
+        """
 
         values = np.asarray(joint_values, dtype=np.float64).reshape(-1)
         return np.array2string(values, precision=3, suppress_small=True)
@@ -70,7 +80,9 @@ class EnsemblExecutor:
         stiffness: list[float] | None = None,
         damping: list[float] | None = None,
     ) -> bool:
-        """Stream a retimed state-waypoint trajectory to the joint controller."""
+        """
+        Stream a retimed state-waypoint trajectory to the joint controller.
+        """
 
         if self._execute_joint_motion is None:
             self._warn("ExecuteTrajectory requires an execute_joint_motion callback.")

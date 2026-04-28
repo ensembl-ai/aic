@@ -60,11 +60,15 @@ logger.setLevel(logging.INFO)
 
 
 def with_latest_state(method):
-    """Refresh the environment from the latest observation before a call."""
+    """
+    Refresh the environment from the latest observation before a call.
+    """
 
     @wraps(method)
     def wrapper(self, *args, **kwargs):
-        """Refresh state and then delegate to the wrapped method."""
+        """
+        Refresh state and then delegate to the wrapped method.
+        """
 
         self._sync_latest_state()
         return method(self, *args, **kwargs)
@@ -73,13 +77,17 @@ def with_latest_state(method):
 
 
 def with_resolved_frames(method):
-    """Resolve and validate manipulator frames before a kinematics call."""
+    """
+    Resolve and validate manipulator frames before a kinematics call.
+    """
 
     signature = inspect.signature(method)
 
     @wraps(method)
     def wrapper(self, *args, **kwargs):
-        """Resolve frame defaults and validate them for the wrapped call."""
+        """
+        Resolve frame defaults and validate them for the wrapped call.
+        """
 
         bound = signature.bind_partial(self, *args, **kwargs)
         base_frame = bound.arguments.get("base_frame") or self.manipulator_base_frame
@@ -102,7 +110,9 @@ def with_resolved_frames(method):
 
 
 class EnsemblRobot:
-    """Robot facade around Tesseract environment, kinematics, and planning."""
+    """
+    Robot facade around Tesseract environment, kinematics, and planning.
+    """
 
     def __init__(
         self,
@@ -112,7 +122,9 @@ class EnsemblRobot:
         log_info: Callable[[str], None] | None = None,
         log_warn: Callable[[str], None] | None = None,
     ):
-        """Initialize the robot model, planner, and optional trajectory executor."""
+        """
+        Initialize the robot model, planner, and optional trajectory executor.
+        """
 
         try:
             self._get_observation = get_observation
@@ -227,13 +239,17 @@ class EnsemblRobot:
             raise RuntimeError("Failed to initialize EnsemblRobot.") from exc
 
     def _load_kinematics_config(self) -> dict:
-        """Load the robot kinematics configuration YAML."""
+        """
+        Load the robot kinematics configuration YAML.
+        """
 
         with open(self.kinematics_config_path, encoding="utf-8") as f:
             return yaml.safe_load(f)
 
     def _read_manipulator_config(self) -> tuple[str, str, str]:
-        """Read manipulator, base-frame, and tip-frame names from config."""
+        """
+        Read manipulator, base-frame, and tip-frame names from config.
+        """
 
         fwd_groups = self.kinematics_config["kinematic_plugins"]["fwd_kin_plugins"]
         group_name = next(iter(fwd_groups))
@@ -243,7 +259,9 @@ class EnsemblRobot:
         return group_name, plugin_config["base_link"], plugin_config["tip_link"]
 
     def _sync_latest_state(self) -> None:
-        """Update the environment joint state from the observation callback."""
+        """
+        Update the environment joint state from the observation callback.
+        """
 
         if self.simulated:
             return
@@ -329,7 +347,9 @@ class EnsemblRobot:
         self,
         transform: np.ndarray | list[list[float]],
     ) -> PlannerResponse | None:
-        """Plan from the current manipulator state to a target TCP pose."""
+        """
+        Plan from the current manipulator state to a target TCP pose.
+        """
 
         return self._planner.PlanToTarget(target_transform=transform)
 
@@ -338,7 +358,9 @@ class EnsemblRobot:
         self,
         joint_values: np.ndarray | list[float],
     ) -> PlannerResponse | None:
-        """Plan from the current state to a target manipulator joint state."""
+        """
+        Plan from the current state to a target manipulator joint state.
+        """
 
         return self._planner.PlanToConfiguration(target_joint_values=joint_values)
 
@@ -346,7 +368,9 @@ class EnsemblRobot:
         self,
         program: CompositeInstruction,
     ) -> CompositeInstruction | None:
-        """Time-parameterize a Tesseract trajectory if possible."""
+        """
+        Time-parameterize a Tesseract trajectory if possible.
+        """
 
         return self._planner.Retime(program)
 
@@ -356,7 +380,9 @@ class EnsemblRobot:
         stiffness: list[float] | None = None,
         damping: list[float] | None = None,
     ) -> bool:
-        """Execute a retimed Tesseract trajectory through the joint controller."""
+        """
+        Execute a retimed Tesseract trajectory through the joint controller.
+        """
 
         return self._executor.ExecuteTrajectory(
             trajectory=trajectory,
@@ -393,7 +419,9 @@ class EnsemblRobot:
         return self.env
 
     def _update_collision_manager_state(self) -> None:
-        """Push the current environment state into the contact manager."""
+        """
+        Push the current environment state into the contact manager.
+        """
 
         state_solver = self.env.getStateSolver()
         state_solver.setState(
