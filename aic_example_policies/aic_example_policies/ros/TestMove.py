@@ -1,6 +1,6 @@
 import numpy as np
+from typing import Any, cast
 
-from aic_control_interfaces.msg import JointMotionUpdate, TrajectoryGenerationMode
 from aic_model.policy import (
     GetObservationCallback,
     MoveRobotCallback,
@@ -10,10 +10,6 @@ from aic_model.policy import (
 from aic_model.robot import EnsemblRobot
 from aic_task_interfaces.msg import Task
 from rclpy.duration import Duration
-from tesseract_robotics.tesseract_command_language import (
-    InstructionPoly_as_MoveInstructionPoly,
-    WaypointPoly_as_StateWaypointPoly,
-)
 
 
 class TestMove(Policy):
@@ -29,88 +25,52 @@ class TestMove(Policy):
         send_feedback: SendFeedbackCallback,
     ):
         self.get_logger().info(f"TestMove.insert_cable() enter. Task: {task}")
-        send_feedback("Testing waypoint joint motion with EnsemblRobot")
+        send_feedback("Sampling workspace targets and executing planned trajectories")
 
-        robot = EnsemblRobot(get_observation)
-
-        current_transform = robot.ComputeFK(robot.manipulator_tip_frame)
-        target_position = np.array(
-            [-0.63381193, 0.2899951, 0.05814897],
-            dtype=np.float64,
-        )
-        target_transform = current_transform.copy()
-        target_transform[:3, 3] = target_position
-
-        plan = robot.PlanToTarget(target_transform)
-        if plan is None:
-            self.get_logger().error("Planning failed: PlanToTarget returned None")
-            return False
-
-        trajectory = robot.Retime(plan.results)
-        if trajectory is None:
-            self.get_logger().error("Planning failed: Retime returned None")
-            return False
-
-        self.get_logger().info("Tesseract trajectory planned and retimed")
-
-        joint_motion_update = JointMotionUpdate(
-            target_stiffness=[150.0, 150.0, 150.0, 80.0, 80.0, 80.0],
-            target_damping=[90.0, 90.0, 90.0, 45.0, 45.0, 45.0],
-            trajectory_generation_mode=TrajectoryGenerationMode(
-                mode=TrajectoryGenerationMode.MODE_POSITION
-            ),
+        robot = cast(Any, EnsemblRobot)(
+            get_observation=get_observation,
+            execute_joint_motion=lambda update: move_robot(joint_motion_update=update),
+            sleep_for=self.sleep_for,
+            log_info=self.get_logger().info,
         )
 
-        previous_time = 0.0
-        waypoint_index = 0
-        for instruction in trajectory.flatten():
-            move = InstructionPoly_as_MoveInstructionPoly(instruction)
-            waypoint = move.getWaypoint()
-            if not waypoint.isStateWaypoint():
+        rng = np.random.default_rng()
+        workspace_low = np.array([-0.6, 0.1, 0.2], dtype=np.float64)
+        workspace_high = np.array([0.6, 0.4, 0.5], dtype=np.float64)
+
+        start_time = self.time_now()
+        timeout = Duration(seconds=10.0)
+        executed_trajectories = 0
+
+        while (self.time_now() - start_time) < timeout:
+            current_transform = robot.ComputeFK(robot.manipulator_tip_frame)
+            target_position = rng.uniform(workspace_low, workspace_high)
+            target_transform = current_transform.copy()
+            target_transform[:3, 3] = target_position
+
+            self.get_logger().info(
+                "Sampled target position "
+                f"{np.array2string(target_position, precision=3)}"
+            )
+
+            plan = robot.PlanToTarget(target_transform)
+            if plan is None:
+                self.get_logger().info("Skipping sample because planning failed")
                 continue
 
-            state_waypoint = WaypointPoly_as_StateWaypointPoly(waypoint)
-            waypoint_time = float(state_waypoint.getTime())
-            if waypoint_index == 0:
-                previous_time = waypoint_time
-                waypoint_index += 1
+            trajectory = robot.Retime(plan.results)
+            if trajectory is None:
+                self.get_logger().info("Skipping sample because retiming failed")
                 continue
 
-            positions = np.asarray(
-                state_waypoint.getPosition(),
-                dtype=np.float64,
-            ).reshape(-1)
-            velocities = np.asarray(
-                state_waypoint.getVelocity(),
-                dtype=np.float64,
-            ).reshape(-1)
-            accelerations = np.asarray(
-                state_waypoint.getAcceleration(),
-                dtype=np.float64,
-            ).reshape(-1)
+            if not robot.ExecuteTrajectory(trajectory):
+                self.get_logger().info("Skipping sample because execution failed")
+                continue
 
-            joint_motion_update.target_state.positions = positions.tolist()
-            joint_motion_update.target_state.velocities = (
-                velocities.tolist() if velocities.size == positions.size else []
+            executed_trajectories += 1
+            send_feedback(
+                f"Executed sampled trajectory {executed_trajectories}"
             )
-            joint_motion_update.target_state.accelerations = (
-                accelerations.tolist()
-                if accelerations.size == positions.size
-                else []
-            )
-            joint_motion_update.target_state.time_from_start = Duration(
-                seconds=waypoint_time,
-            ).to_msg()
-            self.get_logger().info(f"Commanding waypoint {waypoint_index}")
-            move_robot(joint_motion_update=joint_motion_update)
-            self.sleep_for(max(waypoint_time - previous_time, 0.0))
-
-            previous_time = waypoint_time
-            waypoint_index += 1
-
-        if waypoint_index < 2:
-            self.get_logger().error("Planned trajectory did not contain waypoints")
-            return False
 
         self.get_logger().info("TestMove.insert_cable() exiting...")
-        return True
+        return executed_trajectories > 0

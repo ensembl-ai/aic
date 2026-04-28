@@ -50,7 +50,9 @@ import xacro
 
 # Internal
 
+from aic_control_interfaces.msg import JointMotionUpdate
 from aic_model_interfaces.msg import Observation
+from aic_model.executor import EnsemblExecutor
 from aic_model.planner import EnsemblPlanner
 
 logger = logging.getLogger(__name__)
@@ -102,8 +104,14 @@ def with_resolved_frames(method):
 class EnsemblRobot:
     """Robot facade around Tesseract environment, kinematics, and planning."""
 
-    def __init__(self, get_observation: Callable[[], Observation] | None = None):
-        """Initialize the robot model and optional live-observation callback."""
+    def __init__(
+        self,
+        get_observation: Callable[[], Observation] | None = None,
+        execute_joint_motion: Callable[[JointMotionUpdate], None] | None = None,
+        sleep_for: Callable[[float], None] | None = None,
+        log_info: Callable[[str], None] | None = None,
+    ):
+        """Initialize the robot model, planner, and optional trajectory executor."""
 
         try:
             self._get_observation = get_observation
@@ -199,6 +207,11 @@ class EnsemblRobot:
             self._report_contact_request.calculate_penetration = True
             self._report_contact_request.contact_limit = self.report_contact_limit
             self._planner = EnsemblPlanner(self)
+            self._executor = EnsemblExecutor(
+                execute_joint_motion=execute_joint_motion,
+                sleep_for=sleep_for,
+                log_info=log_info,
+            )
             if self.simulated:
                 self.env.setState(
                     self._active_joint_names,
@@ -332,6 +345,20 @@ class EnsemblRobot:
         """Time-parameterize a Tesseract trajectory if possible."""
 
         return self._planner.Retime(program)
+
+    def ExecuteTrajectory(
+        self,
+        trajectory: CompositeInstruction,
+        stiffness: list[float] | None = None,
+        damping: list[float] | None = None,
+    ) -> bool:
+        """Execute a retimed Tesseract trajectory through the joint controller."""
+
+        return self._executor.ExecuteTrajectory(
+            trajectory=trajectory,
+            stiffness=stiffness,
+            damping=damping,
+        )
 
     def SetActiveDOFValues(self, joint_values: np.ndarray | list[float]) -> None:
         """

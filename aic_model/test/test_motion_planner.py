@@ -175,7 +175,7 @@ def main():
     parser.add_argument(
         "--planner-max-delta",
         type=float,
-        default=0.2,
+        default=0.1,
         help="Maximum per-joint delta in radians for sampled planning goals.",
     )
     parser.add_argument("--check-collision", action="store_true")
@@ -376,7 +376,9 @@ def main():
 
     if planner_goal_failures:
         print("\nFirst planner goal mismatches:")
-        for sample_index, position_error, orientation_error in planner_goal_failures[:20]:
+        for sample_index, position_error, orientation_error in planner_goal_failures[
+            :20
+        ]:
             if orientation_error is None:
                 print(f"  sample={sample_index} joint_err={position_error:.3e}")
             else:
