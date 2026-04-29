@@ -91,6 +91,9 @@ class EnsemblPlanner:
         composite_profile = TrajOptDefaultCompositeProfile()
         composite_profile.smooth_accelerations = False
         composite_profile.smooth_jerks = False
+        composite_profile.collision_cost_config.safety_margin = 0.005
+        composite_profile.collision_constraint_config.safety_margin = 0.0
+        composite_profile.collision_constraint_config.safety_margin_buffer = 0.0
         self._profiles.addProfile(
             TRAJOPT_NAMESPACE,
             DEFAULT_PROFILE,
