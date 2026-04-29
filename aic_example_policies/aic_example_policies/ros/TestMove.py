@@ -106,7 +106,6 @@ class TestMove(Policy):
         robot = cast(Any, EnsemblRobot)(
             get_observation=get_observation,
             execute_joint_motion=lambda update: move_robot(joint_motion_update=update),
-            sleep_for=self.sleep_for,
         )
 
         rng = np.random.default_rng()

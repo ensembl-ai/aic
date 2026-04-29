@@ -38,14 +38,12 @@ class EnsemblExecutor:
     def __init__(
         self,
         execute_joint_motion: Callable[[JointMotionUpdate], None] | None = None,
-        sleep_for: Callable[[float], None] | None = None,
     ):
         """
         Initialize the executor with controller and timing callbacks.
         """
 
         self._execute_joint_motion = execute_joint_motion
-        self._sleep_for = sleep_for
 
     def ExecuteTrajectory(
         self,
@@ -77,7 +75,6 @@ class EnsemblExecutor:
             ),
         )
 
-        previous_time = 0.0
         waypoint_index = 0
         for instruction in flattened_instructions:
             move = InstructionPoly_as_MoveInstructionPoly(instruction)
@@ -88,7 +85,6 @@ class EnsemblExecutor:
             state_waypoint = WaypointPoly_as_StateWaypointPoly(waypoint)
             waypoint_time = float(state_waypoint.getTime())
             if waypoint_index == 0:
-                previous_time = waypoint_time
                 waypoint_index += 1
                 continue
 
@@ -120,10 +116,6 @@ class EnsemblExecutor:
 
             self._execute_joint_motion(joint_motion_update)
 
-            if self._sleep_for is not None:
-                self._sleep_for(max(waypoint_time - previous_time, 0.0))
-
-            previous_time = waypoint_time
             waypoint_index += 1
 
         if waypoint_index < 2:

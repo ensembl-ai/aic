@@ -116,7 +116,6 @@ class EnsemblRobot:
         self,
         get_observation: Callable[[], Observation] | None = None,
         execute_joint_motion: Callable[[JointMotionUpdate], None] | None = None,
-        sleep_for: Callable[[float], None] | None = None,
     ):
         """
         Initialize the robot model, planner, and optional trajectory executor.
@@ -218,7 +217,6 @@ class EnsemblRobot:
             self._planner = EnsemblPlanner(self)
             self._executor = EnsemblExecutor(
                 execute_joint_motion=execute_joint_motion,
-                sleep_for=sleep_for,
             )
             if self.simulated:
                 self.env.setState(
