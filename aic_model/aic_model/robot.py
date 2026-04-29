@@ -20,7 +20,6 @@ import inspect
 import logging
 import os
 from typing import Any, cast
-import warnings
 
 import numpy as np
 import yaml
@@ -56,7 +55,6 @@ from aic_model.executor import EnsemblExecutor
 from aic_model.planner import EnsemblPlanner
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
 
 
 def with_latest_state(method):
@@ -99,7 +97,7 @@ def with_resolved_frames(method):
         ):
             raise ValueError(
                 f"Target frame '{target_frame}' or Base frame '{base_frame}' is not "
-                "on the configured manipulator chain."
+                f"on the configured manipulator chain."
             )
 
         bound.arguments["base_frame"] = base_frame
@@ -119,8 +117,6 @@ class EnsemblRobot:
         get_observation: Callable[[], Observation] | None = None,
         execute_joint_motion: Callable[[JointMotionUpdate], None] | None = None,
         sleep_for: Callable[[float], None] | None = None,
-        log_info: Callable[[str], None] | None = None,
-        log_warn: Callable[[str], None] | None = None,
     ):
         """
         Initialize the robot model, planner, and optional trajectory executor.
@@ -129,8 +125,6 @@ class EnsemblRobot:
         try:
             self._get_observation = get_observation
             self.simulated = get_observation is None
-            self._log_info = log_info
-            self._log_warn = log_warn
 
             self.aic_description_share = get_package_share_directory("aic_description")
             self.urdf_xacro_path = f"{self.aic_description_share}/urdf/ur_gz.urdf.xacro"
@@ -225,8 +219,6 @@ class EnsemblRobot:
             self._executor = EnsemblExecutor(
                 execute_joint_motion=execute_joint_motion,
                 sleep_for=sleep_for,
-                log_info=log_info,
-                log_warn=log_warn,
             )
             if self.simulated:
                 self.env.setState(
@@ -281,7 +273,7 @@ class EnsemblRobot:
         ]
         if missing_joint_names:
             raise RuntimeError(
-                "Observation is missing manipulator joints required by Tesseract: "
+                f"Observation is missing manipulator joints required by Tesseract: "
                 f"{missing_joint_names}."
             )
 
@@ -305,10 +297,9 @@ class EnsemblRobot:
             doc = cast(Any, xacro.process_file(xacro_path, mappings={"name": "ur"}))
         except Exception as exc:
             raise RuntimeError(
-                "Failed to expand robot xacro "
-                f"'{xacro_path}'. This usually means a missing ROS package, "
-                "an undefined xacro argument, or a bad include path. "
-                "The current setup passes the mapping {'name': 'ur'}. "
+                f"Failed to expand robot xacro '{xacro_path}'. This usually means "
+                f"a missing ROS package, an undefined xacro argument, or a bad "
+                f"include path. The current setup passes the mapping {{'name': 'ur'}}. "
                 f"Original error: {exc}"
             ) from exc
         return doc.toxml()
@@ -346,12 +337,16 @@ class EnsemblRobot:
     def PlanToTarget(
         self,
         transform: np.ndarray | list[list[float]],
+        max_joint_delta: float = float("inf"),
     ) -> PlannerResponse | None:
         """
         Plan from the current manipulator state to a target TCP pose.
         """
 
-        return self._planner.PlanToTarget(target_transform=transform)
+        return self._planner.PlanToTarget(
+            target_transform=transform,
+            max_joint_delta=max_joint_delta,
+        )
 
     @with_latest_state
     def PlanToConfiguration(
@@ -396,10 +391,8 @@ class EnsemblRobot:
         """
 
         if not self.simulated:
-            warnings.warn(
+            logger.warning(
                 "SetActiveDOFValues is only available when get_observation is None.",
-                RuntimeWarning,
-                stacklevel=2,
             )
             return
         joint_values = np.asarray(joint_values, dtype=np.float64).reshape(-1)

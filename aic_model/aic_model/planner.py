@@ -16,28 +16,27 @@
 
 from __future__ import annotations
 
+import logging
 import os
-import traceback
-import warnings
+
 import numpy as np
-from transforms3d.euler import mat2euler
 
 os.environ.setdefault("TRAJOPT_LOG_THRESH", "ERROR")
 
 from tesseract_robotics.tesseract_command_language import (
-    CartesianWaypoint,
-    CartesianWaypointPoly_wrap_CartesianWaypoint,
     CompositeInstruction,
     MoveInstruction,
     MoveInstructionPoly_wrap_MoveInstruction,
     MoveInstructionType_FREESPACE,
-    MoveInstructionType_LINEAR,
     ProfileDictionary,
     StateWaypoint,
     StateWaypointPoly_wrap_StateWaypoint,
 )
-from tesseract_robotics.tesseract_common import Isometry3d, ManipulatorInfo
-from tesseract_robotics.tesseract_motion_planners import PlannerRequest, PlannerResponse
+from tesseract_robotics.tesseract_common import ManipulatorInfo
+from tesseract_robotics.tesseract_motion_planners import (
+    PlannerRequest,
+    PlannerResponse,
+)
 from tesseract_robotics.tesseract_motion_planners_trajopt import (
     TrajOptDefaultCompositeProfile,
     TrajOptDefaultPlanProfile,
@@ -50,6 +49,7 @@ from tesseract_robotics.tesseract_time_parameterization import (
 
 DEFAULT_PROFILE = "DEFAULT"
 TRAJOPT_NAMESPACE = "TrajOptMotionPlannerTask"
+logger = logging.getLogger(__name__)
 
 
 class EnsemblPlanner:
@@ -60,8 +60,6 @@ class EnsemblPlanner:
     def __init__(
         self,
         robot,
-        num_waypoints: int = 5,
-        timeout: float = 10.0,
     ):
         """
         Initialize planner state for a specific robot and manipulator.
@@ -76,10 +74,7 @@ class EnsemblPlanner:
         self.velocity_limits = robot.velocity_limits
         self.acceleration_limits = robot.acceleration_limits
         self.jerk_limits = robot.jerk_limits
-        self.num_waypoints = int(num_waypoints)
-        self.timeout = float(timeout)
-        self._log_info = getattr(robot, "_log_info", None)
-        self._log_warn = getattr(robot, "_log_warn", None)
+        self.last_failure_reason = None
 
         self._manipulator_info = ManipulatorInfo()
         self._manipulator_info.manipulator = self.manipulator_group_name
@@ -93,43 +88,27 @@ class EnsemblPlanner:
             DEFAULT_PROFILE,
             TrajOptDefaultPlanProfile(),
         )
+        composite_profile = TrajOptDefaultCompositeProfile()
+        composite_profile.smooth_accelerations = False
+        composite_profile.smooth_jerks = False
         self._profiles.addProfile(
             TRAJOPT_NAMESPACE,
             DEFAULT_PROFILE,
-            TrajOptDefaultCompositeProfile(),
+            composite_profile,
         )
-        if self.timeout > 0.0:
-            self._info(
-                "Configured timeout is not enforced because the current Tesseract Python "
-                "binding does not expose a cancellable planner timeout."
-            )
 
-    def _info(self, message: str) -> None:
-        """
-        Emit an informational planner log when a callback is available.
-        """
-
-        if self._log_info is not None:
-            self._log_info(f"[planner] {message}")
-
-    def _warn(self, message: str) -> None:
-        """
-        Emit a warning planner log and mirror it to Python warnings.
-        """
-
-        if self._log_warn is not None:
-            self._log_warn(f"[planner] {message}")
-        warnings.warn(message, RuntimeWarning, stacklevel=2)
-
-    def _solve_program(self, program: CompositeInstruction) -> PlannerResponse | None:
+    def _solve_program(
+        self,
+        program: CompositeInstruction,
+    ) -> PlannerResponse | None:
         """
         Solve a Tesseract program and return the native planner response.
         """
 
-        self._info(
-            "Submitting planning request "
-            f"with {len(program.flatten())} flattened instructions and "
-            f"timeout={self.timeout:.3f}s."
+        self.last_failure_reason = None
+        logger.debug(
+            f"Submitting planning request with {len(program.flatten())} "
+            "flattened instructions."
         )
         request = PlannerRequest()
         request.instructions = program
@@ -138,42 +117,52 @@ class EnsemblPlanner:
         try:
             response = self._motion_planner.solve(request)
         except Exception as exc:
-            self._warn(
+            self.last_failure_reason = (
+                f"Planning request failed before planner response: "
+                f"{exc.__class__.__name__}: {exc}"
+            )
+            logger.exception(
                 "Planning request failed before a planner response was produced: "
                 f"{exc.__class__.__name__}: {exc}"
             )
-            self._info(traceback.format_exc().rstrip())
             return None
 
         if not response.successful:
-            self._warn(f"TrajOpt failed: {response.message}")
+            self.last_failure_reason = f"TrajOpt failed: {response.message}"
+            logger.warning(f"{self.last_failure_reason}")
             return None
-        self._info(f"Planning succeeded: {response.message}")
+        logger.debug(f"Planning succeeded: {response.message}")
         return response
 
     def PlanToTarget(
         self,
         target_transform: np.ndarray | list[list[float]],
+        max_joint_delta: float = float("inf"),
     ) -> PlannerResponse | None:
         """
         Plan from the current robot state to a target TCP transform.
         """
 
-        target_transform = np.asarray(target_transform, dtype=np.float64)
-        current_joint_values = np.asarray(
-            self.robot.GetActiveDOFValues(),
-            dtype=np.float64,
-        ).reshape(-1)
-        current_transform = np.asarray(self.robot.ComputeFK(), dtype=np.float64)
-        self._info(
-            "PlanToTarget request "
-            f"start_pose=(pos={np.array2string(current_transform[:3, 3], precision=3, suppress_small=True)} "
-            f"euler_xyz={np.array2string(np.asarray(mat2euler(current_transform[:3, :3]), dtype=np.float64), precision=3, suppress_small=True)}) "
-            f"target_pose=(pos={np.array2string(target_transform[:3, 3], precision=3, suppress_small=True)} "
-            f"euler_xyz={np.array2string(np.asarray(mat2euler(target_transform[:3, :3]), dtype=np.float64), precision=3, suppress_small=True)}) "
-            f"start_joints={np.array2string(current_joint_values, precision=3, suppress_small=True)}"
-        )
-        return self._solve_program(self._make_target_program(target_transform))
+        current_joint_values = self.robot.GetActiveDOFValues()
+        target_joint_values = self.robot.ComputeIK(target_transform)
+        if target_joint_values is None:
+            self.last_failure_reason = (
+                "PlanToTarget failed: no collision-free IK solution."
+            )
+            logger.warning(f"{self.last_failure_reason}")
+            return None
+
+        max_delta = float(np.max(np.abs(target_joint_values - current_joint_values)))
+        if max_delta > max_joint_delta:
+            self.last_failure_reason = (
+                f"PlanToTarget failed: closest IK solution requires max absolute "
+                f"joint delta {max_delta:.3f} rad, which exceeds "
+                f"max_joint_delta={max_joint_delta:.3f} rad."
+            )
+            logger.warning(f"{self.last_failure_reason}")
+            return None
+
+        return self.PlanToConfiguration(target_joint_values)
 
     def PlanToConfiguration(
         self,
@@ -183,176 +172,12 @@ class EnsemblPlanner:
         Plan from the current robot state to a target joint configuration.
         """
 
-        target_joint_values = np.asarray(target_joint_values, dtype=np.float64).reshape(
-            -1
-        )
-        current_joint_values = np.asarray(
-            self.robot.GetActiveDOFValues(),
-            dtype=np.float64,
-        ).reshape(-1)
-        self._info(
-            "PlanToConfiguration request "
-            f"start_joints={np.array2string(current_joint_values, precision=3, suppress_small=True)} "
-            f"target_joints={np.array2string(target_joint_values, precision=3, suppress_small=True)}"
-        )
-        return self._solve_program(
-            self._make_configuration_program(target_joint_values)
-        )
-
-    def Retime(
-        self,
-        program: CompositeInstruction,
-    ) -> CompositeInstruction | None:
-        """
-        Apply Tesseract time-parameterization to an existing program.
-        """
-
-        self._info(
-            "Retiming trajectory "
-            f"with {len(program.flatten())} flattened instructions."
-        )
-        trajectory = InstructionsTrajectory(program)
-        time_parameterization = TimeOptimalTrajectoryGeneration()
-        ok = time_parameterization.compute(
-            trajectory,
-            self.velocity_limits,
-            self.acceleration_limits,
-            self.jerk_limits,
-        )
-        if not ok:
-            self._warn("Time optimal trajectory generation failed.")
-            return None
-
-        self._info("Retiming succeeded.")
-        return program
-
-    def _make_target_program(
-        self,
-        target_transform: np.ndarray | list[list[float]],
-    ) -> CompositeInstruction:
-        """
-        Create a Cartesian planning program from the current state to a pose.
-        """
-
-        current_joint_values = np.asarray(
-            self.robot.GetActiveDOFValues(),
-            dtype=np.float64,
-        ).reshape(-1)
-        if current_joint_values.size != len(self.manipulator_joint_names):
-            raise ValueError(
-                "Expected current joint values with shape "
-                f"({len(self.manipulator_joint_names)},), got "
-                f"{current_joint_values.shape}."
-            )
-        current_transform = np.asarray(self.robot.ComputeFK(), dtype=np.float64)
-        if current_transform.shape != (4, 4):
-            raise ValueError(
-                "Expected robot.ComputeFK() to return shape "
-                f"(4, 4), got {current_transform.shape}."
-            )
-        target_transform = np.asarray(target_transform, dtype=np.float64)
-        if target_transform.shape != (4, 4):
-            raise ValueError(
-                f"Expected target transform with shape (4, 4), got {target_transform.shape}."
-            )
-
+        target_joint_values = np.asarray(target_joint_values, dtype=np.float64)
+        current_joint_values = self.robot.GetActiveDOFValues()
         program = CompositeInstruction(DEFAULT_PROFILE)
         program.setManipulatorInfo(self._manipulator_info)
-        self._info(
-            "Building Cartesian program "
-            f"start_pose=(pos={np.array2string(current_transform[:3, 3], precision=3, suppress_small=True)} "
-            f"euler_xyz={np.array2string(np.asarray(mat2euler(current_transform[:3, :3]), dtype=np.float64), precision=3, suppress_small=True)}) "
-            f"target_pose=(pos={np.array2string(target_transform[:3, 3], precision=3, suppress_small=True)} "
-            f"euler_xyz={np.array2string(np.asarray(mat2euler(target_transform[:3, :3]), dtype=np.float64), precision=3, suppress_small=True)}) "
-            f"start_joints={np.array2string(current_joint_values, precision=3, suppress_small=True)} "
-            f"num_waypoints={self.num_waypoints}"
-        )
-        program.appendMoveInstruction(
-            MoveInstructionPoly_wrap_MoveInstruction(
-                MoveInstruction(
-                    StateWaypointPoly_wrap_StateWaypoint(
-                        StateWaypoint(
-                            self.manipulator_joint_names,
-                            current_joint_values,
-                        )
-                    ),
-                    MoveInstructionType_FREESPACE,
-                    DEFAULT_PROFILE,
-                    self._manipulator_info,
-                )
-            )
-        )
 
-        current_position = current_transform[:3, 3]
-        target_position = target_transform[:3, 3]
-        interpolated_positions = current_position + np.outer(
-            np.linspace(0.0, 1.0, num=self.num_waypoints)[1:],
-            target_position - current_position,
-        )
-        waypoint_transform = np.array(target_transform, copy=True)
-
-        for position in interpolated_positions:
-            waypoint_transform[:3, 3] = position
-            isometry = Isometry3d()
-            isometry.setMatrix(waypoint_transform)
-            program.appendMoveInstruction(
-                MoveInstructionPoly_wrap_MoveInstruction(
-                    MoveInstruction(
-                        CartesianWaypointPoly_wrap_CartesianWaypoint(
-                            CartesianWaypoint(isometry)
-                        ),
-                        MoveInstructionType_LINEAR,
-                        DEFAULT_PROFILE,
-                        self._manipulator_info,
-                    )
-                )
-            )
-        return program
-
-    def _make_configuration_program(
-        self,
-        target_joint_values: np.ndarray | list[float],
-    ) -> CompositeInstruction:
-        """
-        Create a joint-space planning program from the current state.
-        """
-
-        current_joint_values = np.asarray(
-            self.robot.GetActiveDOFValues(),
-            dtype=np.float64,
-        ).reshape(-1)
-        if current_joint_values.size != len(self.manipulator_joint_names):
-            raise ValueError(
-                "Expected current joint values with shape "
-                f"({len(self.manipulator_joint_names)},), got "
-                f"{current_joint_values.shape}."
-            )
-
-        target_joint_values = np.asarray(
-            target_joint_values,
-            dtype=np.float64,
-        ).reshape(-1)
-        if target_joint_values.size != len(self.manipulator_joint_names):
-            raise ValueError(
-                "Expected target joint values with shape "
-                f"({len(self.manipulator_joint_names)},), got "
-                f"{target_joint_values.shape}."
-            )
-
-        program = CompositeInstruction(DEFAULT_PROFILE)
-        program.setManipulatorInfo(self._manipulator_info)
-        self._info(
-            "Building joint-space program "
-            f"start_joints={np.array2string(current_joint_values, precision=3, suppress_small=True)} "
-            f"target_joints={np.array2string(target_joint_values, precision=3, suppress_small=True)} "
-            f"num_waypoints={self.num_waypoints}"
-        )
-
-        for alpha in np.linspace(0.0, 1.0, num=self.num_waypoints):
-            joint_values = (
-                (1.0 - alpha) * current_joint_values
-                + alpha * target_joint_values
-            )
+        for joint_values in (current_joint_values, target_joint_values):
             program.appendMoveInstruction(
                 MoveInstructionPoly_wrap_MoveInstruction(
                     MoveInstruction(
@@ -369,4 +194,28 @@ class EnsemblPlanner:
                 )
             )
 
+        return self._solve_program(program)
+
+    def Retime(
+        self,
+        program: CompositeInstruction,
+    ) -> CompositeInstruction | None:
+        """
+        Apply Tesseract time-parameterization to an existing program.
+        """
+
+        logger.debug(f"Retiming trajectory with {len(program.flatten())} instructions.")
+        trajectory = InstructionsTrajectory(program)
+        time_parameterization = TimeOptimalTrajectoryGeneration()
+        ok = time_parameterization.compute(
+            trajectory,
+            self.velocity_limits,
+            self.acceleration_limits,
+            self.jerk_limits,
+        )
+        if not ok:
+            logger.warning("Time optimal trajectory generation failed.")
+            return None
+
+        logger.debug("Retiming succeeded.")
         return program
