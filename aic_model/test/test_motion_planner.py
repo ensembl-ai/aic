@@ -6,7 +6,7 @@ import sys
 
 import numpy as np
 import tqdm
-from transforms3d.euler import euler2mat, mat2euler
+from transforms3d.euler import mat2euler
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -29,7 +29,7 @@ POSITION_ROI_OFFSETS_METERS = np.array(
     ],
     dtype=np.float64,
 )
-ORIENTATION_ROI_HALF_WIDTH_RADIANS = np.deg2rad(20.0)
+TCP_Z_MAX_DEVIATION_RADIANS = np.deg2rad(20.0)
 
 
 def transform_to_position_euler(transform):
@@ -39,28 +39,70 @@ def transform_to_position_euler(transform):
     )
 
 
-def position_euler_to_transform(position, euler):
-    transform = np.eye(4, dtype=np.float64)
-    transform[:3, :3] = euler2mat(*euler)
-    transform[:3, 3] = position
-    return transform
+def rotation_matrix_from_axis_angle(axis, angle):
+    axis = np.asarray(axis, dtype=np.float64)
+    axis = axis / np.linalg.norm(axis)
+    x, y, z = axis
+    c = np.cos(angle)
+    s = np.sin(angle)
+    one_minus_c = 1.0 - c
+    return np.array(
+        [
+            [
+                c + x * x * one_minus_c,
+                x * y * one_minus_c - z * s,
+                x * z * one_minus_c + y * s,
+            ],
+            [
+                y * x * one_minus_c + z * s,
+                c + y * y * one_minus_c,
+                y * z * one_minus_c - x * s,
+            ],
+            [
+                z * x * one_minus_c - y * s,
+                z * y * one_minus_c + x * s,
+                c + z * z * one_minus_c,
+            ],
+        ],
+        dtype=np.float64,
+    )
+
+
+def sample_tcp_z_cone_rotation(rng, reference_rotation, max_deviation):
+    if max_deviation <= 0.0:
+        return reference_rotation.copy()
+
+    azimuth = rng.uniform(0.0, 2.0 * np.pi)
+    tilt_angle = np.arccos(
+        rng.uniform(np.cos(max_deviation), 1.0),
+    )
+    tilt_axis = (
+        np.cos(azimuth) * reference_rotation[:, 0]
+        + np.sin(azimuth) * reference_rotation[:, 1]
+    )
+    return rotation_matrix_from_axis_angle(tilt_axis, tilt_angle) @ reference_rotation
 
 
 def sample_roi_transform(
     rng,
     anchor_transform,
     position_offsets=POSITION_ROI_OFFSETS_METERS,
-    orientation_half_width=ORIENTATION_ROI_HALF_WIDTH_RADIANS,
+    tcp_z_max_deviation=TCP_Z_MAX_DEVIATION_RADIANS,
 ):
-    anchor_position, anchor_euler = transform_to_position_euler(anchor_transform)
     position_offsets = np.asarray(position_offsets, dtype=np.float64)
     position_low = np.min(position_offsets, axis=1)
     position_high = np.max(position_offsets, axis=1)
-    return position_euler_to_transform(
-        anchor_position + rng.uniform(position_low, position_high),
-        anchor_euler
-        + rng.uniform(-orientation_half_width, orientation_half_width, size=3),
+    target_transform = np.eye(4, dtype=np.float64)
+    target_transform[:3, :3] = sample_tcp_z_cone_rotation(
+        rng,
+        anchor_transform[:3, :3],
+        tcp_z_max_deviation,
     )
+    target_transform[:3, 3] = anchor_transform[:3, 3] + rng.uniform(
+        position_low,
+        position_high,
+    )
+    return target_transform
 
 
 def closest_joint_solution(solutions, reference_config):
@@ -95,7 +137,7 @@ def sample_reachable_roi_target(
     rng,
     anchor_transform,
     reference_config,
-    orientation_half_width,
+    tcp_z_max_deviation,
     max_joint_delta,
     max_attempts=1000,
 ):
@@ -104,7 +146,7 @@ def sample_reachable_roi_target(
         target_transform = sample_roi_transform(
             rng,
             anchor_transform,
-            orientation_half_width=orientation_half_width,
+            tcp_z_max_deviation=tcp_z_max_deviation,
         )
         solutions = robot.ComputeIK(
             target_transform,
@@ -174,10 +216,14 @@ def main():
         ),
     )
     parser.add_argument(
+        "--tcp-z-max-deviation-deg",
         "--orientation-roi-half-width-deg",
+        dest="tcp_z_max_deviation_deg",
         type=float,
-        default=np.rad2deg(ORIENTATION_ROI_HALF_WIDTH_RADIANS),
-        help="Half-width in degrees for RPY target sampling around home FK.",
+        default=np.rad2deg(TCP_Z_MAX_DEVIATION_RADIANS),
+        help=(
+            "Maximum angle in degrees between sampled TCP Z and reference TCP Z."
+        ),
     )
     parser.add_argument(
         "--reachable-sample-attempts",
@@ -194,7 +240,7 @@ def main():
     args = parser.parse_args()
 
     rng = np.random.default_rng(args.seed)
-    orientation_roi_half_width = np.deg2rad(args.orientation_roi_half_width_deg)
+    tcp_z_max_deviation = np.deg2rad(args.tcp_z_max_deviation_deg)
 
     robot = EnsemblRobot()
     home_config = HOME_JOINT_POSITIONS.copy()
@@ -220,7 +266,7 @@ def main():
         target_transform = sample_roi_transform(
             rng,
             home_transform,
-            orientation_half_width=orientation_roi_half_width,
+            tcp_z_max_deviation=tcp_z_max_deviation,
         )
         solutions = robot.ComputeIK(
             target_transform,
@@ -279,7 +325,7 @@ def main():
                 rng,
                 home_transform,
                 start_config,
-                orientation_roi_half_width,
+                tcp_z_max_deviation,
                 args.planner_max_delta,
                 max_attempts=args.reachable_sample_attempts,
             )

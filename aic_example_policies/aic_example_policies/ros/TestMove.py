@@ -1,7 +1,7 @@
 import numpy as np
 from typing import Any, cast
 
-from transforms3d.euler import euler2mat, mat2euler
+from transforms3d.euler import mat2euler
 
 from aic_model.policy import (
     GetObservationCallback,
@@ -22,7 +22,7 @@ POSITION_ROI_OFFSETS_METERS = np.array(
     ],
     dtype=np.float64,
 )
-ORIENTATION_ROI_HALF_WIDTH_RADIANS = np.deg2rad(20.0)
+TCP_Z_MAX_DEVIATION_RADIANS = np.deg2rad(20.0)
 
 
 def transform_to_position_euler(transform):
@@ -32,26 +32,60 @@ def transform_to_position_euler(transform):
     )
 
 
-def position_euler_to_transform(position, euler):
-    transform = np.eye(4, dtype=np.float64)
-    transform[:3, :3] = euler2mat(*euler)
-    transform[:3, 3] = position
-    return transform
+def rotation_matrix_from_axis_angle(axis, angle):
+    axis = np.asarray(axis, dtype=np.float64)
+    axis = axis / np.linalg.norm(axis)
+    x, y, z = axis
+    c = np.cos(angle)
+    s = np.sin(angle)
+    one_minus_c = 1.0 - c
+    return np.array(
+        [
+            [
+                c + x * x * one_minus_c,
+                x * y * one_minus_c - z * s,
+                x * z * one_minus_c + y * s,
+            ],
+            [
+                y * x * one_minus_c + z * s,
+                c + y * y * one_minus_c,
+                y * z * one_minus_c - x * s,
+            ],
+            [
+                z * x * one_minus_c - y * s,
+                z * y * one_minus_c + x * s,
+                c + z * z * one_minus_c,
+            ],
+        ],
+        dtype=np.float64,
+    )
+
+
+def sample_tcp_z_cone_rotation(rng, reference_rotation):
+    azimuth = rng.uniform(0.0, 2.0 * np.pi)
+    tilt_angle = np.arccos(
+        rng.uniform(np.cos(TCP_Z_MAX_DEVIATION_RADIANS), 1.0),
+    )
+    tilt_axis = (
+        np.cos(azimuth) * reference_rotation[:, 0]
+        + np.sin(azimuth) * reference_rotation[:, 1]
+    )
+    return rotation_matrix_from_axis_angle(tilt_axis, tilt_angle) @ reference_rotation
 
 
 def sample_roi_transform(rng, anchor_transform):
-    anchor_position, anchor_euler = transform_to_position_euler(anchor_transform)
     position_low = np.min(POSITION_ROI_OFFSETS_METERS, axis=1)
     position_high = np.max(POSITION_ROI_OFFSETS_METERS, axis=1)
-    return position_euler_to_transform(
-        anchor_position + rng.uniform(position_low, position_high),
-        anchor_euler
-        + rng.uniform(
-            -ORIENTATION_ROI_HALF_WIDTH_RADIANS,
-            ORIENTATION_ROI_HALF_WIDTH_RADIANS,
-            size=3,
-        ),
+    target_transform = np.eye(4, dtype=np.float64)
+    target_transform[:3, :3] = sample_tcp_z_cone_rotation(
+        rng,
+        anchor_transform[:3, :3],
     )
+    target_transform[:3, 3] = anchor_transform[:3, 3] + rng.uniform(
+        position_low,
+        position_high,
+    )
+    return target_transform
 
 
 class TestMove(Policy):
