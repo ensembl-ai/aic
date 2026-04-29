@@ -23,7 +23,7 @@ HOME_JOINT_POSITIONS = np.array(
 )
 POSITION_ROI_OFFSETS_METERS = np.array(
     [
-        [-0.4, 0.1],
+        [-0.2, 0.2],
         [0.4, -0.4],
         [0.2, -0.3],
     ],

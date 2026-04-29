@@ -16,7 +16,7 @@ from rclpy.duration import Duration
 
 POSITION_ROI_OFFSETS_METERS = np.array(
     [
-        [-0.4, 0.1],
+        [-0.2, 0.2],
         [0.4, -0.4],
         [0.2, -0.3],
     ],
@@ -76,6 +76,7 @@ class TestMove(Policy):
         )
 
         rng = np.random.default_rng()
+        reference_transform = robot.ComputeFK(robot.manipulator_tip_frame)
 
         start_time = self.time_now()
         timeout = Duration(seconds=10.0)
@@ -83,7 +84,7 @@ class TestMove(Policy):
 
         while (self.time_now() - start_time) < timeout:
             current_transform = robot.ComputeFK(robot.manipulator_tip_frame)
-            target_transform = sample_roi_transform(rng, current_transform)
+            target_transform = sample_roi_transform(rng, reference_transform)
             target_position, target_euler = transform_to_position_euler(
                 target_transform
             )
