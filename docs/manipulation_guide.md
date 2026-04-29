@@ -18,3 +18,69 @@ pixi reinstall ros-kilted-aic-model
 # Test policy without gazebo gui
 /entrypoint.sh ground_truth:=false start_aic_engine:=true gazebo_gui:=false
 pixi run ros2 run aic_model aic_model --ros-args -p use_sim_time:=true -p policy:=aic_example_policies.ros.TestMove
+
+## Robot API quick reference
+
+Use `EnsemblRobot` from `aic_model.robot` as the facade for kinematics, collision
+checking, planning, retiming, and execution. In a policy, construct it with the
+runtime callbacks; without callbacks it runs in simulated/offline mode and starts
+at zero joint state. Robot state is refreshed from `get_observation` before FK, IK,
+collision checks, and planning calls that need the current joints.
+
+```python
+import numpy as np
+from aic_model.robot import EnsemblRobot
+
+robot = EnsemblRobot(
+    get_observation=get_observation,
+    execute_joint_motion=lambda update: move_robot(joint_motion_update=update),
+    sleep_for=sleep_for,
+)
+tcp_in_base = robot.ComputeFK()
+target = tcp_in_base.copy()
+target[:3, 3] += np.array([0.02, 0.0, 0.0], dtype=np.float64)
+plan = robot.PlanToTarget(target, max_joint_delta=0.5)
+trajectory = robot.Retime(plan.results) if plan is not None else None
+ok = robot.ExecuteTrajectory(trajectory) if trajectory is not None else False
+```
+
+Frame arguments are only needed when you want something other than the configured
+manipulator frames. `target_frame=None` or omitted means `robot.manipulator_tip_frame`
+(`"gripper/tcp"` today). `base_frame=None` or omitted means
+`robot.manipulator_base_frame` (`"base_link"` today). For FK, the returned matrix is
+`T_base_frame_target_frame`. For IK, the input transform is interpreted as the desired
+`target_frame` pose expressed in `base_frame`. Both frames must be links on the
+configured manipulator chain, otherwise the call raises `ValueError`.
+
+- `robot.ComputeFK(target_frame=None, base_frame=None) -> np.ndarray`: returns a
+  `(4, 4)` `float64` homogeneous transform for the current state.
+- `robot.ComputeIK(transform, target_frame=None, base_frame=None, return_all=False, check_collision=True)`:
+  `transform` must be a `(4, 4)` array-like homogeneous matrix and is converted
+  to `np.float64`. Returns the closest collision-free joint vector as shape
+  `(6,)`, all solutions as shape `(N, 6)` when `return_all=True`, or `None` if
+  no solution is found. Set `check_collision=False` to keep IK solutions that are
+  kinematically valid but may collide.
+- `robot.CheckCollision(report=False)`: checks the current robot/environment
+  state. Returns `True`/`False`, or `(in_collision, contacts)` when
+  `report=True`; each contact includes the link pair, signed distance, contact
+  type ids, and whether it is a single contact point.
+- `robot.PlanToTarget(transform, max_joint_delta=float("inf"))`: plans from the
+  current state to the default TCP pose in the default base frame. The transform
+  has the same `(4, 4)` convention as default IK. `max_joint_delta` rejects IK
+  goals whose largest per-joint move from the current state is too large. Returns
+  a Tesseract `PlannerResponse` or `None`; use `plan.results` as the program.
+- `robot.PlanToConfiguration(joint_values)`: plans to a joint vector in
+  manipulator joint order. `joint_values` should be array-like length `6` and is
+  converted to `float64`.
+- `robot.Retime(program)`: time-parameterizes `plan.results` and returns a
+  `CompositeInstruction`, or `None` if retiming fails.
+- `robot.ExecuteTrajectory(trajectory, stiffness=None, damping=None)`: streams a
+  retimed trajectory through the controller callback. Optional stiffness/damping
+  are six-element joint lists. Returns `False` if no execution callback was
+  provided or the trajectory is invalid.
+
+`GetActiveDOFValues()` returns the current manipulator joints in the same order used
+by IK, planning, and execution. `SetActiveDOFValues(joint_values)` is only for
+offline/simulated use, i.e. when `EnsemblRobot()` was created without
+`get_observation`. `GetEnv()` returns the refreshed native Tesseract environment
+for advanced scene/object updates.
