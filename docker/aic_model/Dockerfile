@@ -1,10 +1,16 @@
 FROM docker.io/library/ros:kilted-ros-core AS build
 
 # Install pixi
-RUN apt update && apt install -y git && curl -fsSL https://pixi.sh/install.sh | bash
+RUN apt update && apt install -y \
+    git \
+    python3-colcon-common-extensions \
+    ros-kilted-ament-cmake \
+  && curl -fsSL https://pixi.sh/install.sh | bash
 ENV PATH="/root/.pixi/bin:$PATH"
 
 # Add base dependencies
+COPY aic_assets /ws_aic/src/aic/aic_assets
+COPY aic_description /ws_aic/src/aic/aic_description
 COPY aic_example_policies /ws_aic/src/aic/aic_example_policies
 COPY aic_model /ws_aic/src/aic/aic_model
 COPY aic_interfaces /ws_aic/src/aic/aic_interfaces
@@ -15,8 +21,18 @@ COPY pixi_env_setup.sh /ws_aic/src/aic/
 # Add other dependencies
 
 SHELL ["/bin/bash", "-c"]
+RUN cd /ws_aic/src/aic \
+    && source /opt/ros/kilted/setup.bash \
+    && colcon build \
+        --packages-select aic_assets aic_description \
+        --packages-ignore aic_gazebo aic_engine_interfaces \
+        --executor sequential
+
 RUN --mount=type=cache,target=/root/.cache/rattler/cache --mount=type=cache,target=/ws_aic/src/aic/.pixi/build \
     cd /ws_aic/src/aic && pixi install --locked
+
+RUN cd /ws_aic/src/aic \
+    && pixi run python -m pip install --no-cache-dir tesseract-robotics==0.5.1
 
 WORKDIR /ws_aic/src/aic
 COPY --chmod=755 <<"EOF" /entrypoint.sh
