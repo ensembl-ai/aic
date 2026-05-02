@@ -38,6 +38,10 @@ robot = EnsemblRobot(
     execute_joint_motion=execute_joint_motion,  # omit if you will not execute
 )
 current_base_tcp = robot.ComputeFK() # get's latest joint angles from observations
+box_name = robot.AddBoxKinbody(
+    dim=[0.1, 0.1, 0.05],
+    transform=current_base_tcp,
+)
 # target_base_tcp: gripper/tcp transform in base_frame, meters, shape (4,4)
 target_base_tcp = np.eye(4, dtype=np.float64)
 ik_solutions = robot.ComputeIK(target_base_tcp, return_all=True) # If return_all is false, it provides closest IK
@@ -71,6 +75,13 @@ configured manipulator chain, otherwise the call raises `ValueError`.
   state. Returns `True`/`False`, or `(in_collision, contacts)` when
   `report=True`; each contact includes the link pair, signed distance, contact
   type ids, and whether it is a single contact point.
+- `robot.AddBoxKinbody(dim, transform, parent_frame="base_link", collision_enabled=True)`:
+  adds a fixed box collision body to the native Tesseract environment. `dim` is
+  `[x, y, z]` in meters. `transform` is a `(4, 4)` homogeneous matrix for the
+  box center expressed in `parent_frame`; the box axes follow the transform
+  rotation. Returns the generated link name. The collision manager is refreshed
+  immediately, so the box is included in `CheckCollision`, collision-filtered
+  IK, and subsequent planning calls.
 - `robot.PlanToTarget(transform, max_joint_delta=float("inf"))`: plans from the
   current state to the default TCP pose in the default base frame. The transform
   has the same `(4, 4)` convention as default IK. `max_joint_delta` rejects IK

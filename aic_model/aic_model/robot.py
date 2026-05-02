@@ -42,9 +42,20 @@ from tesseract_robotics.tesseract_collision import (
     ContactTestType_ALL,
     ContactTestType_FIRST,
 )
-from tesseract_robotics.tesseract_environment import Environment
+from tesseract_robotics.tesseract_environment import (
+    AddLinkCommand,
+    ChangeLinkCollisionEnabledCommand,
+    Environment,
+)
+from tesseract_robotics.tesseract_geometry import Box
 from tesseract_robotics.tesseract_kinematics import KinGroupIKInput, KinGroupIKInputs
 from tesseract_robotics.tesseract_motion_planners import PlannerResponse
+from tesseract_robotics.tesseract_scene_graph import (
+    Collision,
+    Joint,
+    JointType_FIXED,
+    Link,
+)
 import xacro
 
 # Internal
@@ -192,18 +203,9 @@ class EnsemblRobot:
                 active_joint_index[joint_name]
                 for joint_name in self._manipulator_joint_names
             ]
-            self._collision_manager = self.env.getDiscreteContactManager()
-            self._collision_object_names = list(
-                self._collision_manager.getCollisionObjects()
-            )
-            self._collision_manager.setActiveCollisionObjects(
-                self._collision_object_names
-            )
             self._collision_object_poses = VectorIsometry3d()
             self._collision_config = ContactManagerConfig()
-            self._collision_config.acm = self.env.getAllowedCollisionMatrix()
-            self._collision_config.margin_data = self.env.getCollisionMarginData()
-            self._collision_manager.applyContactManagerConfig(self._collision_config)
+            self._refresh_collision_manager()
             self._bool_contact_request = ContactRequest()
             self._bool_contact_request.type = ContactTestType_FIRST
             self._bool_contact_request.calculate_distance = False
@@ -218,6 +220,7 @@ class EnsemblRobot:
             self._executor = EnsemblExecutor(
                 execute_joint_motion=execute_joint_motion,
             )
+            self._box_kinbody_count = 0
             if self.simulated:
                 self.env.setState(
                     self._active_joint_names,
@@ -309,6 +312,22 @@ class EnsemblRobot:
 
         with open(srdf_path, encoding="utf-8") as f:
             return f.read()
+
+    def _refresh_collision_manager(self) -> None:
+        """
+        Rebuild the cached collision manager after environment topology changes.
+        """
+
+        self._collision_manager = self.env.getDiscreteContactManager()
+        self._collision_object_names = list(
+            self._collision_manager.getCollisionObjects()
+        )
+        self._collision_manager.setActiveCollisionObjects(
+            self._collision_object_names
+        )
+        self._collision_config.acm = self.env.getAllowedCollisionMatrix()
+        self._collision_config.margin_data = self.env.getCollisionMarginData()
+        self._collision_manager.applyContactManagerConfig(self._collision_config)
 
     @with_latest_state
     def GetActiveDOFValues(
@@ -408,6 +427,79 @@ class EnsemblRobot:
         """
 
         return self.env
+
+    @with_latest_state
+    def AddBoxKinbody(
+        self,
+        dim: np.ndarray | list[float],
+        transform: np.ndarray | list[list[float]],
+        parent_frame: str = "base_link",
+        collision_enabled: bool = True,
+    ) -> str:
+        """
+        Add a fixed box collision body to the Tesseract environment.
+
+        ``dim`` is the box size ``[x, y, z]`` in meters. ``transform`` is the
+        box-center pose expressed in ``parent_frame`` as a ``(4, 4)`` matrix.
+        The returned string is the generated link name for the added body.
+        """
+
+        dimensions = np.asarray(dim, dtype=np.float64).reshape(-1)
+        if dimensions.size != 3:
+            raise ValueError(f"Expected dim to contain 3 values, got {dimensions.size}.")
+        if np.any(dimensions <= 0.0):
+            raise ValueError(f"Expected positive box dimensions, got {dimensions}.")
+
+        transform_matrix = np.asarray(transform, dtype=np.float64)
+        if transform_matrix.shape != (4, 4):
+            raise ValueError(
+                f"Expected transform with shape (4, 4), got {transform_matrix.shape}."
+            )
+        if parent_frame not in list(self.env.getLinkNames()):
+            raise ValueError(f"Parent frame '{parent_frame}' is not in the environment.")
+
+        self._box_kinbody_count += 1
+        link_name = f"box_kinbody_{self._box_kinbody_count}"
+        while link_name in list(self.env.getLinkNames()):
+            self._box_kinbody_count += 1
+            link_name = f"box_kinbody_{self._box_kinbody_count}"
+
+        link = Link(link_name)
+        collision = Collision()
+        collision.name = f"{link_name}_collision"
+        collision.origin = Isometry3d.Identity()
+        collision.geometry = Box(
+            float(dimensions[0]),
+            float(dimensions[1]),
+            float(dimensions[2]),
+        )
+        link.collision.append(collision)
+
+        joint = Joint(f"{parent_frame}_to_{link_name}")
+        joint.parent_link_name = parent_frame
+        joint.child_link_name = link_name
+        joint.type = JointType_FIXED
+        joint_origin = Isometry3d()
+        joint_origin.setMatrix(transform_matrix)
+        joint.parent_to_joint_origin_transform = joint_origin
+
+        if not self.env.applyCommand(AddLinkCommand(link, joint)):
+            raise RuntimeError(f"Failed to add box kinbody '{link_name}'.")
+        if not self.env.applyCommand(
+            ChangeLinkCollisionEnabledCommand(link_name, collision_enabled)
+        ):
+            raise RuntimeError(
+                f"Failed to set collision_enabled={collision_enabled} for "
+                f"box kinbody '{link_name}'."
+            )
+
+        self._refresh_collision_manager()
+        self._update_collision_manager_state()
+        logger.debug(
+            f"Added box kinbody '{link_name}' under '{parent_frame}' with "
+            f"dimensions {dimensions.tolist()}."
+        )
+        return link_name
 
     def _update_collision_manager_state(self) -> None:
         """
