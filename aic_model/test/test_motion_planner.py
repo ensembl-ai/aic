@@ -132,6 +132,30 @@ def enabled_label(enabled):
     return "enabled" if enabled else "disabled"
 
 
+def validate_box_collision_reporting(home_config):
+    collision_robot = EnsemblRobot()
+    collision_robot.SetActiveDOFValues(home_config)
+    box_transform = np.eye(4, dtype=np.float64)
+    box_name = collision_robot.AddBoxKinbody(
+        dim=[1.0, 1.0, 1.0],
+        transform=box_transform,
+        parent_frame="base_link",
+        body_name="base_link_collision_probe",
+    )
+    in_collision, contacts = collision_robot.CheckCollision(report=True)
+    if not in_collision:
+        raise RuntimeError(
+            "Expected base_link collision probe box at [0, 0, 0] to collide."
+        )
+    if not contacts:
+        raise RuntimeError("Collision report was empty for the probe box collision.")
+    if not any(box_name in contact["pair"] for contact in contacts):
+        raise RuntimeError(
+            f"Collision report did not include the probe box '{box_name}'."
+        )
+    return box_name, contacts
+
+
 def sample_reachable_roi_target(
     robot,
     rng,
@@ -247,6 +271,9 @@ def main():
     robot.SetActiveDOFValues(home_config)
     if robot.CheckCollision():
         raise RuntimeError("Home joint positions are in collision.")
+    collision_probe_name, collision_probe_contacts = validate_box_collision_reporting(
+        home_config,
+    )
     home_transform = robot.ComputeFK()
     home_position, home_euler = transform_to_position_euler(home_transform)
 
@@ -255,6 +282,10 @@ def main():
     print(f"joints:     {np.array2string(home_config, precision=4)}")
     print(f"position:   {np.array2string(home_position, precision=4)}")
     print(f"euler_xyz:  {np.array2string(home_euler, precision=4)}")
+    print(
+        f"box collision probe: {collision_probe_name} "
+        f"contacts={len(collision_probe_contacts)}"
+    )
 
     ik_failures = 0
     checked_solutions = 0

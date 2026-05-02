@@ -41,6 +41,7 @@ current_base_tcp = robot.ComputeFK() # get's latest joint angles from observatio
 box_name = robot.AddBoxKinbody(
     dim=[0.1, 0.1, 0.05],
     transform=current_base_tcp,
+    body_name="tcp_clearance_box",  # omit for a UUID-generated unique name
 )
 # target_base_tcp: gripper/tcp transform in base_frame, meters, shape (4,4)
 target_base_tcp = np.eye(4, dtype=np.float64)
@@ -75,13 +76,14 @@ configured manipulator chain, otherwise the call raises `ValueError`.
   state. Returns `True`/`False`, or `(in_collision, contacts)` when
   `report=True`; each contact includes the link pair, signed distance, contact
   type ids, and whether it is a single contact point.
-- `robot.AddBoxKinbody(dim, transform, parent_frame="base_link", collision_enabled=True)`:
+- `robot.AddBoxKinbody(dim, transform, parent_frame="base_link", collision_enabled=True, body_name=None)`:
   adds a fixed box collision body to the native Tesseract environment. `dim` is
   `[x, y, z]` in meters. `transform` is a `(4, 4)` homogeneous matrix for the
   box center expressed in `parent_frame`; the box axes follow the transform
-  rotation. Returns the generated link name. The collision manager is refreshed
-  immediately, so the box is included in `CheckCollision`, collision-filtered
-  IK, and subsequent planning calls.
+  rotation. `body_name` is the Tesseract link name to create; omit it to use a
+  UUID-generated unique name like `box_kinbody_<uuid>`. Returns the link name.
+  The collision manager is refreshed immediately, so the box is included in
+  `CheckCollision`, collision-filtered IK, and subsequent planning calls.
 - `robot.PlanToTarget(transform, max_joint_delta=float("inf"))`: plans from the
   current state to the default TCP pose in the default base frame. The transform
   has the same `(4, 4)` convention as default IK. `max_joint_delta` rejects IK

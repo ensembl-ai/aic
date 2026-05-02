@@ -19,6 +19,7 @@ from functools import wraps
 import inspect
 import logging
 import os
+import uuid
 from typing import Any, cast
 
 import numpy as np
@@ -220,7 +221,6 @@ class EnsemblRobot:
             self._executor = EnsemblExecutor(
                 execute_joint_motion=execute_joint_motion,
             )
-            self._box_kinbody_count = 0
             if self.simulated:
                 self.env.setState(
                     self._active_joint_names,
@@ -435,34 +435,29 @@ class EnsemblRobot:
         transform: np.ndarray | list[list[float]],
         parent_frame: str = "base_link",
         collision_enabled: bool = True,
+        body_name: str | None = None,
     ) -> str:
         """
         Add a fixed box collision body to the Tesseract environment.
 
         ``dim`` is the box size ``[x, y, z]`` in meters. ``transform`` is the
         box-center pose expressed in ``parent_frame`` as a ``(4, 4)`` matrix.
-        The returned string is the generated link name for the added body.
+        ``body_name`` is the link name for the added body. When omitted, a
+        unique name is generated from a UUID. The returned string is the link
+        name for the added body.
         """
 
         dimensions = np.asarray(dim, dtype=np.float64).reshape(-1)
-        if dimensions.size != 3:
-            raise ValueError(f"Expected dim to contain 3 values, got {dimensions.size}.")
-        if np.any(dimensions <= 0.0):
-            raise ValueError(f"Expected positive box dimensions, got {dimensions}.")
+        if dimensions.size != 3 or np.any(dimensions <= 0.0):
+            raise ValueError(f"Expected dim to be three positive values, got {dim}.")
 
         transform_matrix = np.asarray(transform, dtype=np.float64)
         if transform_matrix.shape != (4, 4):
             raise ValueError(
                 f"Expected transform with shape (4, 4), got {transform_matrix.shape}."
             )
-        if parent_frame not in list(self.env.getLinkNames()):
-            raise ValueError(f"Parent frame '{parent_frame}' is not in the environment.")
 
-        self._box_kinbody_count += 1
-        link_name = f"box_kinbody_{self._box_kinbody_count}"
-        while link_name in list(self.env.getLinkNames()):
-            self._box_kinbody_count += 1
-            link_name = f"box_kinbody_{self._box_kinbody_count}"
+        link_name = body_name or f"box_kinbody_{uuid.uuid4().hex}"
 
         link = Link(link_name)
         collision = Collision()
@@ -484,7 +479,9 @@ class EnsemblRobot:
         joint.parent_to_joint_origin_transform = joint_origin
 
         if not self.env.applyCommand(AddLinkCommand(link, joint)):
-            raise RuntimeError(f"Failed to add box kinbody '{link_name}'.")
+            raise RuntimeError(
+                f"Failed to add box kinbody '{link_name}' under '{parent_frame}'."
+            )
         if not self.env.applyCommand(
             ChangeLinkCollisionEnabledCommand(link_name, collision_enabled)
         ):
