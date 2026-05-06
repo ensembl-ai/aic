@@ -6,10 +6,12 @@ source /opt/ros/kilted/setup.bash
 
 # Install aic_description and other tesseract package dependencies
 
+```bash
 source /opt/ros/kilted/setup.bash
 colcon build --packages-select aic_assets aic_description --packages-ignore aic_gazebo aic_engine_interfaces --symlink-install --executor sequential
 source install/setup.bash
 pixi run python -m pip install tesseract-robotics==0.5.1
+```
 
 NOTE: The above dependencies are baked into docker and pixi toml
 
