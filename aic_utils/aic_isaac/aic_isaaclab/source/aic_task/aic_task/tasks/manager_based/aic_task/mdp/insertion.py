@@ -78,8 +78,8 @@ def sample_insertion_episode(
     ids = env_ids.to(device=env.device)
     n = len(ids)
 
-    port_pos = port.data.root_pos_w[ids]
-    port_quat = port.data.root_quat_w[ids]
+    port_pos = _as_torch(port.data.root_pos_w)[ids]
+    port_quat = _as_torch(port.data.root_quat_w)[ids]
     entrance_offset = torch.tensor(entrance_offset_port, dtype=torch.float32, device=env.device).repeat(n, 1)
     entrance_pos = port_pos + quat_apply(port_quat, entrance_offset)
     entrance_rpy = torch.tensor(entrance_rpy_port, dtype=torch.float32, device=env.device).repeat(n, 1)
@@ -118,10 +118,20 @@ def _tcp_pose(env, asset_cfg: SceneEntityCfg) -> tuple[torch.Tensor, torch.Tenso
     )
 
 
+def _as_torch(data) -> torch.Tensor:
+    if not isinstance(data, torch.Tensor):
+        import warp as wp
+
+        data = wp.to_torch(data)
+    return data
+
+
 def _first_body_tensor(data: torch.Tensor, asset_cfg: SceneEntityCfg) -> torch.Tensor:
+    data = _as_torch(data)
     body_ids = asset_cfg.body_ids
     body_id = 0 if isinstance(body_ids, slice) else body_ids[0]
-    return data[:, body_id, :]
+    selected = data[:, body_id]
+    return selected if selected.ndim == 2 else selected.reshape(selected.shape[0], -1)
 
 
 def _plug_tip_pose(env, asset_cfg: SceneEntityCfg) -> tuple[torch.Tensor, torch.Tensor]:
@@ -164,11 +174,11 @@ def insertion_actor_observation(
     progress = torch.sum((tcp_pos - buffers.noisy_entrance_pos_w) * entrance_axis_w, dim=1, keepdim=True)
     progress = progress / progress_scale_m
 
-    wrench = _first_body_tensor(robot.data.body_incoming_wrench_w, asset_cfg).clone()
+    wrench = _first_body_tensor(robot.data.body_incoming_joint_wrench_b, asset_cfg).clone()
     wrench[:, :3] /= force_scale_n
     wrench[:, 3:] /= torque_scale_nm
 
-    joint_pos = robot.data.joint_pos[:, asset_cfg.joint_ids] / torch.pi
+    joint_pos = _as_torch(robot.data.joint_pos)[:, asset_cfg.joint_ids] / torch.pi
     return torch.cat([joint_pos, rel_pos_tcp, rel_rot, wrench, progress, env.action_manager.action], dim=1)
 
 
@@ -249,7 +259,25 @@ def insertion_success(
     axis = torch.tensor(insertion_axis_entrance, dtype=torch.float32, device=env.device)
     entrance_axis_w = quat_apply(buffers.true_entrance_quat_w, axis.repeat(env.num_envs, 1))
     depth = torch.sum((plug_pos - buffers.true_entrance_pos_w) * entrance_axis_w, dim=1)
-    return ((lateral <= lateral_threshold_m) & (angle <= angle_threshold_rad) & (depth >= depth_threshold_m)).float()
+    return (lateral <= lateral_threshold_m) & (angle <= angle_threshold_rad) & (depth >= depth_threshold_m)
+
+
+def insertion_success_reward(
+    env,
+    asset_cfg: SceneEntityCfg,
+    insertion_axis_entrance: tuple[float, float, float],
+    lateral_threshold_m: float,
+    angle_threshold_rad: float,
+    depth_threshold_m: float,
+) -> torch.Tensor:
+    return insertion_success(
+        env,
+        asset_cfg,
+        insertion_axis_entrance,
+        lateral_threshold_m,
+        angle_threshold_rad,
+        depth_threshold_m,
+    ).float()
 
 
 def force_guard(
@@ -258,13 +286,13 @@ def force_guard(
     threshold_n: float,
 ) -> torch.Tensor:
     robot: Articulation = env.scene[asset_cfg.name]
-    forces = _first_body_tensor(robot.data.body_incoming_wrench_w, asset_cfg)[:, :3]
+    forces = _first_body_tensor(robot.data.body_incoming_joint_wrench_b, asset_cfg)[:, :3]
     return torch.linalg.norm(forces, dim=1) > threshold_n
 
 
 def force_penalty(env, asset_cfg: SceneEntityCfg) -> torch.Tensor:
     robot: Articulation = env.scene[asset_cfg.name]
-    forces = _first_body_tensor(robot.data.body_incoming_wrench_w, asset_cfg)[:, :3]
+    forces = _first_body_tensor(robot.data.body_incoming_joint_wrench_b, asset_cfg)[:, :3]
     return torch.linalg.norm(forces, dim=1)
 
 
@@ -323,7 +351,7 @@ def insertion_sampling_curriculum(
         lateral_threshold_m,
         angle_threshold_rad,
         depth_threshold_m,
-    ).mean()
+    ).float().mean()
     if success > success_advance_threshold:
         buffers.position_curriculum_m[:] = torch.clamp(
             buffers.position_curriculum_m + position_step_m,

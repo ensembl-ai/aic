@@ -191,7 +191,7 @@ class RewardsCfg:
         },
     )
     insertion_success = RewTerm(
-        func=mdp.insertion_success,
+        func=mdp.insertion_success_reward,
         weight=8.0,
         params={
             "asset_cfg": ROBOT_TCP_CFG,
