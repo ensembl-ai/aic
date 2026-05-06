@@ -248,13 +248,13 @@ python aic_utils/aic_isaac/aic_isaaclab/scripts/list_envs.py --keyword AIC-Inser
 ```
 
 Zero-action reset/step smoke. Let it run for 10-20 seconds, then stop with
-`Ctrl-C`.
+`Ctrl-C`. `AIC-Insertion-v0` disables inherited wrist cameras, so no
+`--enable_cameras` flag is required.
 
 ```bash
 python aic_utils/aic_isaac/aic_isaaclab/scripts/zero_agent.py \
   --task AIC-Insertion-v0 \
   --num_envs 1 \
-  --headless \
   --device cuda:0
 ```
 
@@ -265,7 +265,6 @@ with `Ctrl-C`.
 python aic_utils/aic_isaac/aic_isaaclab/scripts/random_agent.py \
   --task AIC-Insertion-v0 \
   --num_envs 4 \
-  --headless \
   --device cuda:0
 ```
 
@@ -276,7 +275,6 @@ python aic_utils/aic_isaac/aic_isaaclab/scripts/rsl_rl/train.py \
   --task AIC-Insertion-v0 \
   --num_envs 8 \
   --max_iterations 1 \
-  --headless \
   --device cuda:0
 ```
 

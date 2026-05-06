@@ -113,9 +113,15 @@ def sample_insertion_episode(
 def _tcp_pose(env, asset_cfg: SceneEntityCfg) -> tuple[torch.Tensor, torch.Tensor]:
     robot: Articulation = env.scene[asset_cfg.name]
     return (
-        robot.data.body_pos_w[:, asset_cfg.body_ids[0]],
-        robot.data.body_quat_w[:, asset_cfg.body_ids[0]],
+        _first_body_tensor(robot.data.body_pos_w, asset_cfg),
+        _first_body_tensor(robot.data.body_quat_w, asset_cfg),
     )
+
+
+def _first_body_tensor(data: torch.Tensor, asset_cfg: SceneEntityCfg) -> torch.Tensor:
+    body_ids = asset_cfg.body_ids
+    body_id = 0 if isinstance(body_ids, slice) else body_ids[0]
+    return data[:, body_id, :]
 
 
 def _plug_tip_pose(env, asset_cfg: SceneEntityCfg) -> tuple[torch.Tensor, torch.Tensor]:
@@ -158,7 +164,7 @@ def insertion_actor_observation(
     progress = torch.sum((tcp_pos - buffers.noisy_entrance_pos_w) * entrance_axis_w, dim=1, keepdim=True)
     progress = progress / progress_scale_m
 
-    wrench = robot.data.body_incoming_wrench_w[:, asset_cfg.body_ids[0], :].clone()
+    wrench = _first_body_tensor(robot.data.body_incoming_wrench_w, asset_cfg).clone()
     wrench[:, :3] /= force_scale_n
     wrench[:, 3:] /= torque_scale_nm
 
@@ -252,13 +258,13 @@ def force_guard(
     threshold_n: float,
 ) -> torch.Tensor:
     robot: Articulation = env.scene[asset_cfg.name]
-    forces = robot.data.body_incoming_wrench_w[:, asset_cfg.body_ids[0], :3]
+    forces = _first_body_tensor(robot.data.body_incoming_wrench_w, asset_cfg)[:, :3]
     return torch.linalg.norm(forces, dim=1) > threshold_n
 
 
 def force_penalty(env, asset_cfg: SceneEntityCfg) -> torch.Tensor:
     robot: Articulation = env.scene[asset_cfg.name]
-    forces = robot.data.body_incoming_wrench_w[:, asset_cfg.body_ids[0], :3]
+    forces = _first_body_tensor(robot.data.body_incoming_wrench_w, asset_cfg)[:, :3]
     return torch.linalg.norm(forces, dim=1)
 
 

@@ -39,6 +39,9 @@ class AICInsertionSceneCfg(AICTaskSceneCfg):
         super().__post_init__()
         self.robot.spawn.activate_contact_sensors = True
 
+    def _add_wrist_cameras(self) -> None:
+        return None
+
 
 @configclass
 class ActionsCfg:

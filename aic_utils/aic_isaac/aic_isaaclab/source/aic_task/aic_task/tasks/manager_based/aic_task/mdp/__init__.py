@@ -5,20 +5,19 @@
 
 """This sub-module contains the functions that are specific to the environment."""
 
-from isaaclab.envs.mdp import (
-    UniformPoseCommandCfg,
-    action_rate_l2,
+from isaaclab.envs.mdp.commands.commands_cfg import UniformPoseCommandCfg
+from isaaclab.envs.mdp.events import reset_joints_by_offset, reset_joints_by_scale
+from isaaclab.envs.mdp.observations import (
+    body_incoming_wrench,
     body_pose_w,
     generated_commands,
-    image,
+    image_features,
     joint_pos_rel,
-    joint_vel_l2,
     joint_vel_rel,
     last_action,
-    reset_joints_by_scale,
-    time_out,
 )
-from isaaclab.envs.mdp import *  # noqa: F401, F403
+from isaaclab.envs.mdp.rewards import action_rate_l2, joint_vel_l2
+from isaaclab.envs.mdp.terminations import time_out
 
 from .observations import *  # noqa: F401, F403
 from .insertion import *  # noqa: F401, F403

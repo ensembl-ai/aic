@@ -214,7 +214,9 @@ class AICTaskSceneCfg(InteractiveSceneCfg):
 
     def __post_init__(self):
         super().__post_init__()
+        self._add_wrist_cameras()
 
+    def _add_wrist_cameras(self) -> None:
         _cam_spawn = sim_utils.PinholeCameraCfg(
             focal_length=22.48,
             focus_distance=0.0,
