@@ -1,0 +1,73 @@
+num_envs: 4096
+max_iterations: 3000
+seed: 7
+task: AIC-Insertion-v0
+
+sim:
+  dt: 0.004166666666666667
+  decimation: 2
+  episode_length_s: 3.0
+
+curriculum:
+  success_advance_threshold: 0.75
+  success_revert_threshold: 0.50
+  position_initial_m: 0.005
+  position_max_m: 0.05
+  position_step_m: 0.005
+  orientation_initial_rad: 0.0
+  orientation_max_rad: 0.17453292519943295
+  orientation_step_rad: 0.017453292519943295
+
+randomization:
+  entrance_position_noise_m:
+    x: [-0.002, 0.002]
+    y: [-0.002, 0.002]
+    z: [0.0, 0.0]
+  entrance_rpy_noise_rad:
+    roll: [0.0, 0.0]
+    pitch: [0.0, 0.0]
+    yaw: [-0.017453292519943295, 0.017453292519943295]
+  gripper_plug_translation_m:
+    x: [-0.003, 0.003]
+    y: [-0.003, 0.003]
+    z: [-0.002, 0.002]
+  gripper_plug_rpy_rad:
+    roll: [-0.03490658503988659, 0.03490658503988659]
+    pitch: [-0.03490658503988659, 0.03490658503988659]
+    yaw: [-0.03490658503988659, 0.03490658503988659]
+  task_board_position_m:
+    x: [-0.005, 0.005]
+    y: [-0.005, 0.005]
+
+observation:
+  insertion_axis_entrance: [0.0, 0.0, 1.0]
+  position_scale_m: 0.05
+  progress_scale_m: 0.02
+  force_scale_n: 22.0
+  torque_scale_nm: 2.0
+
+action:
+  translation_scale_m: 0.0015
+  rotation_scale_rad: 0.017453292519943295
+
+reward:
+  lateral_sigma_m: 0.006
+  angle_sigma_rad: 0.08
+  depth_scale_m: 0.015
+  lateral_weight: 2.0
+  angle_weight: 1.0
+  depth_weight: 2.5
+  success_weight: 8.0
+  force_penalty_weight: 0.004
+  action_rate_penalty_weight: 0.005
+  joint_velocity_penalty_weight: 0.0002
+  sdf_query_weight: 0.5
+  sapu_interpenetration_threshold_m: 0.001
+  sapu_penalty_weight: 4.0
+
+termination:
+  success_lateral_m: 0.0025
+  success_angle_rad: 0.04
+  success_depth_m: 0.012
+  force_guard_n: 22.0
+  max_lateral_m: 0.08

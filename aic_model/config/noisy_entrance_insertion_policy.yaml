@@ -1,0 +1,24 @@
+checkpoint_path: /app/ws_aic/src/aic/aic_model/checkpoints/insertion_actor.pt
+entrance_topic: /insertion_entrance_pose
+entrance_timeout_s: 2.0
+control_period_s: 0.03333333333333333
+max_policy_duration_s: 55.0
+pose_command_frame: base_link
+insertion_axis_entrance: [0.0, 0.0, 1.0]
+
+position_scale_m: 0.05
+progress_scale_m: 0.02
+force_scale_n: 22.0
+torque_scale_nm: 2.0
+action_translation_scale_m: 0.0015
+action_rotation_scale_rad: 0.017453292519943295
+
+stiffness: [90.0, 90.0, 90.0, 50.0, 50.0, 50.0]
+damping: [50.0, 50.0, 50.0, 20.0, 20.0, 20.0]
+wrench_feedback_gains: [0.5, 0.5, 0.5, 0.0, 0.0, 0.0]
+
+force_guard_n: 22.0
+success_depth_m: 0.012
+success_lateral_m: 0.0025
+success_angle_rad: 0.04
+feedback_period_s: 1.0
