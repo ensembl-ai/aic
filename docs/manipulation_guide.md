@@ -139,6 +139,10 @@ cd /app/ws_aic/src/aic
 pixi install --locked
 pixi run pip install --no-deps --upgrade --no-cache-dir --extra-index-url https://pypi.nvidia.com \
   -r aic_utils/aic_isaac/aic_isaaclab/requirements-isaac.txt
+pixi run pip install -e aic_utils/aic_isaac/aic_isaaclab/source/aic_task
+
+pixi run python -c "import isaacsim; print('isaacsim ok')"
+pixi run python -c "import aic_task; print('aic_task ok')"
 ```
 
 Check out IsaacLab next to the AIC repo:
