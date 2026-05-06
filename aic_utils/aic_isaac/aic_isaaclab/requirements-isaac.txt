@@ -33,6 +33,13 @@ isaacsim-sensor==6.0.0
 isaacsim-storage==6.0.0
 isaacsim-utils==6.0.0
 
+# GUI/editor experiences used by noVNC/X11 runs with `--viz kit`.
+isaacsim-cortex==6.0.0
+isaacsim-example==6.0.0
+isaacsim-gui==6.0.0
+isaacsim-replicator==6.0.0
+isaacsim-test==6.0.0
+
 # Local extension caches avoid first-run registry pulls for core Kit/Physics
 # dependencies when running Isaac Lab headless.
 isaacsim-extscache-kit==6.0.0

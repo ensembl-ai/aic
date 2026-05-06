@@ -86,6 +86,7 @@ PIXIBIN="${PIXI_BIN_DIR}/pixi"
 DISPLAY_NUM="${AIC_BROWSER_DESKTOP_DISPLAY_NUM:-1}"
 DISPLAY_VALUE=":${DISPLAY_NUM}"
 HTTP_PORT="${AIC_BROWSER_DESKTOP_HTTP_PORT:-6080}"
+HTTP_BIND_ADDR="${AIC_BROWSER_DESKTOP_HTTP_BIND_ADDR:-0.0.0.0}"
 VNC_PORT="${AIC_BROWSER_DESKTOP_VNC_PORT:-5901}"
 
 SCREEN_WIDTH="${AIC_BROWSER_DESKTOP_WIDTH:-1920}"
@@ -586,7 +587,7 @@ start_novnc() {
 
   start_detached_process "/tmp/aic-novnc-${HTTP_PORT}.pid" \
     "${novnc_proxy}" \
-      --listen "127.0.0.1:${HTTP_PORT}" \
+      --listen "${HTTP_BIND_ADDR}:${HTTP_PORT}" \
       --vnc "127.0.0.1:${VNC_PORT}"
 }
 
@@ -620,8 +621,8 @@ start_display_stack() {
   start_novnc
 
   log "Display ready."
-  log "Tunnel: ssh -L ${HTTP_PORT}:127.0.0.1:${HTTP_PORT} root@HOST -p PORT"
-  log "Open: http://127.0.0.1:${HTTP_PORT}/vnc.html"
+  log "RunPod HTTP: expose port ${HTTP_PORT}, then open the RunPod HTTP URL ending in /vnc.html"
+  log "noVNC bind: ${HTTP_BIND_ADDR}:${HTTP_PORT}"
 }
 
 main() {
