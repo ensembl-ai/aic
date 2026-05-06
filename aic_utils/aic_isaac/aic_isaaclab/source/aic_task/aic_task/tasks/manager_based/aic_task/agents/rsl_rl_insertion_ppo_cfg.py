@@ -1,14 +1,14 @@
 from isaaclab.utils import configclass
 
 from isaaclab_rl.rsl_rl import (
-    RslRlBaseRunnerCfg,
     RslRlMLPModelCfg,
+    RslRlOnPolicyRunnerCfg,
     RslRlPpoAlgorithmCfg,
 )
 
 
 @configclass
-class InsertionPPORunnerCfg(RslRlBaseRunnerCfg):
+class InsertionPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     seed = 7
     device = "cuda:0"
     num_steps_per_env = 32
