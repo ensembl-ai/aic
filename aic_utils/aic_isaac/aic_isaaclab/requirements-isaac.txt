@@ -1,0 +1,27 @@
+# Isaac Sim packages are installed separately from Pixi so the ROS/Gazebo
+# environment remains locked. Install with:
+#
+#   pixi run pip install --no-deps --upgrade --no-cache-dir \
+#     --extra-index-url https://pypi.nvidia.com \
+#     -r aic_utils/aic_isaac/aic_isaaclab/requirements-isaac.txt
+#
+# Keep non-Isaac Python dependencies such as torch, torchvision, warp-lang,
+# flatdict, lazy-loader, prettytable, and wcwidth in pixi.toml.
+
+isaacsim==6.0.0
+isaacsim-kernel==6.0.0
+isaacsim-app==6.0.0
+isaacsim-asset==6.0.0
+isaacsim-core==6.0.0
+isaacsim-rl==6.0.0
+isaacsim-robot==6.0.0
+isaacsim-robot-motion==6.0.0
+isaacsim-sensor==6.0.0
+isaacsim-storage==6.0.0
+isaacsim-utils==6.0.0
+
+# Local extension caches avoid first-run registry pulls for core Kit/Physics
+# dependencies when running Isaac Lab headless.
+isaacsim-extscache-kit==6.0.0
+isaacsim-extscache-kit-sdk==6.0.0
+isaacsim-extscache-physics==6.0.0
