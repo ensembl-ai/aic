@@ -193,7 +193,7 @@ Manual equivalent, useful when debugging outside `pixi shell`:
 
 ```bash
 export ISAACLAB_ROOT=/app/ws_aic/src/IsaacLab
-export PYTHONPATH="${ISAACLAB_ROOT}/source/isaaclab:${ISAACLAB_ROOT}/source/isaaclab_assets:${ISAACLAB_ROOT}/source/isaaclab_tasks:${ISAACLAB_ROOT}/source/isaaclab_rl:/app/ws_aic/src/aic/aic_utils/aic_isaac/aic_isaaclab/source/aic_task:${PYTHONPATH}"
+export PYTHONPATH="${ISAACLAB_ROOT}/source/isaaclab:${ISAACLAB_ROOT}/source/isaaclab_assets:${ISAACLAB_ROOT}/source/isaaclab_tasks:${ISAACLAB_ROOT}/source/isaaclab_rl:${ISAACLAB_ROOT}/source/isaaclab_visualizers:/app/ws_aic/src/aic/aic_utils/aic_isaac/aic_isaaclab/source/aic_task:${PYTHONPATH}"
 ```
 
 The task USDs are expected in the gitignored directory below.
@@ -289,10 +289,12 @@ python aic_utils/aic_isaac/aic_isaaclab/scripts/rsl_rl/train.py \
 
 GUI/noVNC visual smoke. Use this only when the container has an X server/noVNC
 display. On this Runpod setup the display is `:1`; use the active display if it
-differs. `--viz kit` launches the Kit GUI, so do not add `--headless`.
+differs. `--viz kit` selects the Kit GUI/visualizer path. This works because
+`pixi_env_setup.sh` adds the IsaacLab source checkout, including
+`source/isaaclab_visualizers`, to `PYTHONPATH`. Do not add `--headless`.
 
 ```bash
-DISPLAY=:1 HEADLESS=0 LIVESTREAM=0 python aic_utils/aic_isaac/aic_isaaclab/scripts/zero_agent.py \
+DISPLAY=:1 HEADLESS=0 LIVESTREAM=0 pixi run python aic_utils/aic_isaac/aic_isaaclab/scripts/zero_agent.py \
   --task AIC-Insertion-v0 \
   --num_envs 1 \
   --device cuda:0 \
@@ -309,7 +311,7 @@ is slower, but makes the USD stage easier to inspect. The visual smoke script
 also accepts explicit viewport coordinates:
 
 ```bash
-DISPLAY=:1 HEADLESS=0 LIVESTREAM=0 python aic_utils/aic_isaac/aic_isaaclab/scripts/zero_agent.py \
+DISPLAY=:1 HEADLESS=0 LIVESTREAM=0 pixi run python aic_utils/aic_isaac/aic_isaaclab/scripts/zero_agent.py \
   --task AIC-Insertion-v0 \
   --num_envs 1 \
   --device cuda:0 \
@@ -323,13 +325,13 @@ DISPLAY=:1 HEADLESS=0 LIVESTREAM=0 python aic_utils/aic_isaac/aic_isaaclab/scrip
 To visualize a saved policy checkpoint in the GUI:
 
 ```bash
-DISPLAY=:1 HEADLESS=0 LIVESTREAM=0 python aic_utils/aic_isaac/aic_isaaclab/scripts/rsl_rl/play.py \
+DISPLAY=:1 HEADLESS=0 LIVESTREAM=0 pixi run python aic_utils/aic_isaac/aic_isaaclab/scripts/rsl_rl/play.py \
   --task AIC-Insertion-v0 \
   --num_envs 1 \
   --device cuda:0 \
   --checkpoint logs/rsl_rl/aic_insertion/<run-name>/model_<iter>.pt \
-  --real-time \
-  --viz kit
+  --viz kit \
+  --real-time
 ```
 
 The `--video` flag is separate from the live GUI. It records frames returned by

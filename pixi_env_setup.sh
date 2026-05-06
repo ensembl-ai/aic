@@ -13,6 +13,7 @@ if [[ -n "${isaaclab_root}" ]]; then
     "${isaaclab_root}/source/isaaclab_assets" \
     "${isaaclab_root}/source/isaaclab_tasks" \
     "${isaaclab_root}/source/isaaclab_rl" \
+    "${isaaclab_root}/source/isaaclab_visualizers" \
     "${repo_root}/aic_utils/aic_isaac/aic_isaaclab/source/aic_task"; do
     if [[ -d "${path}" && ":${PYTHONPATH:-}:" != *":${path}:"* ]]; then
       export PYTHONPATH="${path}:${PYTHONPATH:-}"
