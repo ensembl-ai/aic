@@ -63,6 +63,7 @@ onnxscript = ">=0.5,<1"
 osqp = ">=1.0,<2"
 prettytable = "==3.3.0"
 rsl-rl-lib = "==5.0.1"
+scipy = ">=1.15,<1.17"
 tensorboard = ">=2.20,<3"
 torch = { version = "==2.7.1", index = "https://download.pytorch.org/whl/cu128" }
 torchvision = { version = "==0.22.1", index = "https://download.pytorch.org/whl/cu128" }

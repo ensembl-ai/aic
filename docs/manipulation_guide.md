@@ -158,7 +158,7 @@ the updated file once:
 
 ```bash
 cd /app/ws_aic/src/aic
-python -m pip install --no-deps --upgrade --no-cache-dir --extra-index-url https://pypi.nvidia.com \
+pixi run python -m pip install --no-deps --upgrade --no-cache-dir --extra-index-url https://pypi.nvidia.com \
   -r aic_utils/aic_isaac/aic_isaaclab/requirements-isaac.txt
 ```
 
@@ -226,6 +226,9 @@ Use a fresh `pixi shell` so the IsaacLab `PYTHONPATH` additions from
 cd /app/ws_aic/src/aic
 pixi shell
 ```
+
+Inside `pixi shell`, run the commands below as written. From a fresh host shell,
+prefix each `python` command with `pixi run`.
 
 Basic imports:
 
