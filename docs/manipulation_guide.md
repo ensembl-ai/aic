@@ -145,6 +145,18 @@ pixi run python -c "import isaacsim; print('isaacsim ok')"
 pixi run python -c "import aic_task; print('aic_task ok')"
 ```
 
+Because the Isaac wheel layer is installed with `--no-deps`, the requirements
+file also explicitly lists small runtime wheels that Isaac Sim/IsaacLab imports
+before an environment can be constructed, currently `scipy`, `h5py`, and
+`trimesh`. If a shell was already set up before those were added, install the
+updated file once:
+
+```bash
+cd /app/ws_aic/src/aic
+python -m pip install --no-deps --upgrade --no-cache-dir --extra-index-url https://pypi.nvidia.com \
+  -r aic_utils/aic_isaac/aic_isaaclab/requirements-isaac.txt
+```
+
 Check out IsaacLab next to the AIC repo:
 
 ```bash

@@ -12,6 +12,14 @@
 # installed with pip --no-deps.
 scipy>=1.15,<1.17
 
+# Required by IsaacLab's manager/recorder import path before an environment can
+# be constructed. Listed explicitly because local IsaacLab is used from source.
+h5py>=3.12,<4
+
+# Required by IsaacLab terrain/mesh utilities imported through the manager MDP
+# package during environment construction.
+trimesh>=4.7,<5
+
 isaacsim==6.0.0
 isaacsim-kernel==6.0.0
 isaacsim-app==6.0.0
