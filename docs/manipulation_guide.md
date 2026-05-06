@@ -148,9 +148,11 @@ pixi run python -c "import aic_task; print('aic_task ok')"
 Because the Isaac wheel layer is installed with `--no-deps`, the requirements
 file also explicitly lists small runtime wheels that Isaac Sim/IsaacLab imports
 before an environment can be constructed, currently `scipy`, `h5py`, and
-`trimesh`. Pixi also tracks ordinary Python helpers that Isaac/Kit may import
+`trimesh`. It also lists the Isaac GUI/editor wheels used by noVNC/X11
+`--viz kit` runs. Pixi tracks ordinary Python helpers that Isaac/Kit may import
 from optional startup paths, including `coverage` and `botocore` for
-video/camera playback and `moviepy` for Gymnasium video recording.
+video/camera playback, `moviepy` for Gymnasium video recording, and `osqp` for
+the optional Isaac wheeled-robot GUI extension.
 If a shell was already set up before the Isaac-side wheels were added, install
 the updated file once:
 
@@ -281,6 +283,34 @@ python aic_utils/aic_isaac/aic_isaaclab/scripts/rsl_rl/train.py \
   --max_iterations 1 \
   --device cuda:0
 ```
+
+GUI/noVNC visual smoke. Use this only when the container has an X server/noVNC
+display. On this Runpod setup the display is `:1`; use the active display if it
+differs. `--viz kit` launches the Kit GUI, so do not add `--headless`.
+
+```bash
+DISPLAY=:1 HEADLESS=0 LIVESTREAM=0 python aic_utils/aic_isaac/aic_isaaclab/scripts/zero_agent.py \
+  --task AIC-Insertion-v0 \
+  --num_envs 1 \
+  --device cuda:0 \
+  --viz kit
+```
+
+To visualize a saved policy checkpoint in the GUI:
+
+```bash
+DISPLAY=:1 HEADLESS=0 LIVESTREAM=0 python aic_utils/aic_isaac/aic_isaaclab/scripts/rsl_rl/play.py \
+  --task AIC-Insertion-v0 \
+  --num_envs 1 \
+  --device cuda:0 \
+  --checkpoint logs/rsl_rl/aic_insertion/<run-name>/model_<iter>.pt \
+  --real-time \
+  --viz kit
+```
+
+The `--video` flag is separate from the live GUI. It records frames returned by
+the sim environment render path and writes MP4 files under the run's `videos`
+directory; it is not a noVNC desktop/screen capture.
 
 The smoke-test pass criteria are:
 
