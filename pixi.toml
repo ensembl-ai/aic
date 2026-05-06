@@ -11,9 +11,11 @@ preview = ["pixi-build"]
 evdev = ">=1.9.2,<2"
 
 [dependencies]
+python = ">=3.12,<3.13"
 pip = "*"
 isort = "==5.13.2"                                                                     # version bundled by the vscode extension
 json5 = ">=0.13.0,<0.14"                                                               # version bundled by the vscode extension
+matplotlib-base = ">=3.10.3,<4"
 numpy = "<2.3.0"
 packaging = ">=24.2,<26.0"                                                             # required by lerobot==0.4.3
 pyright = "==1.1.408"
@@ -46,6 +48,17 @@ lerobot_teleoperator_devices = { git = "https://github.com/koonpeng/lerobot-ros"
 mujoco = "==3.5.0"
 pynput = ">=1.7.6,<2"
 pyspacemouse = ">=2.0.0, <3"
+
+[target.linux-64.pypi-dependencies]
+# IsaacLab runtime helpers that Pixi can safely manage. Isaac Sim packages are
+# intentionally installed separately from requirements-isaac.txt with --no-deps.
+flatdict = "==4.0.0"
+lazy-loader = "==0.5"
+prettytable = "==3.3.0"
+torch = { version = "==2.7.1", index = "https://download.pytorch.org/whl/cu128" }
+torchvision = { version = "==0.22.1", index = "https://download.pytorch.org/whl/cu128" }
+warp-lang = "==1.12.0"
+wcwidth = "==0.7.0"
 
 [activation]
 scripts = ["pixi_env_setup.sh"]
