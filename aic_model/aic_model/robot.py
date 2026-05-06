@@ -521,7 +521,7 @@ class EnsemblRobot:
     @with_resolved_frames
     def ComputeFK(
         self,
-        joint_values: np.ndarray | list[float] | None = None,
+        joint_values: np.ndarray | list[float] | str | None = None,
         target_frame: str | None = None,
         base_frame: str | None = None,
     ) -> np.ndarray:
@@ -532,6 +532,12 @@ class EnsemblRobot:
         observed manipulator joints. Otherwise, ``joint_values`` must be an
         explicit manipulator joint vector in manipulator joint order.
         """
+
+        if isinstance(joint_values, str):
+            if target_frame is not None and target_frame != self.manipulator_tip_frame:
+                base_frame = target_frame
+            target_frame = joint_values
+            joint_values = None
 
         if joint_values is None:
             self._sync_latest_state()
