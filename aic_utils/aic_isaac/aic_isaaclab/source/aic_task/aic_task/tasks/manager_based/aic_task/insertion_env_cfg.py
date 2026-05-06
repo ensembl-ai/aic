@@ -283,4 +283,5 @@ class AICInsertionEnvCfg(ManagerBasedRLEnvCfg):
         self.sim.render_interval = self.decimation
         self.sim.dt = 1.0 / 240.0
         self.episode_length_s = 3.0
-        self.viewer.eye = (1.0, 0.0, 0.8)
+        self.viewer.eye = (0.85, -0.55, 0.55)
+        self.viewer.lookat = (0.28, 0.20, 0.04)

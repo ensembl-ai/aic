@@ -296,7 +296,28 @@ DISPLAY=:1 HEADLESS=0 LIVESTREAM=0 python aic_utils/aic_isaac/aic_isaaclab/scrip
   --task AIC-Insertion-v0 \
   --num_envs 1 \
   --device cuda:0 \
-  --viz kit
+  --viz kit \
+  --real-time \
+  --disable_fabric
+```
+
+If the viewport opens but looks empty or black, wait until the log prints
+`[INFO]: Completed setting up the environment...`, then select
+`/World/envs/env_0/Robot` or `/World/envs/env_0/task_board` in the Stage tree and
+press `F` to frame it. Keep `--disable_fabric` for one-env visual debugging; it
+is slower, but makes the USD stage easier to inspect. The visual smoke script
+also accepts explicit viewport coordinates:
+
+```bash
+DISPLAY=:1 HEADLESS=0 LIVESTREAM=0 python aic_utils/aic_isaac/aic_isaaclab/scripts/zero_agent.py \
+  --task AIC-Insertion-v0 \
+  --num_envs 1 \
+  --device cuda:0 \
+  --viz kit \
+  --real-time \
+  --disable_fabric \
+  --viewer-eye 0.85 -0.55 0.55 \
+  --viewer-target 0.28 0.20 0.04
 ```
 
 To visualize a saved policy checkpoint in the GUI:
