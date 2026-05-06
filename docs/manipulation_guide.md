@@ -247,22 +247,23 @@ IsaacLab/Kit environment listing:
 python aic_utils/aic_isaac/aic_isaaclab/scripts/list_envs.py --keyword AIC-Insertion
 ```
 
-Zero-action reset/step smoke. Let it run for 10-20 seconds, then stop with
-`Ctrl-C`. `AIC-Insertion-v0` disables inherited wrist cameras, so no
-`--enable_cameras` flag is required.
+Zero-action reset/step smoke. Exit code `124` from `timeout` is expected here:
+it means the environment kept stepping until the timeout without a traceback.
+`AIC-Insertion-v0` disables inherited wrist cameras, so no `--enable_cameras`
+flag is required.
 
 ```bash
-python aic_utils/aic_isaac/aic_isaaclab/scripts/zero_agent.py \
+timeout 30s python aic_utils/aic_isaac/aic_isaaclab/scripts/zero_agent.py \
   --task AIC-Insertion-v0 \
   --num_envs 1 \
   --device cuda:0
 ```
 
-Random-action action/IK/contact smoke. Let it run for 20-30 seconds, then stop
-with `Ctrl-C`.
+Random-action action/IK/contact smoke. Exit code `124` from `timeout` has the
+same meaning here.
 
 ```bash
-python aic_utils/aic_isaac/aic_isaaclab/scripts/random_agent.py \
+timeout 30s python aic_utils/aic_isaac/aic_isaaclab/scripts/random_agent.py \
   --task AIC-Insertion-v0 \
   --num_envs 4 \
   --device cuda:0
