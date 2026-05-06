@@ -75,6 +75,7 @@ simulation_app = app_launcher.app
 
 """Rest everything follows."""
 
+import importlib.metadata as metadata
 import os
 import time
 
@@ -97,6 +98,7 @@ from isaaclab_rl.rsl_rl import (
     RslRlVecEnvWrapper,
     export_policy_as_jit,
     export_policy_as_onnx,
+    handle_deprecated_rsl_rl_cfg,
 )
 from isaaclab_rl.utils.pretrained_checkpoint import get_published_pretrained_checkpoint
 
@@ -119,6 +121,9 @@ def main(
 
     # override configurations with non-hydra CLI arguments
     agent_cfg: RslRlBaseRunnerCfg = cli_args.update_rsl_rl_cfg(agent_cfg, args_cli)
+    agent_cfg = handle_deprecated_rsl_rl_cfg(
+        agent_cfg, metadata.version("rsl-rl-lib")
+    )
     env_cfg.scene.num_envs = (
         args_cli.num_envs if args_cli.num_envs is not None else env_cfg.scene.num_envs
     )

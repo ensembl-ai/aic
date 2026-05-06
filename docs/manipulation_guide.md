@@ -148,8 +148,11 @@ pixi run python -c "import aic_task; print('aic_task ok')"
 Because the Isaac wheel layer is installed with `--no-deps`, the requirements
 file also explicitly lists small runtime wheels that Isaac Sim/IsaacLab imports
 before an environment can be constructed, currently `scipy`, `h5py`, and
-`trimesh`. If a shell was already set up before those were added, install the
-updated file once:
+`trimesh`. Pixi also tracks ordinary Python helpers that Isaac/Kit may import
+from optional startup paths, including `coverage` and `botocore` for
+video/camera playback and `moviepy` for Gymnasium video recording.
+If a shell was already set up before the Isaac-side wheels were added, install
+the updated file once:
 
 ```bash
 cd /app/ws_aic/src/aic

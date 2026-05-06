@@ -52,9 +52,12 @@ pyspacemouse = ">=2.0.0, <3"
 [target.linux-64.pypi-dependencies]
 # IsaacLab runtime helpers that Pixi can safely manage. Isaac Sim packages are
 # intentionally installed separately from requirements-isaac.txt with --no-deps.
+botocore = ">=1.35,<2"
+coverage = ">=7,<8"
 flatdict = "==4.0.0"
 hydra-core = ">=1.3,<1.4"
 lazy-loader = "==0.5"
+moviepy = "==1.0.3"
 onnx = ">=1.18,<2"
 onnxscript = ">=0.5,<1"
 prettytable = "==3.3.0"

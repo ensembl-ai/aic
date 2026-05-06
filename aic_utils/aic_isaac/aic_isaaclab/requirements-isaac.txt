@@ -6,7 +6,8 @@
 #     -r aic_utils/aic_isaac/aic_isaaclab/requirements-isaac.txt
 #
 # Keep non-Isaac Python dependencies such as torch, torchvision, warp-lang,
-# flatdict, lazy-loader, prettytable, and wcwidth in pixi.toml.
+# botocore, coverage, moviepy, flatdict, lazy-loader, prettytable, and wcwidth
+# in pixi.toml.
 
 # Required by isaacsim.core.utils.numpy. Listed explicitly because this file is
 # installed with pip --no-deps.
