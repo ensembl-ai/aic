@@ -8,6 +8,10 @@
 # Keep non-Isaac Python dependencies such as torch, torchvision, warp-lang,
 # flatdict, lazy-loader, prettytable, and wcwidth in pixi.toml.
 
+# Required by isaacsim.core.utils.numpy. Listed explicitly because this file is
+# installed with pip --no-deps.
+scipy>=1.15,<1.17
+
 isaacsim==6.0.0
 isaacsim-kernel==6.0.0
 isaacsim-app==6.0.0
