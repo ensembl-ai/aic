@@ -57,8 +57,20 @@
 # No /etc/profile.d writes.
 # No exec bash -l.
 # ROS and Pixi/Codex PATH are activated in the current shell when sourced.
+# This script is often sourced to activate ROS/Pixi/DISPLAY.
+# Therefore, never leak strict shell options into the user's interactive shell.
+AIC_SCRIPT_SOURCED=0
+if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
+  AIC_SCRIPT_SOURCED=1
+fi
 
-set -Eeuo pipefail
+if [[ "${AIC_SCRIPT_SOURCED}" -eq 0 ]]; then
+  set -Eeuo pipefail
+else
+  set +e
+  set +u
+  set +o pipefail 2>/dev/null || true
+fi
 
 FIRST=0
 DISPLAY_ENABLE=0
