@@ -9,6 +9,13 @@ setup(
     data_files=[
         ("share/ament_index/resource_index/packages", ["resource/" + package_name]),
         ("share/" + package_name, ["package.xml"]),
+        (
+            "share/" + package_name + "/config",
+            [
+                "config/noisy_entrance_insertion_policy.yaml",
+                "config/insertion_policy_training.yaml",
+            ],
+        ),
     ],
     install_requires=["setuptools"],
     zip_safe=True,
@@ -24,6 +31,7 @@ setup(
     entry_points={
         "console_scripts": [
             "aic_model = aic_model.aic_model:main",
+            "aic_insertion_train = aic_model.insertion_policy.training.launch:main",
         ],
     },
 )

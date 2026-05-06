@@ -9680,6 +9680,7 @@ packages:
   - ros-kilted-aic-task-interfaces
   - ros-kilted-geometry-msgs
   - ros-kilted-lifecycle-msgs
+  - transforms3d
   - ros-kilted-rclpy
   - ros-kilted-sensor-msgs
   - ros-kilted-std-srvs
@@ -9705,6 +9706,7 @@ packages:
   - ros-kilted-aic-task-interfaces
   - ros-kilted-geometry-msgs
   - ros-kilted-lifecycle-msgs
+  - transforms3d
   - ros-kilted-rclpy
   - ros-kilted-sensor-msgs
   - ros-kilted-std-srvs

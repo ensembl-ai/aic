@@ -518,18 +518,31 @@ class EnsemblRobot:
             self._collision_object_poses,
         )
 
-    @with_latest_state
     @with_resolved_frames
     def ComputeFK(
         self,
+        joint_values: np.ndarray | list[float] | None = None,
         target_frame: str | None = None,
         base_frame: str | None = None,
     ) -> np.ndarray:
         """
-        Return the current 4x4 transform of ``target_frame`` relative to ``base_frame``.
+        Return the 4x4 transform of ``target_frame`` relative to ``base_frame``.
+
+        If ``joint_values`` is None, the transform is computed from the current
+        observed manipulator joints. Otherwise, ``joint_values`` must be an
+        explicit manipulator joint vector in manipulator joint order.
         """
 
-        joint_positions = self.GetActiveDOFValues()
+        if joint_values is None:
+            self._sync_latest_state()
+            joint_positions = self.GetActiveDOFValues()
+        else:
+            joint_positions = np.asarray(joint_values, dtype=np.float64).reshape(-1)
+            if joint_positions.size != len(self._manipulator_joint_names):
+                raise ValueError(
+                    f"Expected {len(self._manipulator_joint_names)} manipulator joints, "
+                    f"got {joint_positions.size}."
+                )
         link_transforms = self._joint_group.calcFwdKin(joint_positions)
         return np.asarray(
             (

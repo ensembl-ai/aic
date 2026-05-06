@@ -64,8 +64,10 @@ For IK, the input transform is interpreted as the desired
 `target_frame` pose expressed in `base_frame`. Both frames must be links on the
 configured manipulator chain, otherwise the call raises `ValueError`.
 
-- `robot.ComputeFK(target_frame=None, base_frame=None) -> np.ndarray`: returns a
-  `(4, 4)` `float64` homogeneous transform for the current state.
+- `robot.ComputeFK(joint_values=None, target_frame=None, base_frame=None) -> np.ndarray`:
+  returns a `(4, 4)` `float64` homogeneous transform. With `joint_values=None`,
+  it uses the current observed manipulator joints. With `joint_values` supplied,
+  it computes FK for that explicit manipulator joint vector.
 - `robot.ComputeIK(transform, target_frame=None, base_frame=None, return_all=False, check_collision=True)`:
   `transform` must be a `(4, 4)` array-like homogeneous matrix and is converted
   to `np.float64`. Returns the closest collision-free joint vector as shape
@@ -172,3 +174,153 @@ curl -L --fail \
 rm -rf "$ASSET_PARENT/Intrinsic_assets"
 unzip -q "$AIC_ISAAC_CACHE_ROOT/Intrinsic_assets.zip" -d "$ASSET_PARENT"
 ```
+
+## Insertion policy
+
+The insertion-only policy lives under `aic_model/aic_model/insertion_policy`.
+It deliberately does not use the task-board ground-truth transform path at
+runtime. The expected runtime inputs are:
+
+- `geometry_msgs/PoseStamped` on `/insertion_entrance_pose`, with
+  `header.frame_id=base_link`. This is the noisy insertion-entrance estimate
+  produced by the upstream perception/localization algorithm.
+- `get_observation()`, specifically joint state, controller TCP pose/velocity,
+  and wrist wrench.
+
+The policy computes all target poses in `base_link`, validates the target TCP
+through `EnsemblRobot.ComputeIK`, verifies the returned joint vector with
+`EnsemblRobot.ComputeFK(joint_values=...)`, then streams `MotionUpdate` commands to
+the Cartesian controller. Transforms use `transforms3d`; the policy code does
+not implement custom quaternion math.
+
+Run the controller policy:
+
+```bash
+pixi run ros2 run aic_model aic_model --ros-args \
+  -p use_sim_time:=true \
+  -p policy:=aic_model.insertion_policy.InsertionPolicy \
+  -p insertion_policy.config_path:=/app/ws_aic/src/aic/aic_model/config/noisy_entrance_insertion_policy.yaml
+```
+
+The config is strict: missing keys, empty frame/topic names, non-unit insertion
+axes, invalid force guards, and invalid curriculum bounds fail at startup rather
+than falling back to hidden defaults.
+
+## Insertion RL training
+
+The RL side is split into small pieces:
+
+- `aic_model.insertion_policy.training.observation`: deployable actor
+  observation encoder. Actor inputs are joint position/velocity, TCP pose
+  relative to noisy entrance, TCP velocity, wrist wrench, and previous action.
+  True port/board state is not encoded.
+- `aic_model.insertion_policy.training.actor_critic`: asymmetric actor-critic
+  MLP. The actor consumes deployable observations; the critic can consume
+  simulator-only privileged state during PPO.
+- `aic_utils/aic_isaac/.../aic_task/insertion_env_cfg.py`: Isaac Lab
+  `AIC-Insertion-v0` task registration with insertion-specific observations,
+  rewards, terminations, start-state curriculum, and domain randomization.
+- `aic_utils/aic_isaac/.../agents/rsl_rl_insertion_ppo_cfg.py`: RSL-RL PPO
+  config for the insertion task.
+
+Training launch:
+
+```bash
+pixi run ros2 run aic_model aic_insertion_train -- \
+  --num_envs 4096 \
+  --max_iterations 3000 \
+  --seed 7 \
+  --run_name aic_insertion_4096env \
+  --headless
+```
+
+Isaac Sim must be usable non-interactively before that command can run. In this
+container, `import isaacsim` currently stops at NVIDIA's Omniverse EULA prompt.
+Accept it once in an interactive shell, then re-run the training command.
+
+```bash
+pixi run python -c "import isaacsim"
+```
+
+The training task resets the TCP near the true entrance using `EnsemblRobot` IK.
+The sampled start offset radius begins at `0.005 m` and expands up to `0.05 m`.
+The start orientation curriculum begins at `0 deg` and expands to `+-10 deg`
+about each XYZ axis. The curriculum update mirrors the IndustReal pattern:
+
+```text
+if success_rate > 0.75:
+  position_max += 0.005 m
+  orientation_max += 1 deg
+elif success_rate < 0.50:
+  position_max -= 0.005 m
+  orientation_max -= 1 deg
+```
+
+The actor is trained against noisy entrance estimates. The critic additionally
+sees privileged true entrance error and estimator error, so PPO can learn a
+cleaner value function without leaking privileged state into deployment.
+
+PPO math used by RSL-RL:
+
+```text
+r_t(theta) = pi_theta(a_t | o_t) / pi_old(a_t | o_t)
+L_policy = -mean(min(r_t A_t, clip(r_t, 1-eps, 1+eps) A_t))
+L_value = mean((V(s_t) - R_t)^2), optionally clipped
+L_total = L_policy + c_v L_value - c_e entropy
+```
+
+The insertion reward terms are:
+
+```text
+R = 2.0 * exp(-||xy_error||^2 / 0.006^2)
+  + 1.0 * exp(-angle_error^2 / 0.08^2)
+  + 2.5 * clamp(insertion_depth / 0.015, -1, 1)
+  + 8.0 * success
+  - 0.004 * ||tcp_force||
+  - 0.005 * ||action_t - action_{t-1}||^2
+  - 0.0002 * ||joint_velocity||^2
+```
+
+Success terminates an episode when lateral error is at most `0.0025 m`,
+orientation error is at most `0.04 rad`, and insertion depth is at least
+`0.012 m`. Force guard termination trips above `22 N`.
+
+With `num_envs=4096`, `num_steps_per_env=32`, each PPO update collects:
+
+```text
+4096 * 32 = 131072 transitions/update
+131072 / 8 minibatches = 16384 samples/minibatch
+```
+
+The insertion sim config uses `dt=1/240 s` and `decimation=2`, so the control
+period is `1/120 s`. The nominal vectorized environment step capacity before
+physics/contact overhead is:
+
+```text
+4096 envs * 120 control steps/s = 491520 env-steps/s
+```
+
+Measured on this machine's RTX 5090 with TF32 enabled, the standalone actor MLP
+forward pass for batch `4096` ran:
+
+```text
+elapsed = 0.177490 s for 1000 forwards
+mean forward = 0.1775 ms per 4096-observation batch
+actor throughput = 23077356 observations/s
+```
+
+Kernel/performance choices made here:
+
+- Actor and critic are plain fused-friendly MLPs with ELU activations and
+  contiguous concatenated observations.
+- Cameras are excluded from the insertion actor observation to keep the policy
+  proprioceptive and fast.
+- PPO uses large GPU batches: `4096` envs and `131072` transitions per update.
+- TF32 is enabled for CUDA matmul and cuDNN in the training launch path.
+- The simulator-side actor observation is one concatenated tensor; privileged
+  critic terms are a separate observation group for asymmetric training.
+
+No Isaac PPO loss curves or trained success-rate numbers were produced in this
+pass because Isaac Sim stopped at the interactive EULA prompt before the
+environment could start. The PyTorch actor path, package install path, and
+non-Isaac tests were verified.

@@ -21,6 +21,7 @@ from isaaclab.envs.mdp import (
 from isaaclab.envs.mdp import *  # noqa: F401, F403
 
 from .observations import *  # noqa: F401, F403
+from .insertion import *  # noqa: F401, F403
 from .rewards import (  # noqa: F401
     body_lin_acc_l2,
     ee_reaching_bonus,
