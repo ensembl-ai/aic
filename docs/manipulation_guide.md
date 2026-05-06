@@ -161,6 +161,24 @@ git fetch origin v3.0.0-beta
 git checkout v3.0.0-beta
 ```
 
+The IsaacLab checkout is source code, not automatically importable just because
+it exists under `/app/ws_aic/src`. The repo activation script
+`pixi_env_setup.sh` adds these paths when entering a fresh `pixi shell`. If the
+shell was already open, either exit and re-enter `pixi shell`, or source the
+activation script once:
+
+```bash
+cd /app/ws_aic/src/aic
+source pixi_env_setup.sh
+```
+
+Manual equivalent, useful when debugging outside `pixi shell`:
+
+```bash
+export ISAACLAB_ROOT=/app/ws_aic/src/IsaacLab
+export PYTHONPATH="${ISAACLAB_ROOT}/source/isaaclab:${ISAACLAB_ROOT}/source/isaaclab_assets:${ISAACLAB_ROOT}/source/isaaclab_tasks:${ISAACLAB_ROOT}/source/isaaclab_rl:/app/ws_aic/src/aic/aic_utils/aic_isaac/aic_isaaclab/source/aic_task:${PYTHONPATH}"
+```
+
 The task USDs are expected in the gitignored directory below.
 
 ```text
@@ -180,6 +198,85 @@ curl -L --fail \
 rm -rf "$ASSET_PARENT/Intrinsic_assets"
 unzip -q "$AIC_ISAAC_CACHE_ROOT/Intrinsic_assets.zip" -d "$ASSET_PARENT"
 ```
+
+## Isaac insertion smoke tests
+
+Run these before full-scale PPO. They are ordered from cheapest to most useful.
+Use a fresh `pixi shell` so the IsaacLab `PYTHONPATH` additions from
+`pixi_env_setup.sh` are active.
+
+```bash
+cd /app/ws_aic/src/aic
+pixi shell
+```
+
+Basic imports:
+
+```bash
+python -c "import isaacsim; print('isaacsim ok')"
+python -c "import isaaclab; import isaaclab_tasks; import isaaclab_rl; import aic_task; print('isaaclab/aic_task ok')"
+```
+
+Direct Gym registration check without launching Kit:
+
+```bash
+python -c "import gymnasium as gym; import aic_task.tasks; print([spec.id for spec in gym.registry.values() if 'AIC-' in spec.id])"
+```
+
+Expected output includes:
+
+```text
+['AIC-Task-v0', 'AIC-Insertion-v0']
+```
+
+IsaacLab/Kit environment listing:
+
+```bash
+python aic_utils/aic_isaac/aic_isaaclab/scripts/list_envs.py --keyword AIC-Insertion
+```
+
+Zero-action reset/step smoke. Let it run for 10-20 seconds, then stop with
+`Ctrl-C`.
+
+```bash
+python aic_utils/aic_isaac/aic_isaaclab/scripts/zero_agent.py \
+  --task AIC-Insertion-v0 \
+  --num_envs 1 \
+  --headless \
+  --device cuda:0
+```
+
+Random-action action/IK/contact smoke. Let it run for 20-30 seconds, then stop
+with `Ctrl-C`.
+
+```bash
+python aic_utils/aic_isaac/aic_isaaclab/scripts/random_agent.py \
+  --task AIC-Insertion-v0 \
+  --num_envs 4 \
+  --headless \
+  --device cuda:0
+```
+
+One-iteration PPO plumbing check:
+
+```bash
+python aic_utils/aic_isaac/aic_isaaclab/scripts/rsl_rl/train.py \
+  --task AIC-Insertion-v0 \
+  --num_envs 8 \
+  --max_iterations 1 \
+  --headless \
+  --device cuda:0
+```
+
+The smoke-test pass criteria are:
+
+- Imports succeed without `ModuleNotFoundError`.
+- `AIC-Insertion-v0` appears in Gym registration.
+- Zero-action run prints observation/action spaces and steps without reset,
+  asset, observation, reward, or termination-manager exceptions.
+- Random-action run steps without IK/action-shape/contact-manager exceptions.
+- One PPO iteration reaches an update and writes a run under
+  `logs/rsl_rl/aic_insertion/`.
 
 ## Insertion policy
 
