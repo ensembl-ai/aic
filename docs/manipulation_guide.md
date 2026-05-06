@@ -399,15 +399,52 @@ Success terminates an episode when lateral error is at most `0.0025 m`,
 orientation error is at most `0.04 rad`, and insertion depth is at least
 `0.012 m`. Force guard termination trips above `22 N`.
 
+### Training time accounting
+
+The `timeout 30s` smoke tests above use wall-clock time only. They are bounded
+health checks for scripts that otherwise run forever; they are not training
+horizons.
+
+For training, count aggregate simulated time across all vectorized environments.
+The insertion sim config uses `dt=1/240 s` and `decimation=2`, so each RL control
+step advances:
+
+```text
+2 * (1 / 240) = 1 / 120 simulated seconds per environment
+```
+
+With `num_envs=4096`, one RL step represents:
+
+```text
+4096 * (1 / 120) = 34.13 aggregate simulated seconds
+```
+
 With `num_envs=4096`, `num_steps_per_env=32`, each PPO update collects:
 
 ```text
 4096 * 32 = 131072 transitions/update
 131072 / 8 minibatches = 16384 samples/minibatch
+131072 / 120 = 1092.27 aggregate simulated seconds/update
+= 18.20 aggregate simulated minutes/update
 ```
 
-The insertion sim config uses `dt=1/240 s` and `decimation=2`, so the control
-period is `1/120 s`. The nominal vectorized environment step capacity before
+At `3000` PPO updates, that is:
+
+```text
+3000 * 1092.27 s = 3276800 aggregate simulated seconds
+= 910.22 aggregate simulated hours
+```
+
+For a larger intuition check:
+
+```text
+1000000 RL steps at 4096 envs
+= 1000000 * 4096 / 120 / 3600
+= 9481.48 aggregate simulated hours
+```
+
+Wall-clock speed depends on PhysX/contact workload, rendering, GPU occupancy,
+and reset cost. The nominal vectorized environment step capacity before
 physics/contact overhead is:
 
 ```text

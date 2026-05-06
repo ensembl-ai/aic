@@ -4,6 +4,8 @@ __pycache__/
 build/
 install/
 log/
+logs/
+outputs/
 files.txt
 
 # pixi environments
