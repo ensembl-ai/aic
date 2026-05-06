@@ -106,3 +106,69 @@ by IK, planning, and execution. `SetActiveDOFValues(joint_values)` is only for
 offline/simulated use, i.e. when `EnsemblRobot()` was created without
 `get_observation`. `GetEnv()` returns the refreshed native Tesseract environment
 for advanced scene/object updates.
+
+
+## Isaac Sim LeRobot Collection
+
+These commands are for a fresh `aic_eval`/Runpod container after the AIC repo is
+available at `/app/ws_aic/src/aic`. The flow is intentionally split: Pixi
+installs the normal dependencies, then pip installs only the Isaac Sim wheel
+layer with `--no-deps` so the AIC Pixi-locked Gazebo and LeRobot stack stays
+intact.
+
+Check that the container can see the GPU and that Pixi is on `PATH`:
+
+```bash
+nvidia-smi
+command -v pixi
+```
+
+Install the repo environment, then install the Isaac Sim packages from the
+single Isaac requirements file. Do not omit `--no-deps`; allowing dependency
+resolution here can replace Torch, CUDA, Numpy, or LeRobot versions from
+`pixi.lock`. The expected Isaac-side stack is Isaac Sim `6.0.0`, IsaacLab
+`v3.0.0-beta`, Python `3.12`, repo-locked Torch `2.7.1`, Torchvision `0.22.1`,
+and LeRobot `0.5.1`.
+
+```bash
+cd /app/ws_aic/src/aic
+pixi install --locked
+pixi run pip install --no-deps --upgrade --no-cache-dir --extra-index-url https://pypi.nvidia.com \
+  -r aic_utils/aic_isaac/aic_isaaclab/requirements-isaac.txt
+```
+
+Check out IsaacLab next to the AIC repo:
+
+```bash
+cd /app/ws_aic/src
+git clone --branch v3.0.0-beta --depth 1 \
+  https://github.com/isaac-sim/IsaacLab.git IsaacLab
+```
+
+If `IsaacLab` already exists, put it on the expected beta tag instead:
+
+```bash
+cd /app/ws_aic/src/IsaacLab
+git fetch origin v3.0.0-beta
+git checkout v3.0.0-beta
+```
+
+The task USDs are expected in the gitignored directory below.
+
+```text
+aic_utils/aic_isaac/aic_isaaclab/source/aic_task/aic_task/tasks/manager_based/aic_task/Intrinsic_assets/
+```
+
+Download the assets:
+
+```bash
+cd /app/ws_aic/src/aic
+ASSET_PARENT="aic_utils/aic_isaac/aic_isaaclab/source/aic_task/aic_task/tasks/manager_based/aic_task"
+AIC_ISAAC_CACHE_ROOT="/app/ws_aic/src/.cache/aic_isaac"
+mkdir -p "$AIC_ISAAC_CACHE_ROOT" "$ASSET_PARENT"
+curl -L --fail \
+  -o "$AIC_ISAAC_CACHE_ROOT/Intrinsic_assets.zip" \
+  "https://developer.nvidia.com/downloads/Omniverse/learning/Events/Hackathons/Intrinsic_assets.zip"
+rm -rf "$ASSET_PARENT/Intrinsic_assets"
+unzip -q "$AIC_ISAAC_CACHE_ROOT/Intrinsic_assets.zip" -d "$ASSET_PARENT"
+```
