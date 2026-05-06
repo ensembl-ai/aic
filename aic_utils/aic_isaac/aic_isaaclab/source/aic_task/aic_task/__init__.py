@@ -10,5 +10,9 @@ Python module serving as a project/extension template.
 # Register Gym environments.
 from .tasks import *
 
-# Register UI extensions.
-from .extension import *
+# Register UI extensions when the package is imported by Omniverse Kit.
+try:
+    from .extension import *
+except ModuleNotFoundError as exc:
+    if exc.name != "omni":
+        raise
