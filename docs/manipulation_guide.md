@@ -334,6 +334,19 @@ DISPLAY=:1 HEADLESS=0 LIVESTREAM=0 pixi run python aic_utils/aic_isaac/aic_isaac
   --real-time
 ```
 
+To watch PPO collection/training step the environment in the GUI, run a tiny
+visual-only training job. `train.py` does not accept `--disable_fabric` or
+`--real-time`; use those only with the smoke/play scripts that define them.
+
+```bash
+DISPLAY=:1 HEADLESS=0 LIVESTREAM=0 pixi run python aic_utils/aic_isaac/aic_isaaclab/scripts/rsl_rl/train.py \
+  --task AIC-Insertion-v0 \
+  --num_envs 1 \
+  --max_iterations 10 \
+  --device cuda:0 \
+  --viz kit
+```
+
 The `--video` flag is separate from the live GUI. It records frames returned by
 the sim environment render path and writes MP4 files under the run's `videos`
 directory; it is not a noVNC desktop/screen capture.
