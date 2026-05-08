@@ -6,39 +6,39 @@
 #   # 1) First-time setup on a fresh container.
 #   # Installs apt packages, Pixi, Node.js/Codex, configures key-only SSH,
 #   # sets Git/GitHub SSH key, and sources ROS/Pixi into this terminal.
-#   source ./aic_runpod_session.bash --first
+#   source runpod/runpod_setup.bash --first
 #
 #   # 2) Activate this SSH terminal/session only.
 #   # Sources ROS and adds Pixi/Codex to PATH. Does not start display.
-#   source ./aic_runpod_session.bash
+#   source runpod/runpod_setup.bash
 #
 #   # 3) Start or reuse remote display for this terminal.
 #   # Starts NVIDIA Xorg + openbox + x11vnc + noVNC.
 #   # Exports DISPLAY/XAUTHORITY in this terminal.
-#   source ./aic_runpod_session.bash --display
+#   source runpod/runpod_setup.bash --display
 #
 #   # 4) Restart remote display cleanly for this terminal.
 #   # Use when Gazebo/RViz/noVNC/display becomes stale or weird.
-#   source ./aic_runpod_session.bash --restart-display
+#   source runpod/runpod_setup.bash --restart-display
 #
 #   # 5) Stop remote display stack.
 #   # Stops Xorg/openbox/x11vnc/noVNC. Does not need source.
-#   ./aic_runpod_session.bash --stop-display
+#   source runpod/runpod_setup.bash --stop-display
 #
 #   # 6) Use alternate noVNC browser port if 6080 is occupied.
-#   source ./aic_runpod_session.bash --display --http-port 6081
+#   source runpod/runpod_setup.bash --display --http-port 6081
 #
 #   # 7) Use alternate VNC backend port if 5901 is occupied.
-#   source ./aic_runpod_session.bash --display --vnc-port 5902
+#   source runpod/runpod_setup.bash --display --vnc-port 5902
 #
 #   # 8) Use a different X display number if :1 is occupied/stale.
-#   source ./aic_runpod_session.bash --display --display-num 2
+#   source runpod/runpod_setup.bash --display --display-num 2
 #
 #   # 9) First-time setup but skip Codex installation.
-#   source ./aic_runpod_session.bash --first --no-codex
+#   source runpod/runpod_setup.bash --first --no-codex
 #
 #   # 10) Show available arguments.
-#   ./aic_runpod_session.bash --help
+#   source runpod/runpod_setup.bash --help
 #
 # Notes:
 #   - Use `source` when you want ROS/Pixi/DISPLAY variables to persist
@@ -86,6 +86,7 @@ PIXIBIN="${PIXI_BIN_DIR}/pixi"
 DISPLAY_NUM="${AIC_BROWSER_DESKTOP_DISPLAY_NUM:-1}"
 DISPLAY_VALUE=":${DISPLAY_NUM}"
 HTTP_PORT="${AIC_BROWSER_DESKTOP_HTTP_PORT:-6080}"
+HTTP_BIND_ADDR="${AIC_BROWSER_DESKTOP_HTTP_BIND_ADDR:-0.0.0.0}"
 VNC_PORT="${AIC_BROWSER_DESKTOP_VNC_PORT:-5901}"
 
 SCREEN_WIDTH="${AIC_BROWSER_DESKTOP_WIDTH:-1920}"
@@ -586,7 +587,7 @@ start_novnc() {
 
   start_detached_process "/tmp/aic-novnc-${HTTP_PORT}.pid" \
     "${novnc_proxy}" \
-      --listen "127.0.0.1:${HTTP_PORT}" \
+      --listen "${HTTP_BIND_ADDR}:${HTTP_PORT}" \
       --vnc "127.0.0.1:${VNC_PORT}"
 }
 
@@ -620,8 +621,8 @@ start_display_stack() {
   start_novnc
 
   log "Display ready."
-  log "Tunnel: ssh -L ${HTTP_PORT}:127.0.0.1:${HTTP_PORT} root@HOST -p PORT"
-  log "Open: http://127.0.0.1:${HTTP_PORT}/vnc.html"
+  log "RunPod HTTP: expose port ${HTTP_PORT}, then open the RunPod HTTP URL ending in /vnc.html"
+  log "noVNC bind: ${HTTP_BIND_ADDR}:${HTTP_PORT}"
 }
 
 main() {
