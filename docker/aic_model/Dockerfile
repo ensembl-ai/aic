@@ -5,7 +5,7 @@ RUN apt update && apt install -y \
     git \
     python3-colcon-common-extensions \
     ros-kilted-ament-cmake \
-  && curl -fsSL https://pixi.sh/install.sh | bash
+  && curl -fsSL https://pixi.sh/install.sh | PIXI_VERSION=0.67.2 bash
 ENV PATH="/root/.pixi/bin:$PATH"
 
 # Add base dependencies
