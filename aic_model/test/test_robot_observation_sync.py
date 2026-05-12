@@ -2,12 +2,12 @@
 
 from pathlib import Path
 import sys
-from types import SimpleNamespace
 
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from aic_model_interfaces.msg import Observation
 from aic_model.robot import EnsemblRobot
 
 
@@ -26,13 +26,11 @@ GRIPPER_JOINT_NAMES = [
 ]
 
 
-def make_observation(joint_names, joint_positions):
-    return SimpleNamespace(
-        joint_states=SimpleNamespace(
-            name=joint_names,
-            position=joint_positions,
-        )
-    )
+def make_observation(joint_names, joint_positions) -> Observation:
+    observation = Observation()
+    observation.joint_states.name = list(joint_names)
+    observation.joint_states.position = list(joint_positions)
+    return observation
 
 
 def test_observation_sync_uses_only_manipulator_joints():

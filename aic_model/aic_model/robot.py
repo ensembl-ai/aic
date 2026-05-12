@@ -61,7 +61,7 @@ import xacro
 
 # Internal
 
-from aic_control_interfaces.msg import JointMotionUpdate
+from aic_control_interfaces.msg import JointMotionUpdate, MotionUpdate
 from aic_model_interfaces.msg import Observation
 from aic_model.executor import EnsemblExecutor
 from aic_model.planner import EnsemblPlanner
@@ -127,6 +127,7 @@ class EnsemblRobot:
     def __init__(
         self,
         get_observation: Callable[[], Observation] | None = None,
+        execute_motion: Callable[[MotionUpdate], Any] | None = None,
         execute_joint_motion: Callable[[JointMotionUpdate], None] | None = None,
     ):
         """
@@ -218,9 +219,11 @@ class EnsemblRobot:
             self._report_contact_request.calculate_penetration = True
             self._report_contact_request.contact_limit = self.report_contact_limit
             self._planner = EnsemblPlanner(self)
-            self._executor = EnsemblExecutor(
+            self.executor = EnsemblExecutor(
+                execute_motion=execute_motion,
                 execute_joint_motion=execute_joint_motion,
             )
+            self._executor = self.executor
             if self.simulated:
                 self.env.setState(
                     self._active_joint_names,
@@ -322,9 +325,7 @@ class EnsemblRobot:
         self._collision_object_names = list(
             self._collision_manager.getCollisionObjects()
         )
-        self._collision_manager.setActiveCollisionObjects(
-            self._collision_object_names
-        )
+        self._collision_manager.setActiveCollisionObjects(self._collision_object_names)
         self._collision_config.acm = self.env.getAllowedCollisionMatrix()
         self._collision_config.margin_data = self.env.getCollisionMarginData()
         self._collision_manager.applyContactManagerConfig(self._collision_config)
@@ -353,15 +354,13 @@ class EnsemblRobot:
 
     def PlanToTarget(
         self,
-        transform: np.ndarray | list[list[float]],
+        base_T_tip_target: np.ndarray | list[list[float]],
         max_joint_delta: float = float("inf"),
     ) -> PlannerResponse | None:
-        """
-        Plan from the current manipulator state to a target TCP pose.
-        """
+        """Plan from the current manipulator state to a target base_T_tip."""
 
         return self._planner.PlanToTarget(
-            target_transform=transform,
+            base_T_tip_target=base_T_tip_target,
             max_joint_delta=max_joint_delta,
         )
 
@@ -432,7 +431,7 @@ class EnsemblRobot:
     def AddBoxKinbody(
         self,
         dim: np.ndarray | list[float],
-        transform: np.ndarray | list[list[float]],
+        parent_T_box: np.ndarray | list[list[float]],
         parent_frame: str = "base_link",
         collision_enabled: bool = True,
         body_name: str | None = None,
@@ -440,7 +439,7 @@ class EnsemblRobot:
         """
         Add a fixed box collision body to the Tesseract environment.
 
-        ``dim`` is the box size ``[x, y, z]`` in meters. ``transform`` is the
+        ``dim`` is the box size ``[x, y, z]`` in meters. ``parent_T_box`` is the
         box-center pose expressed in ``parent_frame`` as a ``(4, 4)`` matrix.
         ``body_name`` is the link name for the added body. When omitted, a
         unique name is generated from a UUID. The returned string is the link
@@ -451,10 +450,11 @@ class EnsemblRobot:
         if dimensions.size != 3 or np.any(dimensions <= 0.0):
             raise ValueError(f"Expected dim to be three positive values, got {dim}.")
 
-        transform_matrix = np.asarray(transform, dtype=np.float64)
-        if transform_matrix.shape != (4, 4):
+        parent_T_box_matrix = np.asarray(parent_T_box, dtype=np.float64)
+        if parent_T_box_matrix.shape != (4, 4):
             raise ValueError(
-                f"Expected transform with shape (4, 4), got {transform_matrix.shape}."
+                f"Expected parent_T_box with shape (4, 4), "
+                f"got {parent_T_box_matrix.shape}."
             )
 
         link_name = body_name or f"box_kinbody_{uuid.uuid4().hex}"
@@ -474,9 +474,9 @@ class EnsemblRobot:
         joint.parent_link_name = parent_frame
         joint.child_link_name = link_name
         joint.type = JointType_FIXED
-        joint_origin = Isometry3d()
-        joint_origin.setMatrix(transform_matrix)
-        joint.parent_to_joint_origin_transform = joint_origin
+        parent_T_link = Isometry3d()
+        parent_T_link.setMatrix(parent_T_box_matrix)
+        joint.parent_to_joint_origin_transform = parent_T_link
 
         if not self.env.applyCommand(AddLinkCommand(link, joint)):
             raise RuntimeError(
@@ -526,7 +526,7 @@ class EnsemblRobot:
         base_frame: str | None = None,
     ) -> np.ndarray:
         """
-        Return the current 4x4 transform of ``target_frame`` relative to ``base_frame``.
+        Return the current base_frame_T_target_frame 4x4 transform.
         """
 
         joint_positions = self.GetActiveDOFValues()
@@ -564,7 +564,7 @@ class EnsemblRobot:
     @with_resolved_frames
     def ComputeIK(
         self,
-        transform: np.ndarray | list[list[float]],
+        base_T_target: np.ndarray | list[list[float]],
         target_frame: str | None = None,
         base_frame: str | None = None,
         return_all: bool = False,
@@ -577,16 +577,17 @@ class EnsemblRobot:
         When ``check_collision`` is ``True``, colliding IK solutions are filtered out.
         """
 
-        transform_matrix = np.asarray(transform, dtype=np.float64)
-        if transform_matrix.shape != (4, 4):
+        base_T_target_matrix = np.asarray(base_T_target, dtype=np.float64)
+        if base_T_target_matrix.shape != (4, 4):
             raise ValueError(
-                f"Expected transform with shape (4, 4), got {transform_matrix.shape}."
+                f"Expected base_T_target with shape (4, 4), "
+                f"got {base_T_target_matrix.shape}."
             )
-        transform_isometry = Isometry3d()
-        transform_isometry.setMatrix(transform_matrix)
+        base_T_target_isometry = Isometry3d()
+        base_T_target_isometry.setMatrix(base_T_target_matrix)
 
         ik_input = KinGroupIKInput()
-        ik_input.pose = transform_isometry
+        ik_input.pose = base_T_target_isometry
         ik_input.tip_link_name = target_frame
         ik_input.working_frame = base_frame
         ik_inputs = KinGroupIKInputs()

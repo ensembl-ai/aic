@@ -32,10 +32,10 @@ POSITION_ROI_OFFSETS_METERS = np.array(
 TCP_Z_MAX_DEVIATION_RADIANS = np.deg2rad(20.0)
 
 
-def transform_to_position_euler(transform):
+def base_T_frame_to_position_euler(base_T_frame):
     return (
-        transform[:3, 3],
-        np.array(mat2euler(transform[:3, :3])),
+        base_T_frame[:3, 3],
+        np.array(mat2euler(base_T_frame[:3, :3])),
     )
 
 
@@ -83,26 +83,26 @@ def sample_tcp_z_cone_rotation(rng, reference_rotation, max_deviation):
     return rotation_matrix_from_axis_angle(tilt_axis, tilt_angle) @ reference_rotation
 
 
-def sample_roi_transform(
+def sample_base_T_tip_roi(
     rng,
-    anchor_transform,
+    base_T_tip_anchor,
     position_offsets=POSITION_ROI_OFFSETS_METERS,
     tcp_z_max_deviation=TCP_Z_MAX_DEVIATION_RADIANS,
 ):
     position_offsets = np.asarray(position_offsets, dtype=np.float64)
     position_low = np.min(position_offsets, axis=1)
     position_high = np.max(position_offsets, axis=1)
-    target_transform = np.eye(4, dtype=np.float64)
-    target_transform[:3, :3] = sample_tcp_z_cone_rotation(
+    base_T_tip_target = np.eye(4, dtype=np.float64)
+    base_T_tip_target[:3, :3] = sample_tcp_z_cone_rotation(
         rng,
-        anchor_transform[:3, :3],
+        base_T_tip_anchor[:3, :3],
         tcp_z_max_deviation,
     )
-    target_transform[:3, 3] = anchor_transform[:3, 3] + rng.uniform(
+    base_T_tip_target[:3, 3] = base_T_tip_anchor[:3, 3] + rng.uniform(
         position_low,
         position_high,
     )
-    return target_transform
+    return base_T_tip_target
 
 
 def closest_joint_solution(solutions, reference_config):
@@ -135,14 +135,16 @@ def enabled_label(enabled):
 def validate_box_collision_reporting(home_config):
     collision_robot = EnsemblRobot()
     collision_robot.SetActiveDOFValues(home_config)
-    box_transform = np.eye(4, dtype=np.float64)
+    base_T_collision_probe = np.eye(4, dtype=np.float64)
     box_name = collision_robot.AddBoxKinbody(
         dim=[1.0, 1.0, 1.0],
-        transform=box_transform,
+        parent_T_box=base_T_collision_probe,
         parent_frame="base_link",
         body_name="base_link_collision_probe",
     )
-    in_collision, contacts = collision_robot.CheckCollision(report=True)
+    collision_result = collision_robot.CheckCollision(report=True)
+    assert isinstance(collision_result, tuple)
+    in_collision, contacts = collision_result
     if not in_collision:
         raise RuntimeError(
             "Expected base_link collision probe box at [0, 0, 0] to collide."
@@ -159,7 +161,7 @@ def validate_box_collision_reporting(home_config):
 def sample_reachable_roi_target(
     robot,
     rng,
-    anchor_transform,
+    base_T_tip_anchor,
     reference_config,
     tcp_z_max_deviation,
     max_joint_delta,
@@ -167,13 +169,13 @@ def sample_reachable_roi_target(
 ):
     for _ in range(max_attempts):
         robot.SetActiveDOFValues(reference_config)
-        target_transform = sample_roi_transform(
+        base_T_tip_target = sample_base_T_tip_roi(
             rng,
-            anchor_transform,
+            base_T_tip_anchor,
             tcp_z_max_deviation=tcp_z_max_deviation,
         )
         solutions = robot.ComputeIK(
-            target_transform,
+            base_T_tip_target,
             return_all=True,
             check_collision=True,
         )
@@ -183,15 +185,15 @@ def sample_reachable_roi_target(
         target_config = closest_joint_solution(solutions, reference_config)
         if max_abs_joint_delta(target_config, reference_config) > max_joint_delta:
             continue
-        return target_transform, target_config
+        return base_T_tip_target, target_config
 
     raise RuntimeError(
         f"Unable to find a reachable ROI target after {max_attempts} attempts."
     )
 
 
-def rotation_error_radians(actual, expected):
-    rotation_delta = actual[:3, :3].T @ expected[:3, :3]
+def rotation_error_radians(base_T_actual, base_T_expected):
+    rotation_delta = base_T_actual[:3, :3].T @ base_T_expected[:3, :3]
     trace = np.clip((np.trace(rotation_delta) - 1.0) / 2.0, -1.0, 1.0)
     return float(np.arccos(trace))
 
@@ -274,8 +276,8 @@ def main():
     collision_probe_name, collision_probe_contacts = validate_box_collision_reporting(
         home_config,
     )
-    home_transform = robot.ComputeFK()
-    home_position, home_euler = transform_to_position_euler(home_transform)
+    base_T_tip_home = robot.ComputeFK()
+    home_position, home_euler = base_T_frame_to_position_euler(base_T_tip_home)
 
     print("\nHome configuration")
     print("------------------")
@@ -294,13 +296,13 @@ def main():
     orientation_tolerance = 1e-3
     for sample_index in tqdm.tqdm(range(args.num_samples), desc="IK/FK"):
         robot.SetActiveDOFValues(home_config)
-        target_transform = sample_roi_transform(
+        base_T_tip_target = sample_base_T_tip_roi(
             rng,
-            home_transform,
+            base_T_tip_home,
             tcp_z_max_deviation=tcp_z_max_deviation,
         )
         solutions = robot.ComputeIK(
-            target_transform,
+            base_T_tip_target,
             return_all=True,
             check_collision=args.collision_check_ik,
         )
@@ -310,11 +312,11 @@ def main():
 
         closest_solution = closest_joint_solution(solutions, home_config)
         robot.SetActiveDOFValues(closest_solution)
-        fk = robot.ComputeFK()
+        base_T_tip_fk = robot.ComputeFK()
         position_error = float(
-            np.linalg.norm(fk[:3, 3] - target_transform[:3, 3])
+            np.linalg.norm(base_T_tip_fk[:3, 3] - base_T_tip_target[:3, 3])
         )
-        orientation_error = rotation_error_radians(fk, target_transform)
+        orientation_error = rotation_error_radians(base_T_tip_fk, base_T_tip_target)
         checked_solutions += 1
         if (
             position_error > position_tolerance
@@ -351,10 +353,10 @@ def main():
     ):
         start_config = planner_start_config.copy()
         try:
-            goal_transform, goal_config = sample_reachable_roi_target(
+            base_T_tip_goal, goal_config = sample_reachable_roi_target(
                 robot,
                 rng,
-                home_transform,
+                base_T_tip_home,
                 start_config,
                 tcp_z_max_deviation,
                 args.planner_max_delta,
@@ -377,7 +379,9 @@ def main():
         robot.SetActiveDOFValues(start_config)
         plan = robot.PlanToConfiguration(goal_config)
         if plan is None:
-            goal_position, goal_euler = transform_to_position_euler(goal_transform)
+            goal_position, goal_euler = base_T_frame_to_position_euler(
+                base_T_tip_goal
+            )
             robot.SetActiveDOFValues(goal_config)
             planner_failures.append(
                 {
@@ -427,7 +431,9 @@ def main():
         in_collision = False
         for waypoint_index, waypoint in enumerate(state_waypoints):
             robot.SetActiveDOFValues(waypoint)
-            in_collision, collision_report = robot.CheckCollision(report=True)
+            collision_result = robot.CheckCollision(report=True)
+            assert isinstance(collision_result, tuple)
+            in_collision, collision_report = collision_result
             if in_collision:
                 planner_collision_failures.append(
                     {
@@ -459,13 +465,18 @@ def main():
             continue
 
         robot.SetActiveDOFValues(final_waypoint)
-        final_transform = robot.ComputeFK()
-        goal_position, goal_euler = transform_to_position_euler(goal_transform)
-        final_position, final_euler = transform_to_position_euler(final_transform)
-        position_error = float(
-            np.linalg.norm(final_transform[:3, 3] - goal_transform[:3, 3])
+        base_T_tip_final = robot.ComputeFK()
+        goal_position, goal_euler = base_T_frame_to_position_euler(base_T_tip_goal)
+        final_position, final_euler = base_T_frame_to_position_euler(
+            base_T_tip_final
         )
-        orientation_error = rotation_error_radians(final_transform, goal_transform)
+        position_error = float(
+            np.linalg.norm(base_T_tip_final[:3, 3] - base_T_tip_goal[:3, 3])
+        )
+        orientation_error = rotation_error_radians(
+            base_T_tip_final,
+            base_T_tip_goal,
+        )
         if (
             position_error > planner_goal_position_tolerance
             or orientation_error > planner_goal_orientation_tolerance
@@ -473,7 +484,7 @@ def main():
             planner_goal_failures.append(
                 {
                     "sample_index": sample_index,
-                    "reason": "final FK does not match target transform",
+                    "reason": "final FK does not match base_T_tip_goal",
                     "joint_error": joint_error,
                     "position_error": position_error,
                     "orientation_error": orientation_error,

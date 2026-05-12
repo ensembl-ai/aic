@@ -39,17 +39,18 @@ robot = EnsemblRobot(
     get_observation=get_observation,
     execute_joint_motion=execute_joint_motion,  # omit if you will not execute
 )
-current_base_tcp = robot.ComputeFK() # get's latest joint angles from observations
+base_T_tip_current = robot.ComputeFK() # get's latest joint angles from observations
+base_T_tcp_clearance_box = base_T_tip_current
 box_name = robot.AddBoxKinbody(
     dim=[0.1, 0.1, 0.05],
-    transform=current_base_tcp,
+    parent_T_box=base_T_tcp_clearance_box,
     body_name="tcp_clearance_box",  # omit for a UUID-generated unique name
 )
-# target_base_tcp: gripper/tcp transform in base_frame, meters, shape (4,4)
-target_base_tcp = np.eye(4, dtype=np.float64)
-ik_solutions = robot.ComputeIK(target_base_tcp, return_all=True) # If return_all is false, it provides closest IK
+# base_T_tip_target: gripper/tcp transform in base_frame, meters, shape (4,4)
+base_T_tip_target = np.eye(4, dtype=np.float64)
+ik_solutions = robot.ComputeIK(base_T_tip_target, return_all=True) # If return_all is false, it provides closest IK
 current_in_collision, contacts = robot.CheckCollision(report=True) # report false is binary check without insights
-plan = robot.PlanToTarget(target_base_tcp)
+plan = robot.PlanToTarget(base_T_tip_target)
 if plan:
     trajectory = robot.Retime(plan.results)
     if trajectory:
@@ -60,16 +61,16 @@ Frame arguments are only needed when you want something other than the configure
 manipulator frames. `target_frame=None` or omitted means `robot.manipulator_tip_frame`
 (`"gripper/tcp"` today). `base_frame=None` or omitted means
 `robot.manipulator_base_frame` (`"base_link"` today). For FK, the returned matrix is
-`T_base_frame_target_frame`.
+`base_frame_T_target_frame`.
 
 For IK, the input transform is interpreted as the desired
-`target_frame` pose expressed in `base_frame`. Both frames must be links on the
+`base_T_target` pose. Both frames must be links on the
 configured manipulator chain, otherwise the call raises `ValueError`.
 
 - `robot.ComputeFK(target_frame=None, base_frame=None) -> np.ndarray`: returns a
   `(4, 4)` `float64` homogeneous transform for the current state.
-- `robot.ComputeIK(transform, target_frame=None, base_frame=None, return_all=False, check_collision=True)`:
-  `transform` must be a `(4, 4)` array-like homogeneous matrix and is converted
+- `robot.ComputeIK(base_T_target, target_frame=None, base_frame=None, return_all=False, check_collision=True)`:
+  `base_T_target` must be a `(4, 4)` array-like homogeneous matrix and is converted
   to `np.float64`. Returns the closest collision-free joint vector as shape
   `(6,)`, all solutions as shape `(N, 6)` when `return_all=True`, or `None` if
   no solution is found. Set `check_collision=False` to keep IK solutions that are
@@ -78,21 +79,21 @@ configured manipulator chain, otherwise the call raises `ValueError`.
   state. Returns `True`/`False`, or `(in_collision, contacts)` when
   `report=True`; each contact includes the link pair, signed distance, contact
   type ids, and whether it is a single contact point.
-- `robot.AddBoxKinbody(dim, transform, parent_frame="base_link", collision_enabled=True, body_name=None)`:
+- `robot.AddBoxKinbody(dim, parent_T_box, parent_frame="base_link", collision_enabled=True, body_name=None)`:
   adds a fixed box collision body to the native Tesseract environment. `dim` is
-  `[x, y, z]` in meters. `transform` is a `(4, 4)` homogeneous matrix for the
-  box center expressed in `parent_frame`; the box axes follow the transform
+  `[x, y, z]` in meters. `parent_T_box` is a `(4, 4)` homogeneous matrix for the
+  box center expressed in `parent_frame`; the box axes follow the `parent_T_box`
   rotation. `body_name` is the Tesseract link name to create; omit it to use a
   UUID-generated unique name like `box_kinbody_<uuid>`. Returns the link name.
   The collision manager is refreshed immediately, so the box is included in
   `CheckCollision`, collision-filtered IK, and subsequent planning calls.
-- `robot.PlanToTarget(transform, max_joint_delta=float("inf"))`: plans from the
-  current state to the default TCP pose in the default base frame. The transform
+- `robot.PlanToTarget(base_T_tip_target, max_joint_delta=float("inf"))`: plans from the
+  current state to the default TCP pose in the default base frame. `base_T_tip_target`
   has the same `(4, 4)` convention as default IK. `max_joint_delta` rejects IK
   goals whose largest per-joint move from the current state is too large. Returns
   a Tesseract `PlannerResponse` or `None`; use `plan.results` as the program.
-  For non-default frames, call `ComputeIK(..., target_frame=..., base_frame=...)`
-  first, then pass the returned joint vector to `PlanToConfiguration`.
+  For attached frames, compute the target TCP transform first, then pass that
+  into `PlanToTarget`.
 - `robot.PlanToConfiguration(joint_values)`: plans to a joint vector in
   manipulator joint order. `joint_values` should be array-like length `6` and is
   converted to `float64`.

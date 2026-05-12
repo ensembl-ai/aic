@@ -16,11 +16,20 @@
 
 from collections.abc import Callable
 import logging
+import time
+from typing import Any
 
 import numpy as np
 
-from aic_control_interfaces.msg import JointMotionUpdate, TrajectoryGenerationMode
+from aic_control_interfaces.msg import (
+    JointMotionUpdate,
+    MotionUpdate,
+    TrajectoryGenerationMode,
+)
+from aic_model_interfaces.msg import Observation
+from geometry_msgs.msg import Twist, Vector3, Wrench
 from rclpy.duration import Duration
+from std_msgs.msg import Header
 from tesseract_robotics.tesseract_command_language import (
     CompositeInstruction,
     InstructionPoly_as_MoveInstructionPoly,
@@ -37,12 +46,14 @@ class EnsemblExecutor:
 
     def __init__(
         self,
+        execute_motion: Callable[[MotionUpdate], Any] | None = None,
         execute_joint_motion: Callable[[JointMotionUpdate], None] | None = None,
     ):
         """
         Initialize the executor with controller and timing callbacks.
         """
 
+        self._execute_motion = execute_motion
         self._execute_joint_motion = execute_joint_motion
 
     def ExecuteTrajectory(
@@ -125,4 +136,89 @@ class EnsemblExecutor:
         logger.debug(
             f"Trajectory execution stream completed with {waypoint_index} waypoints."
         )
+        return True
+
+    def insert_part(
+        self,
+        direction: np.ndarray | list[float],
+        force_thresholds: np.ndarray | list[float],
+        velocity: float,
+        max_distance: float,
+        timeout: float,
+        command_period: float,
+        frame_id: str,
+        stiffness: np.ndarray | list[float],
+        damping: np.ndarray | list[float],
+        wrench_feedback_gains: np.ndarray | list[float],
+        get_observation: Callable[[], Observation],
+        sleep_for: Callable[[float], None],
+        stamp_message: Callable[[], Any],
+    ) -> bool:
+        """
+        Stream Cartesian insertion velocity commands until force or travel limit.
+        """
+
+        if self._execute_motion is None:
+            logger.warning("insert_part requires Cartesian motion callbacks.")
+            return False
+
+        direction = np.asarray(direction, dtype=np.float64).reshape(3)
+        direction = direction / np.linalg.norm(direction)
+        force_thresholds = np.abs(
+            np.asarray(force_thresholds, dtype=np.float64).reshape(3)
+        )
+        force_threshold_axes = force_thresholds > 0.0
+        linear_velocity = direction * abs(float(velocity))
+        duration_limit = min(
+            float(timeout),
+            abs(float(max_distance)) / abs(float(velocity)),
+        )
+        stiffness = np.asarray(stiffness, dtype=np.float64).reshape(6)
+        damping = np.asarray(damping, dtype=np.float64).reshape(6)
+        wrench_feedback_gains = np.asarray(
+            wrench_feedback_gains,
+            dtype=np.float64,
+        ).reshape(6)
+
+        def motion_update(velocity_vector: np.ndarray) -> MotionUpdate:
+            return MotionUpdate(
+                header=Header(
+                    frame_id=frame_id,
+                    stamp=stamp_message(),
+                ),
+                velocity=Twist(
+                    linear=Vector3(
+                        x=float(velocity_vector[0]),
+                        y=float(velocity_vector[1]),
+                        z=float(velocity_vector[2]),
+                    ),
+                    angular=Vector3(x=0.0, y=0.0, z=0.0),
+                ),
+                target_stiffness=np.diag(stiffness).flatten().tolist(),
+                target_damping=np.diag(damping).flatten().tolist(),
+                feedforward_wrench_at_tip=Wrench(
+                    force=Vector3(x=0.0, y=0.0, z=0.0),
+                    torque=Vector3(x=0.0, y=0.0, z=0.0),
+                ),
+                wrench_feedback_gains_at_tip=wrench_feedback_gains.tolist(),
+                trajectory_generation_mode=TrajectoryGenerationMode(
+                    mode=TrajectoryGenerationMode.MODE_VELOCITY,
+                ),
+            )
+
+        started_at = time.monotonic()
+        while time.monotonic() - started_at < duration_limit:
+            force = get_observation().wrist_wrench.wrench.force
+            measured_force = np.array([force.x, force.y, force.z], dtype=np.float64)
+            if np.any(
+                force_threshold_axes
+                & (np.abs(measured_force) >= force_thresholds)
+            ):
+                self._execute_motion(motion_update(np.zeros(3, dtype=np.float64)))
+                return True
+
+            self._execute_motion(motion_update(linear_velocity))
+            sleep_for(command_period)
+
+        self._execute_motion(motion_update(np.zeros(3, dtype=np.float64)))
         return True

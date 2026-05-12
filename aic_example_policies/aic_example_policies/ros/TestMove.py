@@ -1,7 +1,4 @@
 import numpy as np
-from typing import Any, cast
-
-from transforms3d.euler import mat2euler
 
 from aic_model.policy import (
     GetObservationCallback,
@@ -10,82 +7,22 @@ from aic_model.policy import (
     SendFeedbackCallback,
 )
 from aic_model.robot import EnsemblRobot
+from aic_model.utils import lookup_transform_matrix
 from aic_task_interfaces.msg import Task
-from rclpy.duration import Duration
 
 
-POSITION_ROI_OFFSETS_METERS = np.array(
-    [
-        [-0.2, 0.2],
-        [0.4, -0.4],
-        [0.2, -0.3],
-    ],
-    dtype=np.float64,
-)
-TCP_Z_MAX_DEVIATION_RADIANS = np.deg2rad(20.0)
-
-
-def transform_to_position_euler(transform):
-    return (
-        transform[:3, 3],
-        np.array(mat2euler(transform[:3, :3])),
-    )
-
-
-def rotation_matrix_from_axis_angle(axis, angle):
-    axis = np.asarray(axis, dtype=np.float64)
-    axis = axis / np.linalg.norm(axis)
-    x, y, z = axis
-    c = np.cos(angle)
-    s = np.sin(angle)
-    one_minus_c = 1.0 - c
-    return np.array(
-        [
-            [
-                c + x * x * one_minus_c,
-                x * y * one_minus_c - z * s,
-                x * z * one_minus_c + y * s,
-            ],
-            [
-                y * x * one_minus_c + z * s,
-                c + y * y * one_minus_c,
-                y * z * one_minus_c - x * s,
-            ],
-            [
-                z * x * one_minus_c - y * s,
-                z * y * one_minus_c + x * s,
-                c + z * z * one_minus_c,
-            ],
-        ],
-        dtype=np.float64,
-    )
-
-
-def sample_tcp_z_cone_rotation(rng, reference_rotation):
-    azimuth = rng.uniform(0.0, 2.0 * np.pi)
-    tilt_angle = np.arccos(
-        rng.uniform(np.cos(TCP_Z_MAX_DEVIATION_RADIANS), 1.0),
-    )
-    tilt_axis = (
-        np.cos(azimuth) * reference_rotation[:, 0]
-        + np.sin(azimuth) * reference_rotation[:, 1]
-    )
-    return rotation_matrix_from_axis_angle(tilt_axis, tilt_angle) @ reference_rotation
-
-
-def sample_roi_transform(rng, anchor_transform):
-    position_low = np.min(POSITION_ROI_OFFSETS_METERS, axis=1)
-    position_high = np.max(POSITION_ROI_OFFSETS_METERS, axis=1)
-    target_transform = np.eye(4, dtype=np.float64)
-    target_transform[:3, :3] = sample_tcp_z_cone_rotation(
-        rng,
-        anchor_transform[:3, :3],
-    )
-    target_transform[:3, 3] = anchor_transform[:3, 3] + rng.uniform(
-        position_low,
-        position_high,
-    )
-    return target_transform
+FAR_APPROACH_Z_OFFSET_METERS = 0.005
+APPROACH_MAX_JOINT_DELTA = np.deg2rad(90.0)
+INSERTION_OVERSHOOT_METERS = 0.015
+INSERTION_DIRECTION_BASE = np.array([0.0, 0.0, -1.0], dtype=np.float64)
+INSERTION_FORCE_THRESHOLDS_N = np.array([0.0, 0.0, 15.0], dtype=np.float64)
+INSERTION_VELOCITY = 0.01
+INSERTION_TIMEOUT_SEC = 30.0
+INSERTION_COMMAND_PERIOD_SEC = 0.05
+INSERTION_STIFFNESS = [90.0, 90.0, 90.0, 50.0, 50.0, 50.0]
+INSERTION_DAMPING = [50.0, 50.0, 50.0, 20.0, 20.0, 20.0]
+INSERTION_WRENCH_FEEDBACK_GAINS = [0.5, 0.5, 0.5, 0.0, 0.0, 0.0]
+TF_TIMEOUT_SEC = 5.0
 
 
 class TestMove(Policy):
@@ -101,53 +38,87 @@ class TestMove(Policy):
         send_feedback: SendFeedbackCallback,
     ):
         self.get_logger().info(f"TestMove.insert_cable() enter. Task: {task}")
-        send_feedback("Sampling workspace targets and executing planned trajectories")
+        send_feedback("Planning plug approach to target port")
 
-        robot = cast(Any, EnsemblRobot)(
+        robot = EnsemblRobot(
             get_observation=get_observation,
+            execute_motion=lambda update: move_robot(motion_update=update),
             execute_joint_motion=lambda update: move_robot(joint_motion_update=update),
         )
 
-        rng = np.random.default_rng()
-        reference_transform = robot.ComputeFK(robot.manipulator_tip_frame)
+        base_frame = robot.manipulator_base_frame
+        port_frame = f"task_board/{task.target_module_name}/{task.port_name}_link"
+        plug_frame = f"{task.cable_name}/{task.plug_name}_link"
 
-        start_time = self.time_now()
-        timeout = Duration(seconds=10.0)
-        executed_trajectories = 0
+        ## FAR APPROACH ESTIMATIONS ##
+        # base_T_port is estimated by perception.
+        base_T_port = lookup_transform_matrix(
+            self._parent_node._tf_buffer,
+            base_frame,
+            port_frame,
+            TF_TIMEOUT_SEC,
+        )
+        # base_T_plug is estimated by perception.
+        base_T_plug = lookup_transform_matrix(
+            self._parent_node._tf_buffer,
+            base_frame,
+            plug_frame,
+            TF_TIMEOUT_SEC,
+        )
+        base_T_tip = robot.ComputeFK()
+        plug_T_tip = np.linalg.inv(base_T_plug) @ base_T_tip
+        # FAR APPROACH TRANSFORM
+        base_T_plug_far_approach = base_T_port.copy()
+        base_T_plug_far_approach[:3, 3] += np.array(
+            [0.0, 0.0, FAR_APPROACH_Z_OFFSET_METERS],
+            dtype=np.float64,
+        )
+        base_T_tip_target = base_T_plug_far_approach @ plug_T_tip
+        self.get_logger().info(
+            f"Planning so plug frame '{plug_frame}' reaches "
+            f"base_T_plug_far_approach above '{port_frame}' at "
+            f"{np.array2string(base_T_plug_far_approach[:3, 3], precision=3)} "
+            f"and reaches base_T_tip_target at "
+            f"{np.array2string(base_T_tip_target[:3, 3], precision=3)}"
+        )
 
-        while (self.time_now() - start_time) < timeout:
-            current_transform = robot.ComputeFK(robot.manipulator_tip_frame)
-            target_transform = sample_roi_transform(rng, reference_transform)
-            target_position, target_euler = transform_to_position_euler(
-                target_transform
-            )
+        plan = robot.PlanToTarget(
+            base_T_tip_target,
+            max_joint_delta=APPROACH_MAX_JOINT_DELTA,
+        )
+        if plan is None:
+            self.get_logger().info(robot._planner.last_failure_reason)
+            return False
 
-            self.get_logger().info(
-                f"Sampled target position {np.array2string(target_position, precision=3)}"
-            )
-            self.get_logger().info(
-                f"Sampled target euler_xyz {np.array2string(target_euler, precision=3)}"
-            )
-            self.get_logger().info(
-                f"Current tcp position {np.array2string(current_transform[:3, 3], precision=3)}"
-            )
+        trajectory = robot.Retime(plan.results)
+        if trajectory is None:
+            self.get_logger().info("Plug approach retiming failed")
+            return False
 
-            plan = robot.PlanToTarget(target_transform)
-            if plan is None:
-                self.get_logger().info("Skipping sample because planning failed")
-                continue
+        if not robot.ExecuteTrajectory(trajectory):
+            self.get_logger().info("Plug approach execution failed")
+            return False
 
-            trajectory = robot.Retime(plan.results)
-            if trajectory is None:
-                self.get_logger().info("Skipping sample because retiming failed")
-                continue
-
-            if not robot.ExecuteTrajectory(trajectory):
-                self.get_logger().info("Skipping sample because execution failed")
-                continue
-
-            executed_trajectories += 1
-            send_feedback(f"Executed sampled trajectory {executed_trajectories}")
+        send_feedback("Executing force-limited insertion")
+        inserted = robot.executor.insert_part(
+            direction=INSERTION_DIRECTION_BASE,
+            force_thresholds=INSERTION_FORCE_THRESHOLDS_N,
+            velocity=INSERTION_VELOCITY,
+            max_distance=FAR_APPROACH_Z_OFFSET_METERS + INSERTION_OVERSHOOT_METERS,
+            timeout=INSERTION_TIMEOUT_SEC,
+            command_period=INSERTION_COMMAND_PERIOD_SEC,
+            frame_id=base_frame,
+            stiffness=INSERTION_STIFFNESS,
+            damping=INSERTION_DAMPING,
+            wrench_feedback_gains=INSERTION_WRENCH_FEEDBACK_GAINS,
+            get_observation=get_observation,
+            sleep_for=self.sleep_for,
+            stamp_message=lambda: self.get_clock().now().to_msg(),
+        )
+        if inserted:
+            send_feedback("Insertion motion completed")
+        else:
+            self.get_logger().info(robot._planner.last_failure_reason)
 
         self.get_logger().info("TestMove.insert_cable() exiting...")
-        return executed_trajectories > 0
+        return inserted

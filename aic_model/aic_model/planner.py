@@ -139,15 +139,13 @@ class EnsemblPlanner:
 
     def PlanToTarget(
         self,
-        target_transform: np.ndarray | list[list[float]],
+        base_T_tip_target: np.ndarray | list[list[float]],
         max_joint_delta: float = float("inf"),
     ) -> PlannerResponse | None:
-        """
-        Plan from the current robot state to a target TCP transform.
-        """
+        """Plan from the current state to a target base_T_tip transform."""
 
         current_joint_values = self.robot.GetActiveDOFValues()
-        target_joint_values = self.robot.ComputeIK(target_transform)
+        target_joint_values = self.robot.ComputeIK(base_T_tip_target)
         if target_joint_values is None:
             self.last_failure_reason = (
                 "PlanToTarget failed: no collision-free IK solution."
