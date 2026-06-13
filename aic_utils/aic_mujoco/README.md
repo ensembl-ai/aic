@@ -336,6 +336,8 @@ ros2 launch aic_bringup spawn_task_board.launch.py   task_board_x:=0.15 task_boa
 
 ## Fresh SDF generation
 
+Run the following commands inside the `aic_eval` distrobox. These snippets intentionally do not enable strict shell modes like `set -u`; ROS setup scripts may reference unset environment variables while sourcing.
+
 ```bash
 cd /home/rmalhan/Software/ws_aic
 
@@ -451,12 +453,18 @@ PY
 
 ## Conversion
 
+This produces a **standalone raw MuJoCo file**:
+
+```text
+/home/rmalhan/aic_mujoco_world_nic_cable/aic_world.xml
+```
+
+That file contains the robot and the world together. It is useful for visual inspection, but it is **not** the file that should be included directly by the ROS-control package `scene.xml`.
+
 ```bash
 cd /home/rmalhan/Software/ws_aic
 
 source /home/rmalhan/.venvs/aic_sdf2mjcf/bin/activate
-source /opt/ros/kilted/setup.bash
-source install/setup.bash
 
 rm -rf /home/rmalhan/aic_mujoco_world_nic_cable
 mkdir -p /home/rmalhan/aic_mujoco_world_nic_cable
@@ -511,35 +519,90 @@ deactivate
 
 ## View in mujoco
 
+View the standalone raw file here. This is only a visual check that the Gazebo export and SDF-to-MJCF conversion worked.
+
 ```bash
 cd /home/rmalhan/Software/ws_aic/src/aic
-pixi shell
-python aic_utils/aic_mujoco/scripts/view_scene.py \
+
+source /home/rmalhan/.venvs/aic_sdf2mjcf/bin/activate
+
+python3 aic_utils/aic_mujoco/scripts/view_scene.py \
   /home/rmalhan/aic_mujoco_world_nic_cable/aic_world.xml
+
+deactivate
 ```
 
 ## Run with controller
 
-```bash
-cd /home/rmalhan/Software/ws_aic/src/aic/aic_utils/aic_mujoco
+The controller launch does **not** load the standalone raw file directly. It loads:
 
-cp /home/rmalhan/aic_mujoco_world_nic_cable/* mjcf/
+```text
+src/aic/aic_utils/aic_mujoco/mjcf/scene.xml
+```
+
+and `scene.xml` includes:
+
+```xml
+<include file="aic_robot.xml"/>
+<include file="aic_world.xml"/>
+```
+
+So the package `mjcf/aic_world.xml` must be the **split world-only file**, not the raw standalone file. Generate the split files in a staging directory first, validate `scene.xml`, and only then copy them into the ROS package.
+
+Do not source `/opt/ros/kilted/setup.bash` or `install/setup.bash` before running `add_cable_plugin.py`. The post-processing script uses Python MuJoCo's `MjSpec`; the ROS workspace setup can place other build/install paths ahead of the venv and can corrupt `MjSpec` name access. Source ROS only after the split files are generated and validated.
+
+```bash
+cd /home/rmalhan/Software/ws_aic
 
 source /home/rmalhan/.venvs/aic_sdf2mjcf/bin/activate
-python3 scripts/add_cable_plugin.py \
-  --input mjcf/aic_world.xml \
-  --output mjcf/aic_world.xml \
-  --robot_output mjcf/aic_robot.xml \
-  --scene_output mjcf/scene.xml
+
+rm -rf /tmp/aic_mujoco_controller_stage
+mkdir -p /tmp/aic_mujoco_controller_stage
+
+cp -a /home/rmalhan/aic_mujoco_world_nic_cable/. /tmp/aic_mujoco_controller_stage/
+
+python3 src/aic/aic_utils/aic_mujoco/scripts/add_cable_plugin.py \
+  --input /tmp/aic_mujoco_controller_stage/aic_world.xml \
+  --output /tmp/aic_mujoco_controller_stage/aic_world.xml \
+  --robot_output /tmp/aic_mujoco_controller_stage/aic_robot.xml \
+  --scene_output /tmp/aic_mujoco_controller_stage/scene.xml
+
+python3 - <<'PY'
+import mujoco
+from xml.etree import ElementTree as ET
+
+scene = "/tmp/aic_mujoco_controller_stage/scene.xml"
+world = "/tmp/aic_mujoco_controller_stage/aic_world.xml"
+robot = "/tmp/aic_mujoco_controller_stage/aic_robot.xml"
+
+m = mujoco.MjModel.from_xml_path(scene)
+print("Validated scene:", scene)
+print("MuJoCo:", mujoco.__version__)
+print("nbody:", m.nbody, "njnt:", m.njnt, "ngeom:", m.ngeom, "nu:", m.nu)
+
+world_root = ET.parse(world).getroot()
+robot_root = ET.parse(robot).getroot()
+world_meshes = [x.attrib.get("name") for x in world_root.findall(".//mesh")]
+robot_meshes = [x.attrib.get("name") for x in robot_root.findall(".//mesh")]
+dups = sorted(set(world_meshes).intersection(robot_meshes))
+assert not dups, f"duplicate mesh names across split files: {dups[:10]}"
+assert not any(b.attrib.get("name") == "tabletop" for b in world_root.findall(".//body")), "split world still contains tabletop"
+assert any(b.attrib.get("name") == "cable_end_0" for b in world_root.findall(".//body")), "split world is missing cable_end_0"
+print("Split files are clean.")
+PY
+
+cp -a /tmp/aic_mujoco_controller_stage/. src/aic/aic_utils/aic_mujoco/mjcf/
+
 deactivate
 
-cd /home/rmalhan/Software/ws_aic
 source /opt/ros/kilted/setup.bash
 source install/setup.bash
 
 colcon build --merge-install --symlink-install --packages-select aic_mujoco
 
 source install/setup.bash
+
+simulate src/aic/aic_utils/aic_mujoco/mjcf/scene.xml
 ```
 
 Terminal 1: Zenoh router
@@ -558,6 +621,8 @@ ros2 run rmw_zenoh_cpp rmw_zenohd
 
 Terminal 2: MuJoCo ROS-control simulation
 
+Use `127.0.0.1` only when this terminal is inside the same `aic_eval` distrobox as Terminal 1. If this terminal is outside that distrobox, replace `127.0.0.1` with the router address printed by Terminal 1, for example `172.17.3.28`.
+
 ```bash
 cd /home/rmalhan/Software/ws_aic
 source /opt/ros/kilted/setup.bash
@@ -572,6 +637,8 @@ ros2 launch aic_mujoco aic_mujoco_bringup.launch.py launch_rviz:=false
 ```
 
 Terminal 3: Controller checks
+
+Use the same Zenoh endpoint choice as Terminal 2.
 
 ```bash
 cd /home/rmalhan/Software/ws_aic
