@@ -336,7 +336,7 @@ ros2 launch aic_bringup spawn_task_board.launch.py   task_board_x:=0.15 task_boa
 
 ## Fresh SDF generation
 
-Run the following commands inside the `aic_eval` distrobox. These snippets intentionally do not enable strict shell modes like `set -u`; ROS setup scripts may reference unset environment variables while sourcing.
+Run all commands in this section from inside the `aic_eval` distrobox. Do not use strict shell modes like `set -u`; ROS setup scripts may reference unset environment variables while sourcing.
 
 ```bash
 cd /home/rmalhan/Software/ws_aic
@@ -407,6 +407,9 @@ PY
 ```
 
 ## Stable converter env
+
+Run this inside `aic_eval`. This creates a Python venv for SDF-to-MJCF conversion and MuJoCo XML post-processing.
+
 ```bash
 cd /home/rmalhan/Software/ws_aic
 
@@ -423,9 +426,6 @@ source /home/rmalhan/.venvs/aic_sdf2mjcf/bin/activate
 
 python -m pip install --upgrade pip
 python -m pip install "numpy<2" scipy trimesh pycollada "mujoco==3.5.0" "dm-control"
-
-source /opt/ros/kilted/setup.bash
-source install/setup.bash
 
 python - <<'PY'
 import sys
@@ -452,6 +452,8 @@ PY
 ```
 
 ## Conversion
+
+Start this block in a fresh `aic_eval` terminal. Do not run it from a shell where `/opt/ros/kilted/setup.bash`, `install/setup.bash`, Zenoh exports, or other ROS setup has already been sourced.
 
 This produces a **standalone raw MuJoCo file**:
 
@@ -534,6 +536,8 @@ deactivate
 
 ## Run with controller
 
+Start the first block in a fresh `aic_eval` terminal. Do not source ROS before the staging split/validation step.
+
 The controller launch does **not** load the standalone raw file directly. It loads:
 
 ```text
@@ -601,11 +605,11 @@ source install/setup.bash
 colcon build --merge-install --symlink-install --packages-select aic_mujoco
 
 source install/setup.bash
-
-simulate src/aic/aic_utils/aic_mujoco/mjcf/scene.xml
 ```
 
 Terminal 1: Zenoh router
+
+Open a new `aic_eval` terminal for this.
 
 ```bash
 cd /home/rmalhan/Software/ws_aic
@@ -621,7 +625,7 @@ ros2 run rmw_zenoh_cpp rmw_zenohd
 
 Terminal 2: MuJoCo ROS-control simulation
 
-Use `127.0.0.1` only when this terminal is inside the same `aic_eval` distrobox as Terminal 1. If this terminal is outside that distrobox, replace `127.0.0.1` with the router address printed by Terminal 1, for example `172.17.3.28`.
+Open a new `aic_eval` terminal for this.
 
 ```bash
 cd /home/rmalhan/Software/ws_aic
@@ -638,7 +642,7 @@ ros2 launch aic_mujoco aic_mujoco_bringup.launch.py launch_rviz:=false
 
 Terminal 3: Controller checks
 
-Use the same Zenoh endpoint choice as Terminal 2.
+Open a new `aic_eval` terminal for this.
 
 ```bash
 cd /home/rmalhan/Software/ws_aic
