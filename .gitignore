@@ -5,6 +5,7 @@ build/
 install/
 log/
 files.txt
+.vscode
 
 # pixi environments
 .pixi/*

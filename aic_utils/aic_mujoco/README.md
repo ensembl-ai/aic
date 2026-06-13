@@ -322,3 +322,229 @@ Any of the policies in `aic_example_policies` can be used to control the robot i
 - [mujoco_ros2_control GitHub](https://github.com/ros-controls/mujoco_ros2_control)
 - [AIC Getting Started Guide](../../docs/getting_started.md)
 - [AIC Scene Description](../../docs/scene_description.md)
+
+## NOTES
+Getting the NIC scene for mujoco
+
+ros2 launch aic_bringup spawn_task_board.launch.py   task_board_x:=0.15 task_board_y:=-0.2 task_board_z:=1.14   task_board_roll:=0.0 task_board_pitch:=0.0 task_board_yaw:=3.1415   nic_card_mount_0_present:=true nic_card_mount_0_translation:=0.0
+
+
+## Fresh SDF generation
+
+```bash
+cd /home/rmalhan/Software/ws_aic
+
+source /opt/ros/kilted/setup.bash
+source install/setup.bash
+
+cp /home/rmalhan/Software/ws_aic/install/share/aic_description/world/aic.sdf /tmp/aic_export_world.sdf
+
+python3 - <<'PY'
+from pathlib import Path
+p = Path("/tmp/aic_export_world.sdf")
+s = p.read_text()
+s = s.replace("<save_world_delay_s>0.1</save_world_delay_s>", "<save_world_delay_s>20.0</save_world_delay_s>")
+s = s.replace("<save_world_delay_s>0.0</save_world_delay_s>", "<save_world_delay_s>20.0</save_world_delay_s>")
+p.write_text(s)
+print("Wrote delayed export world:", p)
+PY
+
+/entrypoint.sh \
+  world_file:=/tmp/aic_export_world.sdf \
+  spawn_task_board:=true \
+  spawn_cable:=true \
+  task_board_x:=0.15 task_board_y:=-0.2 task_board_z:=1.14 \
+  task_board_roll:=0.0 task_board_pitch:=0.0 task_board_yaw:=3.1415 \
+  nic_card_mount_0_present:=true nic_card_mount_0_translation:=0.0 \
+  cable_type:=sfp_sc_cable \
+  attach_cable_to_gripper:=true \
+  cable_x:=0.172 cable_y:=0.024 cable_z:=1.518 \
+  cable_roll:=0.4432 cable_pitch:=-0.48 cable_yaw:=1.3303 \
+  ground_truth:=true \
+  start_aic_engine:=false \
+  gazebo_gui:=true \
+  launch_rviz:=false
+```
+
+## Sanity check SDF
+```bash
+python3 - <<'PY'
+from pathlib import Path
+import re
+
+p = Path("/tmp/aic.sdf")
+print("exists:", p.exists())
+print("size:", p.stat().st_size if p.exists() else None)
+s = p.read_text(errors="replace")
+
+for term in [
+    "task_board",
+    "task_board_base",
+    "nic_card",
+    "nic_card_mount",
+    "sfp_port",
+    "cable_0",
+    "sfp_sc_cable",
+    "sfp_tip",
+    "sfp_module",
+    "sc_plug",
+    "lc_plug",
+    "ur5e",
+]:
+    print(f"{term}: {s.count(term)}")
+
+print("\nmodels:")
+for name in re.findall(r"<model\\s+name=[\"']([^\"']+)[\"']", s):
+    print("-", name)
+PY
+```
+
+## Stable converter env
+```bash
+cd /home/rmalhan/Software/ws_aic
+
+sudo apt update
+sudo apt install -y \
+  python3-venv \
+  python3-pip \
+  libsdformat16 \
+  python3-sdformat16 \
+  python3-gz-math9
+
+python3 -m venv --system-site-packages /home/rmalhan/.venvs/aic_sdf2mjcf
+source /home/rmalhan/.venvs/aic_sdf2mjcf/bin/activate
+
+python -m pip install --upgrade pip
+python -m pip install "numpy<2" scipy trimesh dm-control pycollada
+
+source /opt/ros/kilted/setup.bash
+source install/setup.bash
+
+python - <<'PY'
+import sys
+import numpy
+import scipy
+import trimesh
+import collada
+import dm_control
+import sdformat
+from gz.math import Vector3d
+
+print("python:", sys.executable)
+print("numpy:", numpy.__version__, numpy.__file__)
+print("scipy:", scipy.__version__, scipy.__file__)
+print("trimesh:", trimesh.__version__, trimesh.__file__)
+print("pycollada:", collada.__file__)
+print("dm_control:", dm_control.__file__)
+print("sdformat OK")
+print("gz.math OK")
+PY
+```
+
+## Conversion
+
+```bash
+cd /home/rmalhan/Software/ws_aic
+
+source /home/rmalhan/.venvs/aic_sdf2mjcf/bin/activate
+source /opt/ros/kilted/setup.bash
+source install/setup.bash
+
+rm -rf /home/rmalhan/aic_mujoco_world_nic_cable
+mkdir -p /home/rmalhan/aic_mujoco_world_nic_cable
+
+cp /tmp/aic.sdf /home/rmalhan/aic_mujoco_world_nic_cable/aic.sdf
+
+sed -i 's|file://<urdf-string>/model://|model://|g' /home/rmalhan/aic_mujoco_world_nic_cable/aic.sdf
+sed -i 's|file:///lc_plug_visual.glb|model://LC Plug/lc_plug_visual.glb|g' /home/rmalhan/aic_mujoco_world_nic_cable/aic.sdf
+sed -i 's|file:///sc_plug_visual.glb|model://SC Plug/sc_plug_visual.glb|g' /home/rmalhan/aic_mujoco_world_nic_cable/aic.sdf
+sed -i 's|file:///sfp_module_visual.glb|model://SFP Module/sfp_module_visual.glb|g' /home/rmalhan/aic_mujoco_world_nic_cable/aic.sdf
+
+python /home/rmalhan/Software/ws_aic/install/bin/sdf2mjcf \
+  /home/rmalhan/aic_mujoco_world_nic_cable/aic.sdf \
+  /home/rmalhan/aic_mujoco_world_nic_cable/aic_world.xml
+```
+
+## Sanity check MJCF
+
+```bash
+cd /home/rmalhan/Software/ws_aic/src/aic
+
+pixi run python - <<'PY'
+import mujoco
+
+path = "/home/rmalhan/aic_mujoco_world_nic_cable/aic_world.xml"
+m = mujoco.MjModel.from_xml_path(path)
+
+print("Loaded:", path)
+print("nbody:", m.nbody, "njnt:", m.njnt, "ngeom:", m.ngeom, "nsite:", m.nsite, "nu:", m.nu)
+
+print("\nKey bodies:")
+for i in range(m.nbody):
+    name = mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_BODY, i)
+    if name and any(k in name.lower() for k in [
+        "task_board",
+        "nic_card",
+        "sfp_port",
+        "cable",
+        "sfp",
+        "sc_plug",
+        "lc_plug",
+        "gripper",
+        "tool",
+    ]):
+        print("-", name)
+PY
+```
+
+## View in mujoco
+
+```bash
+cd /home/rmalhan/Software/ws_aic/src/aic
+
+pixi run python aic_utils/aic_mujoco/scripts/view_scene.py \
+  /home/rmalhan/aic_mujoco_world_nic_cable/aic_world.xml
+```
+
+## Run with controller
+
+```bash
+cd /home/rmalhan/Software/ws_aic/src/aic/aic_utils/aic_mujoco
+
+cp /home/rmalhan/aic_mujoco_world_nic_cable/* mjcf/
+
+source /home/rmalhan/.venvs/aic_sdf2mjcf/bin/activate
+python3 scripts/add_cable_plugin.py \
+  --input mjcf/aic_world.xml \
+  --output mjcf/aic_world.xml \
+  --robot_output mjcf/aic_robot.xml \
+  --scene_output mjcf/scene.xml
+deactivate
+
+cd /home/rmalhan/Software/ws_aic
+source /opt/ros/kilted/setup.bash
+source install/setup.bash
+
+colcon build --merge-install --symlink-install --packages-select aic_mujoco
+
+source install/setup.bash
+
+export RMW_IMPLEMENTATION=rmw_zenoh_cpp
+export ZENOH_CONFIG_OVERRIDE='transport/shared_memory/enabled=false'
+
+ros2 launch aic_mujoco aic_mujoco_bringup.launch.py launch_rviz:=false
+```
+
+On other terminal
+```bash
+cd /home/rmalhan/Software/ws_aic
+source /opt/ros/kilted/setup.bash
+source install/setup.bash
+
+export RMW_IMPLEMENTATION=rmw_zenoh_cpp
+export ZENOH_CONFIG_OVERRIDE='transport/shared_memory/enabled=false'
+
+ros2 control list_controllers
+ros2 topic hz /joint_states
+ros2 topic hz /observations
+```
