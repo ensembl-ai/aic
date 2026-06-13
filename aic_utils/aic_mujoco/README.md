@@ -293,7 +293,8 @@ The `aic_mujoco_bringup.launch.py` launch file starts MuJoCo simulation with ros
 # terminal 1: Start the Zenoh router if not already running
 source ~/ws_aic/install/setup.bash
 export RMW_IMPLEMENTATION=rmw_zenoh_cpp
-export ZENOH_CONFIG_OVERRIDE='transport/shared_memory/enabled=true'
+export ZENOH_ROUTER_CONFIG_URI=~/ws_aic/src/aic/docker/aic_eval/aic_zenoh_config.json5
+export ZENOH_CONFIG_OVERRIDE='mode="router";listen/endpoints=["tcp/[::]:7447"];connect/endpoints=[];routing/router/peers_failover_brokering=true;transport/shared_memory/enabled=false'
 ros2 run rmw_zenoh_cpp rmw_zenohd
 ```
 
@@ -301,7 +302,9 @@ ros2 run rmw_zenoh_cpp rmw_zenohd
 # terminal 2: Launch MuJoCo simulation with ros2_control
 source ~/ws_aic/install/setup.bash
 export RMW_IMPLEMENTATION=rmw_zenoh_cpp
-export ZENOH_CONFIG_OVERRIDE='transport/shared_memory/enabled=true'
+export ZENOH_SESSION_CONFIG_URI=~/ws_aic/src/aic/docker/aic_eval/aic_zenoh_config.json5
+export ZENOH_CONFIG_OVERRIDE='connect/endpoints=["tcp/127.0.0.1:7447"];transport/shared_memory/enabled=false'
+export ZENOH_ROUTER_CHECK_ATTEMPTS=-1
 ros2 launch aic_mujoco aic_mujoco_bringup.launch.py
 ```
 
@@ -309,7 +312,9 @@ The robot can now be teleoperated using the `aic_teleoperation` package. See the
 
 ```bash
 export RMW_IMPLEMENTATION=rmw_zenoh_cpp 
-export ZENOH_CONFIG_OVERRIDE='transport/shared_memory/enabled=false' 
+export ZENOH_SESSION_CONFIG_URI=~/ws_aic/src/aic/docker/aic_eval/aic_zenoh_config.json5
+export ZENOH_CONFIG_OVERRIDE='connect/endpoints=["tcp/127.0.0.1:7447"];transport/shared_memory/enabled=false'
+export ZENOH_ROUTER_CHECK_ATTEMPTS=-1
 source ~/ws_aic/install/setup.bash
 ros2 run aic_teleoperation cartesian_keyboard_teleop
 ```
@@ -415,7 +420,7 @@ python3 -m venv --system-site-packages /home/rmalhan/.venvs/aic_sdf2mjcf
 source /home/rmalhan/.venvs/aic_sdf2mjcf/bin/activate
 
 python -m pip install --upgrade pip
-python -m pip install "numpy<2" scipy trimesh dm-control pycollada
+python -m pip install "numpy<2" scipy trimesh pycollada "mujoco==3.5.0" "dm-control"
 
 source /opt/ros/kilted/setup.bash
 source install/setup.bash
@@ -427,6 +432,7 @@ import scipy
 import trimesh
 import collada
 import dm_control
+import mujoco
 import sdformat
 from gz.math import Vector3d
 
@@ -436,6 +442,8 @@ print("scipy:", scipy.__version__, scipy.__file__)
 print("trimesh:", trimesh.__version__, trimesh.__file__)
 print("pycollada:", collada.__file__)
 print("dm_control:", dm_control.__file__)
+print("mujoco:", mujoco.__version__, mujoco.__file__)
+assert mujoco.__version__ == "3.5.0", mujoco.__version__
 print("sdformat OK")
 print("gz.math OK")
 PY
@@ -470,7 +478,9 @@ python /home/rmalhan/Software/ws_aic/install/bin/sdf2mjcf \
 ```bash
 cd /home/rmalhan/Software/ws_aic/src/aic
 
-pixi run python - <<'PY'
+source /home/rmalhan/.venvs/aic_sdf2mjcf/bin/activate
+
+python - <<'PY'
 import mujoco
 
 path = "/home/rmalhan/aic_mujoco_world_nic_cable/aic_world.xml"
@@ -495,14 +505,16 @@ for i in range(m.nbody):
     ]):
         print("-", name)
 PY
+
+deactivate
 ```
 
 ## View in mujoco
 
 ```bash
 cd /home/rmalhan/Software/ws_aic/src/aic
-
-pixi run python aic_utils/aic_mujoco/scripts/view_scene.py \
+pixi shell
+python aic_utils/aic_mujoco/scripts/view_scene.py \
   /home/rmalhan/aic_mujoco_world_nic_cable/aic_world.xml
 ```
 
@@ -528,21 +540,48 @@ source install/setup.bash
 colcon build --merge-install --symlink-install --packages-select aic_mujoco
 
 source install/setup.bash
-
-export RMW_IMPLEMENTATION=rmw_zenoh_cpp
-export ZENOH_CONFIG_OVERRIDE='transport/shared_memory/enabled=false'
-
-ros2 launch aic_mujoco aic_mujoco_bringup.launch.py launch_rviz:=false
 ```
 
-On other terminal
+Terminal 1: Zenoh router
+
 ```bash
 cd /home/rmalhan/Software/ws_aic
 source /opt/ros/kilted/setup.bash
 source install/setup.bash
 
 export RMW_IMPLEMENTATION=rmw_zenoh_cpp
-export ZENOH_CONFIG_OVERRIDE='transport/shared_memory/enabled=false'
+export ZENOH_ROUTER_CONFIG_URI=/home/rmalhan/Software/ws_aic/src/aic/docker/aic_eval/aic_zenoh_config.json5
+export ZENOH_CONFIG_OVERRIDE='mode="router";listen/endpoints=["tcp/[::]:7447"];connect/endpoints=[];routing/router/peers_failover_brokering=true;transport/shared_memory/enabled=false'
+
+ros2 run rmw_zenoh_cpp rmw_zenohd
+```
+
+Terminal 2: MuJoCo ROS-control simulation
+
+```bash
+cd /home/rmalhan/Software/ws_aic
+source /opt/ros/kilted/setup.bash
+source install/setup.bash
+
+export RMW_IMPLEMENTATION=rmw_zenoh_cpp
+export ZENOH_SESSION_CONFIG_URI=/home/rmalhan/Software/ws_aic/src/aic/docker/aic_eval/aic_zenoh_config.json5
+export ZENOH_CONFIG_OVERRIDE='connect/endpoints=["tcp/127.0.0.1:7447"];transport/shared_memory/enabled=false'
+export ZENOH_ROUTER_CHECK_ATTEMPTS=-1
+
+ros2 launch aic_mujoco aic_mujoco_bringup.launch.py launch_rviz:=false
+```
+
+Terminal 3: Controller checks
+
+```bash
+cd /home/rmalhan/Software/ws_aic
+source /opt/ros/kilted/setup.bash
+source install/setup.bash
+
+export RMW_IMPLEMENTATION=rmw_zenoh_cpp
+export ZENOH_SESSION_CONFIG_URI=/home/rmalhan/Software/ws_aic/src/aic/docker/aic_eval/aic_zenoh_config.json5
+export ZENOH_CONFIG_OVERRIDE='connect/endpoints=["tcp/127.0.0.1:7447"];transport/shared_memory/enabled=false'
+export ZENOH_ROUTER_CHECK_ATTEMPTS=-1
 
 ros2 control list_controllers
 ros2 topic hz /joint_states
