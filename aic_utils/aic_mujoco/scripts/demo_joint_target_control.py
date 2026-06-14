@@ -125,15 +125,8 @@ def make_cube_vertex_path(side: float, step: float) -> np.ndarray:
     vertices = np.array(
         [
             [0.0, 0.0, 0.0],
-            [L, 0.0, 0.0],
-            [L, L, 0.0],
-            [0.0, L, 0.0],
-            [0.0, 0.0, 0.0],
-            [0.0, 0.0, L],
-            [L, 0.0, L],
+            [-L, -L, -L],
             [L, L, L],
-            [0.0, L, L],
-            [0.0, 0.0, L],
             [0.0, 0.0, 0.0],
         ],
         dtype=float,
@@ -232,7 +225,7 @@ def make_parser() -> argparse.ArgumentParser:
         default=0.0015,
         help="Advance when EE is this close.",
     )
-    p.add_argument("--max-steps-per-waypoint", type=int, default=80)
+    p.add_argument("--max-steps-per-waypoint", type=int, default=20)
 
     p.add_argument("--controlled-joints", type=csv_list, default=None)
     p.add_argument("--passive-joints", type=csv_list, default=None)
