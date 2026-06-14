@@ -1,0 +1,51 @@
+{
+  "controlled_joints": [
+    "shoulder_pan_joint",
+    "shoulder_lift_joint",
+    "elbow_joint",
+    "wrist_1_joint",
+    "wrist_2_joint",
+    "wrist_3_joint"
+  ],
+  "passive_joints": [
+    "gripper/left_finger_joint",
+    "gripper/right_finger_joint"
+  ],
+  "passive_mode": "freeze",
+  "torque_mode": "actuator_ctrl",
+  "target_mode": "explicit",
+  "target_q": [0.0, -1.57, -1.57, -1.57, 1.57, 0.0],
+  "kp": [
+    100.0,
+    100.0,
+    100.0,
+    50.0,
+    50.0,
+    50.0
+  ],
+  "kd": [
+    40.0,
+    40.0,
+    40.0,
+    15.0,
+    15.0,
+    15.0
+  ],
+  "torque_limits": [
+    120.0,
+    120.0,
+    120.0,
+    60.0,
+    60.0,
+    60.0
+  ],
+  "torque_rate_limits": [
+    1200.0,
+    1200.0,
+    1200.0,
+    600.0,
+    600.0,
+    600.0
+  ],
+  "use_bias_compensation": true
+}
