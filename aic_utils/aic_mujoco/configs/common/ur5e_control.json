@@ -13,8 +13,6 @@
   ],
   "passive_mode": "freeze",
   "torque_mode": "actuator_ctrl",
-  "target_mode": "explicit",
-  "target_q": [0.0, -1.57, -1.57, -1.57, 1.57, 0.0],
   "kp": [
     100.0,
     100.0,

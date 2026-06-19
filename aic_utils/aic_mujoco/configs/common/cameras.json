@@ -1,0 +1,7 @@
+{
+  "camera_names": [
+    "center_camera",
+    "left_camera",
+    "right_camera"
+  ]
+}

@@ -30,6 +30,12 @@ class WrenchObservation:
     torque_bias: np.ndarray | None
 
 
+@dataclass
+class ContactObservation:
+    ncon: int
+    max_penetration: float
+
+
 def read_sensor(
     model: mujoco.MjModel,
     data: mujoco.MjData,
@@ -76,19 +82,30 @@ def force_torque_observation(
     )
 
 
-def vector_summary(values: np.ndarray | None) -> str:
-    if values is None:
-        return "missing"
-    values = np.asarray(values, dtype=float)
-    norm = float(np.linalg.norm(values))
-    return "norm={:.3f} xyz=[{}]".format(
-        norm,
-        ", ".join(f"{x:+.3f}" for x in values),
+def contact_observation(
+    model: mujoco.MjModel,
+    data: mujoco.MjData,
+) -> ContactObservation:
+    """Return the maximum active MuJoCo contact penetration.
+
+    Visual overlap is not contact. This reads MuJoCo's active contact array
+    after ``mj_step``/``mj_forward`` and returns ``max(0, -contact.dist)``.
+    """
+
+    distances: list[float] = []
+    ncon = int(getattr(data, "ncon", 0))
+    contacts = getattr(data, "contact")
+
+    for contact_id in range(ncon):
+        contact = contacts[contact_id]
+        distances.append(float(contact.dist))
+
+    min_distance = None if not distances else min(distances)
+    max_penetration = 0.0 if min_distance is None else max(0.0, -min_distance)
+    return ContactObservation(
+        ncon=ncon,
+        max_penetration=max_penetration,
     )
-
-
-def camera_names(text: str) -> list[str]:
-    return [x.strip() for x in text.split(",") if x.strip()]
 
 
 class CameraHealthChecker:

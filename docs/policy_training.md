@@ -68,6 +68,34 @@ ROS bridges this with `/clock` and `use_sim_time:=true`. A direct MuJoCo/MJLab
 training loop bridges it by never depending on wall-clock timers in the first
 place.
 
+For AIC specifically, the challenge docs warn that task time limits are based
+on simulation time, not wall-clock time. A policy that uses `time.time()` or
+wall-clock `sleep()` can behave differently when realtime factor changes. In
+MuJoCo/MJLab training, treat `model.opt.timestep` and the number of physics
+steps as the clock.
+
+Practical rule:
+
+```text
+wall time: only for viewer/debug pacing
+sim time: controller, reward, timeout, curriculum, logging metrics
+```
+
+In a vectorized RL loop, an "environment step" may contain multiple physics
+substeps:
+
+```text
+policy action held for decimation steps
+  for k in range(decimation):
+    apply controller target
+    mj_step(model, data)
+sim_time += decimation * model.opt.timestep
+```
+
+This is the bridge between controller behavior and accelerated training. The
+controller still sees the correct physics `dt`; the trainer does not need to
+run in realtime.
+
 ## What AIC Encourages
 
 The AIC policy API supports both:
@@ -168,6 +196,38 @@ force/torque is observation and safety signal
 An admittance layer can be added later if we want measured wrench to directly
 modify the command before IK.
 
+## Force/Torque Bias And Zeroing
+
+Force/torque sensors should be treated as biased sensors. A nonzero wrench at
+reset does not necessarily mean the policy caused contact; it may be gravity,
+payload preload, cable tension, sensor bias, or controller settling.
+
+The AIC docs expose the same concept through
+`/aic_controller/tare_force_torque_sensor`. The controller docs recommend
+taring before training episodes, and the interface docs state that evaluation
+automatically calls the tare service before the cable is spawned. In direct
+MuJoCo training, we reproduce this behavior ourselves:
+
+```text
+reset sim state
+place robot and payload
+hold reset pose for N physics steps
+sample raw F/T for K physics steps
+wrench_bias = mean(raw samples)
+episode observation = raw_wrench - wrench_bias
+```
+
+Use the zeroed wrench for observations, safety penalties, and terminations:
+
+```text
+force_obs = raw_force - force_bias
+torque_obs = raw_torque - torque_bias
+```
+
+Step-to-step wrench deltas can be useful in some controllers, but they should
+not replace the zeroed absolute wrench. Sustained contact force is important in
+insertion, and `current - previous` loses that information.
+
 ## MJLab Role
 
 MJLab is not just abstract classes. It provides the manager-based RL framework
@@ -225,7 +285,10 @@ observations
   cameras later if needed
 
 rewards
-  to be defined deliberately per task
+  SDF alignment to nominal inserted pose
+  insertion progress toward port bottom
+  zeroed force/torque safety penalty
+  action/path regularization after behavior is stable
 
 terminations
   success
@@ -237,6 +300,95 @@ terminations
 Do not define reward math casually. Rewards and observations determine what the
 policy learns, so they should be chosen after deciding the exact task and
 available state.
+
+## Nominal Insertion Pose And Stopping Condition
+
+The local AIC scoring docs and implementation do not define success as "insert
+15 cm." They define:
+
+- Full insertion: correct plug inserted into the correct target port, verified
+  by the Gazebo insertion/contact event.
+- Partial insertion: plug is inside a bounding box between the port entrance
+  frame and the port frame, within 5 mm XY tolerance, with score increasing as
+  the plug approaches the port frame.
+- Proximity: if not inside the port, score falls with final plug-port distance.
+
+For SFP in the current assets, `sfp_port_0_link_entrance` is offset by
+`-0.0458 m` from `sfp_port_0_link` in the port-local Z direction. So the
+asset-derived entrance-to-bottom depth is about 45.8 mm. The baseline
+`CheatCode` policy descends to `z_offset < -0.015`, which is a simple example
+policy stopping depth, not the scoring definition and not 15 cm.
+
+For MuJoCo rewards, the nominal inserted pose should therefore be derived from
+scene frames:
+
+```text
+world_T_port_entrance = body_transform("sfp_port_0_link_entrance")
+world_T_port_bottom   = body_transform("sfp_port_0_link")
+desired_world_T_sfp_tip for full insertion is at/near world_T_port_bottom
+desired_world_T_sfp_tip for pre-insertion is world_T_port_entrance plus an offset
+```
+
+The exact final SFP-tip frame may need a small calibrated offset if the AIC
+plug frame is not exactly the physical leading surface, but it should be
+calibrated from the generated scene/assets, not guessed as a fixed 15 cm.
+
+## SDF-Based Geometry Reward
+
+For dense insertion shaping, use an IndustReal-style sampled SDF query reward:
+
+```text
+offline/reset setup:
+  sample ~1000 points on the SFP plug surface in plug-local coordinates
+  construct a target SDF for the plug mesh at the nominal inserted pose
+
+per physics/control step:
+  transform sampled plug points by current world_T_plug
+  query target SDF at those world points
+  distance = RMS(abs(sdf_values))
+  reward_sdf = -log(distance + eps)
+```
+
+This is different from "sum distances between all plug and port points." A
+Chamfer-like point distance can be ambiguous near cavities and symmetries. SDF
+query distance gives a smoother signal for "make the current plug occupancy
+match the desired inserted plug occupancy."
+
+Use two SDF-style signals for different purposes:
+
+```text
+target plug SDF:
+  alignment reward to nominal inserted pose
+
+port/socket solid SDF:
+  collision/interpenetration penalty against socket walls
+```
+
+Then combine with simple task terms:
+
+```text
+reward =
+  w_sdf      * (-log(rms_sdf + eps))
+  + w_prog   * insertion_progress_along_port_axis
+  - w_force  * max(0, ||zeroed_force|| - force_limit)
+  - w_torque * max(0, ||zeroed_torque|| - torque_limit)
+  - w_action * ||action||^2
+```
+
+The first implementation should keep weights explicit and modest. The SDF term
+teaches geometric alignment; progress teaches direction into the port; zeroed
+force/torque protects against learning "solve by pushing harder."
+
+We should not reinvent geometry kernels. Use:
+
+- `trimesh` for mesh loading, surface sampling, and proximity/SDF query.
+- `scipy` for numerical/proximity support.
+- `rtree` for trimesh spatial acceleration.
+
+The current prototype reward utilities live in
+`aic_mujoco.mjlab.rewards` and deliberately require the caller to provide the
+mesh, sampled points, current transform, and nominal target transform. This
+keeps task geometry explicit.
 
 ## Recommended Development Sequence
 

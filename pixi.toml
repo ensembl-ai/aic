@@ -17,6 +17,8 @@ json5 = ">=0.13.0,<0.14"                                                        
 numpy = "<2.3.0"
 packaging = ">=24.2,<26.0"                                                             # required by lerobot==0.4.3
 pyright = "==1.1.408"
+rtree = ">=1.4.1,<2"
+scipy = ">=1.15.0,<2"
 ros-kilted-aic-control-interfaces = { path = "aic_interfaces/aic_control_interfaces" }
 ros-kilted-aic-example-policies = { path = "aic_example_policies" }
 ros-kilted-aic-model = { path = "aic_model" }
@@ -46,6 +48,7 @@ lerobot_teleoperator_devices = { git = "https://github.com/koonpeng/lerobot-ros"
 mujoco = "==3.5.0"
 pynput = ">=1.7.6,<2"
 pyspacemouse = ">=2.0.0, <3"
+trimesh = ">=4.7.0,<5"
 
 [activation]
 scripts = ["pixi_env_setup.sh"]

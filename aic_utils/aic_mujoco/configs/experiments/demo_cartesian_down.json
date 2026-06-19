@@ -1,0 +1,15 @@
+{
+  "include": [
+    "../common/ur5e_control.json",
+    "../common/preinsert_sfp_nic.json",
+    "../common/sensors.json",
+    "../common/cameras.json",
+    "../common/reward_debug.json"
+  ],
+  "policy_action": "delta_world_z_down",
+  "down_distance": 0.08,
+  "step_size": 0.001,
+  "waypoint_tolerance": 0.0015,
+  "max_steps_per_waypoint": 20,
+  "log_period": 1.0
+}

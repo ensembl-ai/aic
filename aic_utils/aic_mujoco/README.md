@@ -62,7 +62,44 @@ python3 -c "import sdformat; print('sdformat OK')"
 python3 -c "from gz.math import Vector3d; print('gz.math OK')"
 ```
 
-#### 2. Build the Converter
+#### 2. Install MuJoCo Policy-Training Geometry Dependencies
+
+The MJLab/prototype reward utilities use established geometry libraries rather
+than custom nearest-point or signed-distance implementations:
+
+- `trimesh`: mesh loading, surface sampling, and signed-distance/proximity queries
+- `scipy`: numerical routines and proximity support
+- `rtree`: spatial acceleration used by `trimesh.proximity`
+
+If you are using the AIC pixi environment, these are listed in the root
+`pixi.toml`. Refresh the environment from `/home/rmalhan/Software/ws_aic/src/aic`:
+
+```bash
+cd /home/rmalhan/Software/ws_aic/src/aic
+pixi install
+pixi shell
+```
+
+If you are using a separate Python environment:
+
+```bash
+python3 -m pip install trimesh scipy rtree
+```
+
+Verify:
+
+```bash
+python3 - <<'PY'
+import trimesh
+import scipy
+import rtree
+print("trimesh", trimesh.__version__)
+print("scipy", scipy.__version__)
+print("rtree OK")
+PY
+```
+
+#### 3. Build the Converter
 
 Build the `sdformat_mjcf` package:
 
@@ -203,6 +240,55 @@ python -c "import mujoco, mujoco.viewer; m = mujoco.MjModel.from_xml_path('~/aic
 ```bash
 simulate ~/ws_aic/src/aic/aic_utils/aic_mujoco/mjcf/scene.xml
 ```
+
+---
+
+### Prototype R&D Configs
+
+The prototype MuJoCo policy-training scripts use composable JSON configs:
+
+```text
+configs/common/
+  ur5e_control.json        robot joints, passive joints, impedance gains
+  preinsert_sfp_nic.json   SFP/NIC frame names and pre-insertion height
+  sensors.json             force/torque sensor names and zeroing settings
+  cameras.json             debug camera names
+  reward_debug.json        temporary reward/log thresholds and weights
+
+configs/experiments/
+  hold_preinsert.json      fixed-target pre-insertion hold demo
+  demo_cartesian_down.json Cartesian Z-down policy/reward debug demo
+```
+
+Config files support an `include` list. Includes are resolved relative to the
+file declaring them, and later values override earlier values. This keeps robot
+constants separate from task frames, sensors, rewards, and per-demo settings.
+
+Run the Cartesian policy/reward debug demo:
+
+```bash
+cd /home/rmalhan/Software/ws_aic/src/aic
+pixi shell
+
+PYTHONPATH=/home/rmalhan/Software/ws_aic/src/aic/aic_utils/aic_mujoco:/home/rmalhan/Software/ws_aic/src/aic/aic_model \
+python3 aic_utils/aic_mujoco/scripts/demo_joint_target_control.py \
+  --xml /home/rmalhan/Software/ws_aic/src/aic/aic_utils/aic_mujoco/mjcf/scene.xml
+```
+
+Run the fixed pre-insertion hold demo:
+
+```bash
+cd /home/rmalhan/Software/ws_aic/src/aic
+pixi shell
+
+PYTHONPATH=/home/rmalhan/Software/ws_aic/src/aic/aic_utils/aic_mujoco:/home/rmalhan/Software/ws_aic/src/aic/aic_model \
+python3 aic_utils/aic_mujoco/scripts/hold_fixed_target.py \
+  --xml /home/rmalhan/Software/ws_aic/src/aic/aic_utils/aic_mujoco/mjcf/scene.xml
+```
+
+Pass `--config path/to/experiment.json` only when you want to run a different
+experiment config. Use CLI flags like `--duration 10` or `--down-distance 0.03`
+as temporary overrides.
 
 ---
 

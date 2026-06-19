@@ -26,8 +26,7 @@ pixi shell
 
 PYTHONPATH=/home/rmalhan/Software/ws_aic/src/aic/aic_utils/aic_mujoco:/home/rmalhan/Software/ws_aic/src/aic/aic_model \
 python3 aic_utils/aic_mujoco/scripts/demo_joint_target_control.py \
---xml /home/rmalhan/Software/ws_aic/src/aic/aic_utils/aic_mujoco/mjcf/scene.xml \
---config /home/rmalhan/Software/ws_aic/src/aic/aic_utils/aic_mujoco/configs/aic_ur5e_hold.json
+--xml /home/rmalhan/Software/ws_aic/src/aic/aic_utils/aic_mujoco/mjcf/scene.xml
 
 Useful demo knobs:
 
@@ -44,7 +43,6 @@ this script; it uses MuJoCo directly.
 from __future__ import annotations
 
 import argparse
-import json
 import time
 from pathlib import Path
 from typing import Any
@@ -53,6 +51,7 @@ import mujoco
 import mujoco.viewer
 import numpy as np
 
+from aic_mujoco.config import load_json_config
 from aic_mujoco.controllers import JointImpedanceConfig, JointImpedanceController
 from aic_mujoco.joints import (
     JointGroup,
@@ -60,10 +59,16 @@ from aic_mujoco.joints import (
     TorqueMode,
     print_model_summary,
 )
+from aic_mujoco.mjlab.logging import DemoLogRecord, format_demo_log
 from aic_mujoco.mjlab.observations import (
     CameraHealthChecker,
+    contact_observation,
     force_torque_observation,
-    vector_summary,
+)
+from aic_mujoco.mjlab.rewards import (
+    compose_reward,
+    insertion_axis_progress,
+    zeroed_wrench_penalty,
 )
 from aic_mujoco.mjlab.reset import (
     PreinsertResetConfig,
@@ -75,50 +80,12 @@ from aic_mujoco.mjlab.step import (
     make_downward_path,
     step_cartesian_position_target,
 )
+from aic_mujoco.utils import body_transform
 
-DEFAULT_CONFIG: dict[str, Any] = {
-    "controlled_joints": [
-        "shoulder_pan_joint",
-        "shoulder_lift_joint",
-        "elbow_joint",
-        "wrist_1_joint",
-        "wrist_2_joint",
-        "wrist_3_joint",
-    ],
-    "passive_joints": [
-        "gripper/left_finger_joint",
-        "gripper/right_finger_joint",
-    ],
-    "passive_mode": "freeze",
-    "torque_mode": "actuator_ctrl",
-    "kp": [100.0, 100.0, 100.0, 50.0, 50.0, 50.0],
-    "kd": [40.0, 40.0, 40.0, 15.0, 15.0, 15.0],
-    "torque_limits": [120.0, 120.0, 120.0, 60.0, 60.0, 60.0],
-    "torque_rate_limits": [1200.0, 1200.0, 1200.0, 600.0, 600.0, 600.0],
-    "use_bias_compensation": True,
-    "ik_home_q": [-0.1597, -1.3542, -1.6648, -1.6933, 1.5710, 1.4110],
-    "preinsert_port_body": "sfp_port_0_link_entrance",
-    "preinsert_tcp_site": "gripper_tcp",
-    "preinsert_sfp_tip_body": "sfp_tip_link",
-    "preinsert_tool_body": "ati/tool_link",
-    "preinsert_weld_child_body": "lc_plug_link",
-    "preinsert_payload_root_body": "cable_end_0",
-    "preinsert_payload_root_freejoint": "cable_end_0_free",
-    "preinsert_height": 0.05,
-    "force_sensor": "AtiForceTorqueSensor_force",
-    "torque_sensor": "AtiForceTorqueSensor_torque",
-    "sensor_zero_settle_steps": 100,
-    "sensor_zero_samples": 50,
-    "camera_names": ["center_camera", "left_camera", "right_camera"],
-}
-
-
-def load_config(path: str | None) -> dict[str, Any]:
-    cfg = dict(DEFAULT_CONFIG)
-    if path is not None:
-        with open(Path(path).expanduser(), "r", encoding="utf-8") as f:
-            cfg.update(json.load(f))
-    return cfg
+SCRIPT_DIR = Path(__file__).resolve().parent
+DEFAULT_CONFIG_PATH = (
+    SCRIPT_DIR.parent / "configs" / "experiments" / "demo_cartesian_down.json"
+)
 
 
 def print_sites_and_bodies(model: mujoco.MjModel) -> None:
@@ -161,11 +128,11 @@ def make_wrench_config(cfg: dict[str, Any]) -> WrenchZeroingConfig:
 def make_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument("--xml", required=True)
-    parser.add_argument("--config", default=None)
-    parser.add_argument("--down-distance", type=float, default=0.08)
-    parser.add_argument("--step-size", type=float, default=0.001)
+    parser.add_argument("--config", default=str(DEFAULT_CONFIG_PATH))
+    parser.add_argument("--down-distance", type=float, default=None)
+    parser.add_argument("--step-size", type=float, default=None)
     parser.add_argument("--duration", type=float, default=0.0)
-    parser.add_argument("--log-period", type=float, default=1.0)
+    parser.add_argument("--log-period", type=float, default=None)
     parser.add_argument("--no-camera-check", action="store_true")
     parser.add_argument("--print-model", action="store_true")
     parser.add_argument("--print-sites", action="store_true")
@@ -174,7 +141,13 @@ def make_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = make_parser().parse_args()
-    cfg = load_config(args.config)
+    cfg = load_json_config(args.config)
+    if args.down_distance is not None:
+        cfg["down_distance"] = args.down_distance
+    if args.step_size is not None:
+        cfg["step_size"] = args.step_size
+    if args.log_period is not None:
+        cfg["log_period"] = args.log_period
 
     model = mujoco.MjModel.from_xml_path(str(Path(args.xml).expanduser().resolve()))
     data = mujoco.MjData(model)
@@ -228,8 +201,8 @@ def main() -> int:
 
     start_pos = data.site_xpos[site_id].copy()
     target_positions = start_pos[None, :] + make_downward_path(
-        args.down_distance,
-        args.step_size,
+        float(cfg["down_distance"]),
+        float(cfg["step_size"]),
     )
 
     camera_checker = None
@@ -252,11 +225,20 @@ def main() -> int:
     print(f"  tcp_site:             {tcp_site}")
     print(f"  start_pos:            {start_pos.tolist()}")
     print(f"  policy_action:        delta_world_z_down")
-    print(f"  down_distance:        {args.down_distance:.4f} m")
-    print(f"  step_size:            {args.step_size:.4f} m")
+    print(f"  config:               {Path(args.config).expanduser().resolve()}")
+    print(f"  down_distance:        {float(cfg['down_distance']):.4f} m")
+    print(f"  step_size:            {float(cfg['step_size']):.4f} m")
     print(f"  waypoints per cycle:  {len(target_positions)}")
     print(f"  torque_mode:          {torque_mode.value}")
     print(f"  passive_mode:         {passive.mode}")
+    print(f"  sim_timestep:         {float(model.opt.timestep):.6f} s")
+    print(f"  reward_port_bottom:   {cfg['reward_port_bottom_body']}")
+    print(
+        "  reward_weights:       "
+        f"progress={float(cfg['reward_progress_weight']):.3g}, "
+        f"force={float(cfg['reward_force_weight']):.3g}, "
+        f"action={float(cfg['reward_action_weight']):.3g}"
+    )
     print(f"  q_start:              {reset_result.q_start.tolist()}")
     print(
         "  sfp_tip_error_m:      "
@@ -281,9 +263,10 @@ def main() -> int:
     steps_on_waypoint = 0
     last_log = -1e9
     t0 = time.time()
+    physics_step = 0
     step_cfg = CartesianStepConfig()
-    waypoint_tolerance = 0.0015
-    max_steps_per_waypoint = 20
+    waypoint_tolerance = float(cfg["waypoint_tolerance"])
+    max_steps_per_waypoint = int(cfg["max_steps_per_waypoint"])
 
     try:
         with mujoco.viewer.launch_passive(model, data) as viewer:
@@ -292,6 +275,7 @@ def main() -> int:
                 if args.duration > 0.0 and t >= args.duration:
                     break
 
+                target_pos = target_positions[waypoint_i]
                 result = step_cartesian_position_target(
                     model=model,
                     data=data,
@@ -299,11 +283,12 @@ def main() -> int:
                     passive=passive,
                     controller=controller,
                     site_id=site_id,
-                    target_pos=target_positions[waypoint_i],
+                    target_pos=target_pos,
                     kp=kp,
                     kd=kd,
                     cfg=step_cfg,
                 )
+                physics_step += 1
                 viewer.sync()
 
                 steps_on_waypoint += 1
@@ -316,8 +301,9 @@ def main() -> int:
                     if waypoint_i >= len(target_positions):
                         waypoint_i = 0
 
-                if t - last_log >= args.log_period:
+                if t - last_log >= float(cfg["log_period"]):
                     last_log = t
+                    target_delta = target_pos - start_pos
                     obs = force_torque_observation(
                         model=model,
                         data=data,
@@ -331,20 +317,79 @@ def main() -> int:
                         if camera_checker is None
                         else camera_checker.summary(data)
                     )
+                    contacts = contact_observation(model=model, data=data)
+
+                    progress = insertion_axis_progress(
+                        world_T_port_bottom=body_transform(
+                            model, data, str(cfg["reward_port_bottom_body"])
+                        ),
+                        world_T_port_entrance=body_transform(
+                            model, data, str(cfg["preinsert_port_body"])
+                        ),
+                        world_T_plug=body_transform(
+                            model, data, str(cfg["preinsert_sfp_tip_body"])
+                        ),
+                    )
+                    force_terms = zeroed_wrench_penalty(
+                        force=obs.force,
+                        torque=obs.torque,
+                        force_limit=float(cfg["reward_force_limit"]),
+                        torque_limit=None,
+                        force_weight=1.0,
+                        torque_weight=1.0,
+                    )
+                    action_penalty = -float(np.dot(target_delta, target_delta))
+                    reward = compose_reward(
+                        [
+                            (
+                                "progress",
+                                progress.normalized_progress,
+                                float(cfg["reward_progress_weight"]),
+                            ),
+                            (
+                                "force",
+                                force_terms.penalty,
+                                float(cfg["reward_force_weight"]),
+                            ),
+                            (
+                                "action",
+                                action_penalty,
+                                float(cfg["reward_action_weight"]),
+                            ),
+                        ]
+                    )
+                    excessive_force = force_terms.force_norm > float(
+                        cfg["terminate_force_limit"]
+                    )
                     print(
-                        "t={:7.2f} | wp={:5d}/{:5d} | ee_err={:8.5f} m | ik_err={:8.5f} m | ik_ok={} | max_tau={:8.2f}".format(
-                            t,
-                            waypoint_i,
-                            len(target_positions),
-                            result.ee_error,
-                            result.ik_error,
-                            str(result.ik_ok),
-                            float(np.max(np.abs(result.tau))),
+                        format_demo_log(
+                            DemoLogRecord(
+                                step=physics_step,
+                                sim_time=float(getattr(data, "time", 0.0)),
+                                wall_time=t,
+                                waypoint_index=waypoint_i,
+                                waypoint_count=len(target_positions),
+                                target_delta_world=target_delta,
+                                tcp_pos=result.ee_pos,
+                                tcp_error=result.ee_error,
+                                ik_error=result.ik_error,
+                                ik_ok=result.ik_ok,
+                                max_tau=float(np.max(np.abs(result.tau))),
+                                force=obs.force,
+                                torque=obs.torque,
+                                camera_summary=camera_summary,
+                                contacts=contacts,
+                                reward_total=reward.total,
+                                reward_terms=reward.terms,
+                                progress=progress.progress,
+                                normalized_progress=progress.normalized_progress,
+                                remaining=progress.remaining,
+                                force_norm=force_terms.force_norm,
+                                torque_norm=force_terms.torque_norm,
+                                excessive_force=excessive_force,
+                            )
                         )
                     )
-                    print(f"  obs.force:   {vector_summary(obs.force)}")
-                    print(f"  obs.torque:  {vector_summary(obs.torque)}")
-                    print(f"  obs.cameras: {camera_summary}")
 
                 time.sleep(float(model.opt.timestep))
     finally:
