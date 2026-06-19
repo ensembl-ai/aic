@@ -5,7 +5,7 @@ AIC task into MJLab concepts before committing to reward, observation, and
 randomization formulas.
 """
 
-from . import actions, events, observations, rewards, terminations
+from . import actions, events, observations, reset, rewards, step, terminations
 from .env_cfg import AicInsertionTaskSpec, make_aic_insertion_env_cfg
 
 __all__ = [
@@ -14,6 +14,8 @@ __all__ = [
     "events",
     "make_aic_insertion_env_cfg",
     "observations",
+    "reset",
     "rewards",
+    "step",
     "terminations",
 ]

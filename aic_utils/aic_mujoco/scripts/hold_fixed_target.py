@@ -68,13 +68,25 @@ IK target:
 
   Then choose the IK solution closest to ``ik_home_q``.
 
-Run from the AIC pixi shell:
+Fresh run:
+
+  cd /home/rmalhan/Software/ws_aic/src/aic
+  pixi shell
+
   PYTHONPATH=/home/rmalhan/Software/ws_aic/src/aic/aic_utils/aic_mujoco:/home/rmalhan/Software/ws_aic/src/aic/aic_model \
   python3 aic_utils/aic_mujoco/scripts/hold_fixed_target.py \
     --xml /home/rmalhan/Software/ws_aic/src/aic/aic_utils/aic_mujoco/mjcf/scene.xml \
     --config /home/rmalhan/Software/ws_aic/src/aic/aic_utils/aic_mujoco/configs/aic_ur5e_hold.json \
     --target-mode preinsert \
     --preinsert-height 0.05
+
+For a shorter smoke test:
+
+  add ``--duration 10``
+
+The config supplies the robot joints, passive gripper behavior, controller
+gains, and default pre-insertion frame names. Do not source ROS for this script;
+it uses MuJoCo directly.
 """
 
 from __future__ import annotations

@@ -1,16 +1,11 @@
 {
-    "typeCheckingMode": "basic",
-    "include": [
-        "aic_model",
-        "aic_utils/aic_mujoco",
-        "aic_utils/lerobot_robot_aic"
-    ],
-    "extraPaths": [
-        "aic_model",
-        "aic_utils/aic_mujoco",
-        "aic_utils/lerobot_robot_aic"
-    ],
-    "exclude": [
-        "**/build"
-    ]
+  "venvPath": ".pixi/envs",
+  "venv": "default",
+  "stubPath": "typings",
+  "extraPaths": [
+    "aic_model",
+    "aic_utils/aic_mujoco",
+    "aic_utils/lerobot_robot_aic"
+  ],
+  "reportMissingModuleSource": false
 }
