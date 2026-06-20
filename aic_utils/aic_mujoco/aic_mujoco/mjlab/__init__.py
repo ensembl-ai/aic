@@ -1,22 +1,15 @@
-"""MJLab-facing skeleton for AIC MuJoCo policy training.
+"""Legacy prototype utility namespace.
 
-This package intentionally contains placeholders. The goal is to organize the
-AIC task into MJLab concepts before committing to reward, observation, and
-randomization formulas.
+The active R&D path lives in :mod:`aic_mujoco.warp`. This namespace remains for
+the plain MuJoCo utility modules used by the viewer/demo scripts.
 """
 
-from . import actions, events, logging, observations, reset, rewards, step, terminations
-from .env_cfg import AicInsertionTaskSpec, make_aic_insertion_env_cfg
+from . import logging, observations, reset, rewards, step
 
 __all__ = [
-    "AicInsertionTaskSpec",
-    "actions",
-    "events",
-    "make_aic_insertion_env_cfg",
     "logging",
     "observations",
     "reset",
     "rewards",
     "step",
-    "terminations",
 ]

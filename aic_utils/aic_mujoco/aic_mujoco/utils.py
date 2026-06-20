@@ -211,16 +211,16 @@ def compute_preinsert_joint_target(
     weld_child_T_sfp_tip = relative_transform(world_T_weld_child, world_T_sfp_tip)
     tool_T_weld_child = weld_body_transform(model, tool_body, weld_child_body)
 
-    tcp_T_sfp_tip_source = "weld"
     if tool_T_weld_child is None:
-        tcp_T_sfp_tip_source = "current_scene_fallback"
-        tcp_T_sfp_tip = relative_transform(world_T_tcp, world_T_sfp_tip)
-    else:
-        tcp_T_sfp_tip = (
-            inverse_transform(tool_T_tcp)
-            @ tool_T_weld_child
-            @ weld_child_T_sfp_tip
+        raise RuntimeError(
+            f"Required weld equality not found between {tool_body!r} and "
+            f"{weld_child_body!r}."
         )
+    tcp_T_sfp_tip = (
+        inverse_transform(tool_T_tcp)
+        @ tool_T_weld_child
+        @ weld_child_T_sfp_tip
+    )
 
     desired_world_T_sfp_tip = world_T_port.copy()
     desired_world_T_sfp_tip[2, 3] += float(height)
@@ -251,7 +251,6 @@ def compute_preinsert_joint_target(
         "payload_root_freejoint": payload_root_freejoint,
         "height": float(height),
         "solution_count": solution_count,
-        "tcp_T_sfp_tip_source": tcp_T_sfp_tip_source,
         "world_T_port": world_T_port,
         "world_T_base": world_T_base,
         "world_T_tool": world_T_tool,

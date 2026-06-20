@@ -7,9 +7,9 @@
     "../common/reward_debug.json"
   ],
   "policy_action": "delta_world_z_down",
-  "down_distance": 0.08,
-  "step_size": 0.001,
+  "down_distance": 0.15,
+  "step_size": 0.005,
   "waypoint_tolerance": 0.0015,
-  "max_steps_per_waypoint": 20,
+  "max_steps_per_waypoint": 10,
   "log_period": 1.0
 }

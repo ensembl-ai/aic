@@ -1,0 +1,158 @@
+<mujoco model="aic_world">
+  <compiler angle="radian" />
+
+  <option gravity="0 0 -9.8" magnetic="5.5645e-06 2.28758e-05 -4.23884e-05" />
+
+  <default>
+    <default class="robot_unused" />
+  </default>
+
+  <asset>
+    <mesh name="a0ab51268db2dd6ba30e2e14e1f8befeabfff6f0fbdfd420b564678df289a3c0_base.stl" class="robot_unused" content_type="model/stl" file="base-d994a04ff52ddcdf6d91bb6d4fcfff9b1425c18e.stl" />
+    <mesh name="a0ab51268db2dd6ba30e2e14e1f8befeabfff6f0fbdfd420b564678df289a3c0_shoulder.stl" class="robot_unused" content_type="model/stl" file="shoulder-a83506202923a888b5b5d3c371edb9e13f236336.stl" />
+    <mesh name="a0ab51268db2dd6ba30e2e14e1f8befeabfff6f0fbdfd420b564678df289a3c0_upperarm.stl" class="robot_unused" content_type="model/stl" file="upperarm-03c2bdced333d049d7ff8fbd721d7d8230d808bc.stl" />
+    <mesh name="a0ab51268db2dd6ba30e2e14e1f8befeabfff6f0fbdfd420b564678df289a3c0_forearm.stl" class="robot_unused" content_type="model/stl" file="forearm-95860729b3e4915567db264330b9ab276f0c8308.stl" />
+    <mesh name="a0ab51268db2dd6ba30e2e14e1f8befeabfff6f0fbdfd420b564678df289a3c0_wrist1.stl" class="robot_unused" content_type="model/stl" file="wrist1-d0aff1dbf858639fbad7a22318ecfa5fba436f30.stl" />
+    <mesh name="a0ab51268db2dd6ba30e2e14e1f8befeabfff6f0fbdfd420b564678df289a3c0_wrist2.stl" class="robot_unused" content_type="model/stl" file="wrist2-777eba24b0996c38308995e2e7740d22a77ee8a8.stl" />
+    <mesh name="a0ab51268db2dd6ba30e2e14e1f8befeabfff6f0fbdfd420b564678df289a3c0_wrist3.stl" class="robot_unused" content_type="model/stl" file="wrist3-f7f56f92b9aad1eab55349b28bbe751f72de21da.stl" />
+    </asset>
+
+  <worldbody>
+    <body name="tabletop" pos="-0.2 0.2 1.14" quat="1 0 0 0">
+      <inertial pos="0 0 0" quat="0.5 0.5 -0.5 0.5" mass="4" diaginertia="0.0072 0.00443333 0.00443333" />
+      <geom name="tabletop_fixed_joint_lump__base_link_inertia_collision" class="robot_unused" type="mesh" group="3" mesh="a0ab51268db2dd6ba30e2e14e1f8befeabfff6f0fbdfd420b564678df289a3c0_base.stl" />
+      <body name="shoulder_link" pos="2.17786e-09 2.01793e-09 0.1625">
+        <inertial pos="0 -0.00193 -0.02561" quat="0.73527 -0.287588 0.218944 0.573354" mass="3.761" diaginertia="0.00703079 0.0070003 0.00602478" />
+        <joint name="shoulder_pan_joint" class="robot_unused" pos="0 0 0" axis="0 0 1" limited="true" range="-6.28319 6.28319" damping="1.0" armature="0.1" />
+        <geom name="shoulder_link_collision" class="robot_unused" quat="0 0 0 1" type="mesh" group="3" mesh="a0ab51268db2dd6ba30e2e14e1f8befeabfff6f0fbdfd420b564678df289a3c0_shoulder.stl" />
+        <body name="upper_arm_link" pos="4.13509e-08 5.11984e-09 -7.44776e-08" quat="0.70710678 0.70710678 0 0">
+          <inertial pos="-0.2125 0 0.11336" quat="0.500275 0.499641 0.500368 0.499716" mass="8.058" diaginertia="0.333881 0.332472 0.0150588" />
+          <joint name="shoulder_lift_joint" class="robot_unused" pos="0 0 0" axis="0 0 1" limited="true" range="-6.28319 6.28319" damping="1.0" armature="0.1" />
+          <geom name="upper_arm_link_collision" class="robot_unused" pos="0 0 0.138" quat="0.5 0.5 -0.5 -0.5" type="mesh" group="3" mesh="a0ab51268db2dd6ba30e2e14e1f8befeabfff6f0fbdfd420b564678df289a3c0_upperarm.stl" />
+          <body name="forearm_link" pos="-0.425 -9.87498e-09 -1.3397e-07">
+            <inertial pos="-0.2422 0 0.0265" quat="0.501301 0.498381 0.510711 0.489375" mass="2.846" diaginertia="0.0787927 0.0785102 0.00397103" />
+            <joint name="elbow_joint" class="robot_unused" pos="0 0 0" axis="0 0 1" limited="true" range="-3.14159 3.14159" damping="1.0" armature="0.1" />
+            <geom name="forearm_link_collision" class="robot_unused" pos="0 0 0.007" quat="0.5 0.5 -0.5 -0.5" type="mesh" group="3" mesh="a0ab51268db2dd6ba30e2e14e1f8befeabfff6f0fbdfd420b564678df289a3c0_forearm.stl" />
+            <body name="wrist_1_link" pos="-0.3922 3.45133e-08 0.1333">
+              <inertial pos="0 -0.01634 -0.0018" quat="0.482884 0.875621 0.0101022 -0.00281842" mass="1.37" diaginertia="0.00165502 0.00142363 0.00119868" />
+              <joint name="wrist_1_joint" class="robot_unused" pos="0 0 0" axis="0 0 1" limited="true" range="-6.28319 6.28319" damping="1.0" armature="0.1" />
+              <geom name="wrist_1_link_collision" class="robot_unused" pos="0 0 -0.127" quat="0.707107 0.707107 0 0" type="mesh" group="3" mesh="a0ab51268db2dd6ba30e2e14e1f8befeabfff6f0fbdfd420b564678df289a3c0_wrist1.stl" />
+              <body name="wrist_2_link" pos="3.91795e-07 -0.0997001 1.04345e-07" quat="0.70710678 0.70710678 0 0">
+                <inertial pos="0 0.01634 -0.0018" quat="0.759847 0.649632 -0.0119443 0.0216264" mass="1.3" diaginertia="0.00135637 0.00128607 0.00095814" />
+                <joint name="wrist_2_joint" class="robot_unused" pos="0 0 0" axis="0 0 1" limited="true" range="-6.28319 6.28319" damping="1.0" armature="0.1" />
+                <geom name="wrist_2_link_collision" class="robot_unused" pos="0 0 -0.0997" quat="1 0 0 0" type="mesh" group="3" mesh="a0ab51268db2dd6ba30e2e14e1f8befeabfff6f0fbdfd420b564678df289a3c0_wrist2.stl" />
+                <body name="wrist_3_link" pos="-6.50517e-07 0.0996005 7.34267e-08" quat="0.70710678 -0.70710678 0 0">
+                  <inertial pos="0 -0.000295454 -0.000755283" quat="0.716686 -0.00126424 0.00131506 0.697394" mass="0.729" diaginertia="0.00200498 0.00200276 0.000606738" />
+                  <joint name="wrist_3_joint" class="robot_unused" pos="0 0 0" axis="0 0 1" limited="true" range="-6.28319 6.28319" damping="1.0" armature="0.1" />
+                  <geom name="wrist_3_link_collision" class="robot_unused" pos="0 0 -0.0989" quat="0.707107 0.707107 0 0" type="mesh" group="3" mesh="a0ab51268db2dd6ba30e2e14e1f8befeabfff6f0fbdfd420b564678df289a3c0_wrist3.stl" />
+                  <geom name="wrist_3_link_fixed_joint_lump__cam_mount_collider_cylinder_collision_1" class="robot_unused" size="0.06 0.005" pos="0 0 -0.005" type="cylinder" group="3" />
+                  <geom name="wrist_3_link_fixed_joint_lump__cam_mount003_collider_box_collision_2" class="robot_unused" size="0.0278375 0.018449 0.0022" pos="0.000252 -0.068974 -0.0072" quat="0.707107 0 0 -0.707107" type="box" group="3" />
+                  <geom name="wrist_3_link_fixed_joint_lump__cam_mount003_collider_box.001_collision_3" class="robot_unused" size="0.017628 0.021625 0.00429" pos="0.000189 -0.100267 -0.022574" quat="0.560986 0.430459 0.430459 -0.560985" type="box" group="3" />
+                  <geom name="wrist_3_link_fixed_joint_lump__cam_mount003_collider_box.002_collision_4" class="robot_unused" size="0.0297835 0.018449 0.005221" pos="0.000252 -0.076575 -0.019058" quat="0.686843 0.168069 0.168069 -0.686842" type="box" group="3" />
+                  <geom name="wrist_3_link_fixed_joint_lump__cam_mount003_collider_box.003_collision_5" class="robot_unused" size="0.0278375 0.018449 0.0022" pos="0.059859 -0.034268 -0.0072" quat="0.965926 0 0 -0.258819" type="box" group="3" />
+                  <geom name="wrist_3_link_fixed_joint_lump__cam_mount003_collider_box.004_collision_6" class="robot_unused" size="0.017628 0.021625 0.00429" pos="0.086928 -0.04997 -0.022574" quat="0.76632 0.157559 0.588018 -0.205335" type="box" group="3" />
+                  <geom name="wrist_3_link_fixed_joint_lump__cam_mount003_collider_box.005_collision_7" class="robot_unused" size="0.0301105 0.018449 0.005221" pos="0.06619 -0.037924 -0.018907" quat="0.938244 0.0615176 0.229587 -0.251402" type="box" group="3" />
+                  <geom name="wrist_3_link_fixed_joint_lump__cam_mount003_collider_box.006_collision_8" class="robot_unused" size="0.0278375 0.018449 0.0022" pos="-0.059607 -0.034705 -0.0072" quat="0.258819 0 0 -0.965926" type="box" group="3" />
+                  <geom name="wrist_3_link_fixed_joint_lump__cam_mount003_collider_box.007_collision_9" class="robot_unused" size="0.017628 0.021625 0.00429" pos="-0.08674 -0.050297 -0.022574" quat="0.205335 0.588018 0.157559 -0.76632" type="box" group="3" />
+                  <geom name="wrist_3_link_fixed_joint_lump__cam_mount003_collider_box.008_collision_10" class="robot_unused" size="0.02985 0.018449 0.005221" pos="-0.066139 -0.038476 -0.019027" quat="0.251402 0.229587 0.0615176 -0.938244" type="box" group="3" />
+                  <geom name="wrist_3_link_fixed_joint_lump__body_collider_box_collision_11" class="robot_unused" size="0.02415 0.0145 0.0145" pos="-1.29182e-09 -0.121046 -0.027474" quat="0.560986 0.430459 -0.430459 0.560986" type="box" group="3" />
+                  <geom name="wrist_3_link_fixed_joint_lump__lens_collider_cylinder_collision_12" class="robot_unused" size="0.015631 0.02163" pos="-1.44918e-10 -0.109197 0.0167461" quat="0.701057 -0.0922975 0.0922975 0.701057" type="cylinder" group="3" />
+                  <geom name="wrist_3_link_fixed_joint_lump__axia80_m20_collider_cylinder_collision_13" class="robot_unused" size="0.041519 0.0126995" pos="0 -4e-06 0.012699" quat="1.73205e-07 -1 0 0" type="cylinder" group="3" />
+                  <geom name="wrist_3_link_fixed_joint_lump__axia80_m20001_collider_cylinder_collision_14" class="robot_unused" size="0.006027 0.0083585" pos="0 0.041828 0.018432" quat="0.707107 -0.707107 0 0" type="cylinder" group="3" />
+                  <geom name="wrist_3_link_fixed_joint_lump__body_collider_box_collision_15" class="robot_unused" size="0.02415 0.0145 0.0145" pos="-0.104818 -0.060516 -0.027472" quat="0.766321 0.157559 -0.588018 0.205335" type="box" group="3" />
+                  <geom name="wrist_3_link_fixed_joint_lump__lens_collider_cylinder_collision_16" class="robot_unused" size="0.015631 0.02163" pos="-0.0945566 -0.0545916 0.0167481" quat="0.957662 -0.0337832 0.126081 0.256605" type="cylinder" group="3" />
+                  <geom name="wrist_3_link_fixed_joint_lump__body_collider_box_collision_17" class="robot_unused" size="0.02415 0.0145 0.0145" pos="0.104818 -0.060516 -0.027472" quat="0.205335 0.588018 -0.157559 0.766321" type="box" group="3" />
+                  <geom name="wrist_3_link_fixed_joint_lump__lens_collider_cylinder_collision_18" class="robot_unused" size="0.015631 0.02163" pos="0.0945566 -0.0545916 0.0167481" quat="0.256605 -0.126081 0.0337832 0.957662" type="cylinder" group="3" />
+                  <body name="center_camera/sensor_link" pos="-1.12868e-07 -0.116079 -0.00893777" quat="0.560986 0.430459 -0.430459 0.560986">
+                    <inertial pos="0 0 0" mass="0.001" diaginertia="1e-06 1e-06 1e-06" />
+                    <body name="center_camera/optical" pos="-3.08709e-08 -2.98838e-08 1.15122e-07" quat="0.499998 -0.5 0.500002 -0.5">
+                      <inertial pos="0 0 0" mass="0.001" diaginertia="1e-06 1e-06 1e-06" />
+                    </body>
+                  </body>
+                  <body name="ati/tool_link" pos="-1.19012e-07 6.92858e-09 0.0245" quat="1 -1.74849e-07 6.92131e-08 -1.3375e-07">
+                    <inertial pos="0 0 0" mass="1.001" diaginertia="0.100001 0.100001 0.100001" />
+                    <geom name="ati/tool_link_fixed_joint_lump__body_collider_cylinder_collision" class="robot_unused" size="0.038 0.05655" pos="0 0 0.06855" quat="1.22475e-07 -0.707107 -0.707107 1.22474e-07" type="cylinder" group="3" />
+                    <geom name="ati/tool_link_fixed_joint_lump__cylinder003_collider_cylinder_collision_1" class="robot_unused" size="0.043 0.006" pos="0 0 0.006" type="cylinder" group="3" />
+                    <site name="AtiForceTorqueSensor" class="robot_unused" pos="0 0 0" />
+                    <site name="gripper_tcp" pos="0 0 0.172" />
+                    <body name="gripper/hande_finger_link_l" pos="0 0 0" quat="1 -4.0986e-08 -4.65686e-08 -6.70582e-08">
+                      <inertial pos="0 0 0" mass="0.001" diaginertia="0.0001 9e-05 3e-05" />
+                      <joint name="gripper/left_finger_joint" class="robot_unused" pos="0 0 0" axis="1 0 0" type="slide" limited="true" range="0 0.025" />
+                      <geom name="gripper/hande_finger_link_l_fixed_joint_lump__finger_collider_box_collision" class="robot_unused" size="0.0039195 0.0105 0.014311" pos="0.007595 -1e-05 0.138138" type="box" group="3" />
+                      <geom name="gripper/hande_finger_link_l_fixed_joint_lump__finger_collider_box001_collision_1" class="robot_unused" size="0.003 0.0105 0.010749" pos="0.003 -1e-05 0.16145" type="box" group="3" />
+                      <geom name="gripper/hande_finger_link_l_fixed_joint_lump__finger_collider_box002_collision_2" class="robot_unused" size="0.0221595 0.00375 0.0019745" pos="-0.010646 -0.015 0.124725" type="box" group="3" />
+                      <geom name="gripper/hande_finger_link_l_fixed_joint_lump__finger_collider_box003_collision_3" class="robot_unused" size="0.0086935 0.0092095 0.0046355" pos="0.002046 -0.00954 0.129064" type="box" group="3" />
+                      </body>
+                    <body name="gripper/hande_finger_link_r" pos="0 0 0">
+                      <inertial pos="0 0 0" mass="0.001" diaginertia="0.0001 9e-05 3e-05" />
+                      <joint name="gripper/right_finger_joint" class="robot_unused" pos="0 0 0" axis="-1 0 0" type="slide" limited="true" range="0 0.025" />
+                      <geom name="gripper/hande_finger_link_r_fixed_joint_lump__finger_collider_box_collision" class="robot_unused" size="0.0039195 0.0105 0.014311" pos="-0.007595 -1e-05 0.138138" type="box" group="3" />
+                      <geom name="gripper/hande_finger_link_r_fixed_joint_lump__finger_collider_box001_collision_1" class="robot_unused" size="0.003 0.0105 0.010749" pos="-0.003 -1e-05 0.16145" type="box" group="3" />
+                      <geom name="gripper/hande_finger_link_r_fixed_joint_lump__finger_collider_box002_collision_2" class="robot_unused" size="0.0221595 0.00375 0.0019745" pos="0.010646 -0.015 0.124725" type="box" group="3" />
+                      <geom name="gripper/hande_finger_link_r_fixed_joint_lump__finger_collider_box003_collision_3" class="robot_unused" size="0.0086935 0.0092095 0.0046355" pos="-0.002046 -0.00954 0.129064" type="box" group="3" />
+                      </body>
+                  <body name="lc_plug_link" pos="-0.000711 0.001759 0.168213" quat="0.577301 0.816105 -0.021418 -0.015395">
+          <inertial pos="0 0.0197 0" quat="0 0.707107 0 0.707107" mass="0.01" diaginertia="1.06153e-07 9.96094e-08 8.49658e-09" />
+          <geom name="cylinder001_collider_cylinder.001" class="robot_unused" size="0.000625 0.001502" pos="0.003125 0.0197 0" quat="0.707107 0.707107 0 0" type="cylinder" group="3" />
+          <geom name="cylinder_collider_cylinder.001" class="robot_unused" size="0.000625 0.001502" pos="-0.003125 0.0197 0" quat="0.707107 0.707107 0 0" type="cylinder" group="3" />
+          <body name="sfp_module_link" pos="5.49085e-09 0.0384 -1.10647e-08" quat="8.99127e-08 1 -1.30823e-06 -1.33817e-06">
+            <inertial pos="0.00024115 0.00702224 0.000553372" quat="0.510037 0.497012 -0.483415 0.50907" mass="0.02" diaginertia="3.07513e-06 2.81054e-06 5.69919e-07" />
+            <geom name="port_collider_box.008" class="robot_unused" size="0.00071 0.000503 0.0064415" pos="-0.00571 0.018813 -0.003546" quat="0.707107 0.707107 0 0" type="box" group="3" />
+            <geom name="port_collider_box.009" class="robot_unused" size="0.00071 0.000503 0.0064415" pos="0.00571 0.018813 -0.003546" quat="0.707107 0.707107 0 0" type="box" group="3" />
+            <geom name="body_collider_box" class="robot_unused" size="0.006875 0.02365 0.0003945" pos="0 0.001 0.00383" type="box" group="3" />
+            <geom name="body_collider_box.001" class="robot_unused" size="0.006875 0.02365 8.9e-05" pos="0 0.001 -0.004138" type="box" group="3" />
+            <geom name="body_collider_box.002" class="robot_unused" size="0.000287 0.02365 0.004225" pos="-0.006588 0.001 0" type="box" group="3" />
+            <geom name="body_collider_box.003" class="robot_unused" size="0.0004055 0.02365 0.004225" pos="0.00647 0.001 0" type="box" group="3" />
+            <geom name="port_collider_box.010" class="robot_unused" size="0.00642 0.0038815 0.0058645" pos="0 0.01229 0.000119" quat="0.707107 0.707107 0 0" type="box" group="3" />
+            <geom name="port_collider_box002_collider_box" class="robot_unused" size="0.00642 0.0002045 0.0008005" pos="0 0.024453 -0.004254" quat="0.707107 0.707107 0 0" type="box" group="3" />
+            <geom name="port_collider_box.011" class="robot_unused" size="0.00125 0.000503 0.0064415" pos="0 0.018813 -0.003546" quat="0.707107 0.707107 0 0" type="box" group="3" />
+            <body name="sfp_tip_link" pos="-4.36114e-09 -0.02365 -4.66483e-09" quat="0.707105 0.707108 -5.19725e-08 -5.70402e-08">
+              <inertial pos="0 0 0" mass="0.001" diaginertia="1e-06 1e-06 1e-06" />
+              <geom name="contact_collision" class="robot_unused" size="0.006875 0.0021125 0.0005" pos="0 0.0021125 -0.0005" type="box" group="3" />
+              <geom name="non_contact_collision" class="robot_unused" size="0.006875 0.0021125 0.0005" pos="0 -0.0021125 -0.0005" type="box" group="3" />
+            </body>
+          </body>
+        </body>
+      </body>
+                  <body name="left_camera/sensor_link" pos="-0.100516 -0.0580325 -0.00893584" quat="0.766321 0.157559 -0.588018 0.205335">
+                    <inertial pos="0 0 0" mass="0.001" diaginertia="1e-06 1e-06 1e-06" />
+                    <body name="left_camera/optical" pos="-5.24901e-08 -7.08975e-07 1.95357e-07" quat="0.499999 -0.5 0.500002 -0.5">
+                      <inertial pos="0 0 0" mass="0.001" diaginertia="1e-06 1e-06 1e-06" />
+                    </body>
+                  </body>
+                  <body name="right_camera/sensor_link" pos="0.100517 -0.058033 -0.00893587" quat="0.205335 0.588018 -0.157559 0.766321">
+                    <inertial pos="0 0 0" mass="0.001" diaginertia="1e-06 1e-06 1e-06" />
+                    <body name="right_camera/optical" pos="-9.51058e-08 4.47412e-08 -1.05629e-07" quat="0.499998 -0.5 0.500002 -0.5">
+                      <inertial pos="0 0 0" mass="0.001" diaginertia="1e-06 1e-06 1e-06" />
+                    </body>
+                  </body>
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+
+  <contact>
+    <exclude name="tabletop_shoulder_link" body1="tabletop" body2="shoulder_link" />
+    <exclude body1="tabletop" body2="shoulder_link" />
+    <exclude body1="gripper/hande_finger_link_l" body2="gripper/hande_finger_link_r" />
+  </contact>
+
+  <actuator>
+    <general name="shoulder_pan_joint_motor" joint="shoulder_pan_joint" />
+    <general name="shoulder_lift_joint_motor" joint="shoulder_lift_joint" />
+    <general name="elbow_joint_motor" joint="elbow_joint" />
+    <general name="wrist_1_joint_motor" joint="wrist_1_joint" />
+    <general name="wrist_2_joint_motor" joint="wrist_2_joint" />
+    <general name="wrist_3_joint_motor" joint="wrist_3_joint" />
+    <general name="gripper/left_finger_joint_motor" joint="gripper/left_finger_joint" />
+  </actuator>
+
+  <equality>
+    <joint joint1="gripper/left_finger_joint" joint2="gripper/right_finger_joint" polycoef="0 1 0 0 0" />
+  </equality>
+
+  </mujoco>

@@ -1,17 +1,16 @@
 #!/usr/bin/env python3
 """Lean pre-insertion Cartesian policy demo.
 
-This script is intentionally a thin demo over the prototype MJLab-facing
-modules:
+This script is intentionally a thin demo over the local prototype modules:
 
-  mjlab.reset:
+  reset:
     reset to the SFP-tip pre-insertion pose and zero the F/T sensor baseline
 
-  mjlab.step:
+  step:
     apply a Cartesian TCP target through translation-only IK and joint
     impedance
 
-  mjlab.observations:
+  observations:
     read reset-zeroed force/torque and camera health diagnostics
 
 The demo policy is deliberately boring: start at pre-insertion, then walk the
@@ -19,10 +18,14 @@ TCP down in world Z. That gives us the same behavior we were testing before,
 but with code organized closer to the reset/step/observation split we need for
 policy training.
 
-Fresh run:
+Fresh run from a new ``aic_eval`` distrobox terminal:
 
 cd /home/rmalhan/Software/ws_aic/src/aic
 pixi shell
+source /opt/ros/kilted/setup.bash
+source /home/rmalhan/Software/ws_aic/install/setup.bash
+export PYTHONNOUSERSITE=1
+export MUJOCO_PLUGIN_PATH=/home/rmalhan/Software/ws_aic/install/opt/mujoco_vendor/lib
 
 PYTHONPATH=/home/rmalhan/Software/ws_aic/src/aic/aic_utils/aic_mujoco:/home/rmalhan/Software/ws_aic/src/aic/aic_model \
 python3 aic_utils/aic_mujoco/scripts/demo_joint_target_control.py \
@@ -30,14 +33,15 @@ python3 aic_utils/aic_mujoco/scripts/demo_joint_target_control.py \
 
 Useful demo knobs:
 
-  --down-distance 0.03
+  --down-distance 0.15
   --step-size 0.001
   --duration 10
   --no-camera-check
 
 The config supplies the robot joints, controller gains, pre-insertion frame
-names, F/T sensor names, and reset-time zeroing settings. Do not source ROS for
-this script; it uses MuJoCo directly.
+names, F/T sensor names, and reset-time zeroing settings. ROS is sourced only
+so EnsemblRobot can find robot description packages for reset IK; no ROS nodes
+are launched.
 """
 
 from __future__ import annotations

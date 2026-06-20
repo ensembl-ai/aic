@@ -24,23 +24,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Iterable
+from typing import Iterable
 
 import numpy as np
-
-if TYPE_CHECKING:
-    import trimesh
-
-
-def _require_trimesh():
-    try:
-        import trimesh
-    except Exception as exc:  # noqa: BLE001
-        raise RuntimeError(
-            "SDF rewards require trimesh plus its proximity dependencies. "
-            "Install trimesh, scipy, and rtree in the active pixi environment."
-        ) from exc
-    return trimesh
+import trimesh
 
 
 @dataclass(frozen=True)
@@ -105,7 +92,6 @@ def transform_points(frame_T_points: np.ndarray, points: np.ndarray) -> np.ndarr
 def load_mesh(mesh_path: str | Path):
     """Load a mesh with trimesh and require an actual mesh object."""
 
-    trimesh = _require_trimesh()
     mesh = trimesh.load_mesh(Path(mesh_path), force="mesh", process=False)
     if mesh.is_empty:
         raise ValueError(f"Loaded empty mesh: {mesh_path}")
@@ -115,7 +101,6 @@ def load_mesh(mesh_path: str | Path):
 def sample_surface_points(mesh, count: int, seed: int | None = None) -> np.ndarray:
     """Sample approximately even surface points from a mesh."""
 
-    trimesh = _require_trimesh()
     if seed is not None:
         np.random.seed(seed)
     sampled = trimesh.sample.sample_surface_even(mesh, int(count))
@@ -137,7 +122,6 @@ class MeshSdfQuery:
     """
 
     def __init__(self, mesh):
-        trimesh = _require_trimesh()
         self.mesh = mesh
         self.query = trimesh.proximity.ProximityQuery(mesh)
 
@@ -283,19 +267,14 @@ def compose_reward(weighted_terms: Iterable[tuple[str, float, float]]) -> Reward
     return RewardComposition(total=total, terms=terms)
 
 
-def insertion_task_reward(env, **kwargs):
-    """Future MJLab manager-term wrapper for the SDF/progress reward."""
-    raise NotImplementedError(
-        "Use SampledSdfPoseReward and insertion_axis_progress in the prototype "
-        "env first; then wrap them as MJLab reward terms."
-    )
+def action_regularization(action: np.ndarray) -> float:
+    """Return ``-||action||^2`` for policy action magnitude regularization."""
+
+    action = np.asarray(action, dtype=float)
+    return -float(np.dot(action, action))
 
 
-def action_regularization_reward(env, **kwargs):
-    """Placeholder for action smoothness or magnitude penalties."""
-    raise NotImplementedError("Choose action regularization deliberately.")
+def penetration_penalty(max_penetration: float) -> float:
+    """Return a negative reward contribution from maximum contact penetration."""
 
-
-def force_safety_penalty(env, **kwargs):
-    """Placeholder for excessive force/torque penalty."""
-    raise NotImplementedError("Choose force limits and penalty shape first.")
+    return -float(max(0.0, max_penetration))

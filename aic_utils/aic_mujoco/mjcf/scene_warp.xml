@@ -1,0 +1,5 @@
+<mujoco model="SceneWarp">
+  <option integrator="implicitfast" timestep="0.002" solver="Newton" iterations="200" tolerance="1e-10"/>
+  <include file="aic_robot_warp.xml"/>
+  <include file="aic_world_warp.xml"/>
+</mujoco>

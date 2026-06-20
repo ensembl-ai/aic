@@ -67,22 +67,27 @@ IK target:
 
   Then choose the IK solution closest to ``ik_home_q``.
 
-Fresh run:
+Fresh run from a new ``aic_eval`` distrobox terminal:
 
   cd /home/rmalhan/Software/ws_aic/src/aic
   pixi shell
+  source /opt/ros/kilted/setup.bash
+  source /home/rmalhan/Software/ws_aic/install/setup.bash
+  export PYTHONNOUSERSITE=1
+  export MUJOCO_PLUGIN_PATH=/home/rmalhan/Software/ws_aic/install/opt/mujoco_vendor/lib
 
   PYTHONPATH=/home/rmalhan/Software/ws_aic/src/aic/aic_utils/aic_mujoco:/home/rmalhan/Software/ws_aic/src/aic/aic_model \
   python3 aic_utils/aic_mujoco/scripts/hold_fixed_target.py \
     --xml /home/rmalhan/Software/ws_aic/src/aic/aic_utils/aic_mujoco/mjcf/scene.xml
 
-For a shorter smoke test:
+For a shorter run:
 
   add ``--duration 10``
 
 The config supplies the robot joints, passive gripper behavior, controller
-gains, and default pre-insertion frame names. Do not source ROS for this script;
-it uses MuJoCo directly.
+gains, and default pre-insertion frame names. ROS is sourced only so
+EnsemblRobot can find robot description packages for reset IK; no ROS nodes are
+launched.
 """
 
 from __future__ import annotations

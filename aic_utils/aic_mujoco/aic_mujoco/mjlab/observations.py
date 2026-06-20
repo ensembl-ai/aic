@@ -1,15 +1,15 @@
-"""Prototype observations for AIC MuJoCo policy-training experiments.
+"""Observation helpers for AIC MuJoCo policy-training experiments.
 
-These helpers are the plain MuJoCo version of the observations we expect to
-carry into MJLab:
+These helpers define the low-dimensional signals used by the AIC insertion
+policy stack:
 
   joint state
   TCP/site pose
   reset-zeroed force/torque
   camera health diagnostics
 
-They are intentionally conservative. Reward/task-specific observation formulas
-still belong in explicit task design, not hidden inside this module.
+Task-specific observation formulas should be explicit and testable here before
+they are wired as MJLab observation terms.
 """
 
 from __future__ import annotations
@@ -165,13 +165,13 @@ class CameraHealthChecker:
 
 
 def joint_state_observation(env, asset_cfg=None):
-    """Placeholder for selected robot joint positions/velocities."""
-    raise NotImplementedError("Select exact joint-state observation contents first.")
+    """Return joint-state observations from an installed MJLab environment."""
+    raise NotImplementedError("Wire joint-state observation to the installed MJLab API.")
 
 
 def tcp_pose_observation(env, asset_cfg=None, frame_name: str = "gripper_tcp"):
-    """Placeholder for TCP pose or task-frame TCP pose."""
-    raise NotImplementedError("Select TCP pose frame and representation first.")
+    """Return TCP pose observations from an installed MJLab environment."""
+    raise NotImplementedError("Wire TCP pose observation to the installed MJLab API.")
 
 
 def zeroed_force_torque_observation(
@@ -179,19 +179,19 @@ def zeroed_force_torque_observation(
     sensor_name: str = "AtiForceTorqueSensor",
     baseline_name: str = "ati_ft_zero",
 ):
-    """Placeholder for force/torque minus reset-time baseline."""
+    """Return reset-zeroed force/torque observations from MJLab sensor state."""
     raise NotImplementedError(
-        "Add sensor indexing and reset-time baseline storage before use."
+        "Wire zeroed force/torque observation to the installed MJLab API."
     )
 
 
 def task_geometry_observation(env, asset_cfg=None):
-    """Placeholder for board, NIC, port, plug, or cable task geometry."""
-    raise NotImplementedError("Decide task state exposure before use.")
+    """Return task geometry observations from an installed MJLab environment."""
+    raise NotImplementedError("Wire task geometry observation to the installed MJLab API.")
 
 
 def camera_health_observation(env, camera_names: tuple[str, ...]):
-    """Placeholder for camera availability/diagnostic observations."""
+    """Return camera health observations from an installed MJLab environment."""
     raise NotImplementedError(
-        "Camera observations should be added after proprioceptive training is stable."
+        "Wire camera observation to the installed MJLab API."
     )

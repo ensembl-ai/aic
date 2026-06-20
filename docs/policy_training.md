@@ -1,7 +1,21 @@
 # Policy Training Architecture Notes
 
 This document collects the working mental model for moving from the AIC
-Gazebo/ROS stack to a MuJoCo/MJLab policy-training stack.
+Gazebo/ROS stack to a direct MuJoCo/MuJoCo-Warp policy-training stack.
+
+The current direction is deliberately narrow:
+
+```text
+generated AIC MuJoCo scene
+  -> local aic_mujoco reset/controller/observation/reward utilities
+  -> direct MuJoCo Warp vectorized environments
+  -> RSL-RL PPO training
+```
+
+ROS is not part of the training inner loop. Gazebo/ROS remain useful for
+generating/evaluating scenes and understanding official AIC semantics, but
+policy training should run directly against MuJoCo state, contacts, sensors,
+and batched environment tensors.
 
 ## MuJoCo Mental Model
 
@@ -64,14 +78,14 @@ for _ in range(decimation):
     mj_step(model, data)
 ```
 
-ROS bridges this with `/clock` and `use_sim_time:=true`. A direct MuJoCo/MJLab
+ROS bridges this with `/clock` and `use_sim_time:=true`. A direct MuJoCo/Warp
 training loop bridges it by never depending on wall-clock timers in the first
 place.
 
 For AIC specifically, the challenge docs warn that task time limits are based
 on simulation time, not wall-clock time. A policy that uses `time.time()` or
 wall-clock `sleep()` can behave differently when realtime factor changes. In
-MuJoCo/MJLab training, treat `model.opt.timestep` and the number of physics
+MuJoCo/Warp training, treat `model.opt.timestep` and the number of physics
 steps as the clock.
 
 Practical rule:
@@ -114,11 +128,12 @@ For the AIC insertion policy-training path, the preferred initial abstraction is
 ```text
 policy action = small Cartesian delta
 controller/action layer = differential IK + joint target tracking
-MuJoCo = physics, contacts, force/torque, cameras
+MuJoCo = physics, contacts, force/torque, task geometry
 ```
 
 Start with 3D translation deltas and fixed orientation. Add orientation deltas
-only when the insertion task needs them.
+only when the insertion task needs them. Add cameras only after the
+low-dimensional policy-training path is stable.
 
 ## Why Not Use The ROS AIC Controller Directly?
 
@@ -228,34 +243,28 @@ Step-to-step wrench deltas can be useful in some controllers, but they should
 not replace the zeroed absolute wrench. Sustained contact force is important in
 insertion, and `current - previous` loses that information.
 
-## MJLab Role
+## Direct MuJoCo/Warp Role
 
-MJLab is not just abstract classes. It provides the manager-based RL framework
-and MuJoCo Warp training backend:
+The current decision is to host the first training prototype directly in
+`aic_mujoco.warp`, not in MJLab. MJLab can be revisited later, but it is not
+allowed to sit on the critical path while the basic task pipeline is still
+being proven.
 
-- scene composition,
-- action manager,
-- observation manager,
-- reward manager,
-- event/reset/randomization manager,
-- termination manager,
-- metrics/curriculum/command managers,
-- parallel GPU simulation through MuJoCo Warp,
-- training and play entrypoints.
+The existing local MuJoCo stack already contains the pieces that matter:
 
-MJLab does not replace the AIC task logic. The AIC-specific pieces become MJLab
-terms:
+- frame utilities and pre-insertion IK target construction,
+- joint grouping and passive joint freezing,
+- impedance-like joint target tracking,
+- reset-time force/torque zeroing,
+- force/torque and contact observations,
+- progress, force, penetration, and future SDF reward utilities,
+- modular JSON config composition,
+- direct MuJoCo Warp model/data smoke testing.
 
-- AIC scene/assets: MJLab scene/entity configuration.
-- Cartesian delta command: action term, preferably based on MJLab's
-  `DifferentialIKAction` first.
-- AIC-like joint target tracking: built-in joint position targets at first, or
-  a custom action term if closer impedance behavior is needed.
-- Force/torque zeroing: reset event plus observation term.
-- Board/NIC/port/cable randomization: reset event terms.
-- Success/failure logic: reward and termination terms.
+Those pieces should be lifted into a batched MuJoCo Warp env, not replaced
+with a ROS controller process.
 
-## Initial MJLab Training Shape
+## Initial Training Shape
 
 The target training loop should look conceptually like this:
 
@@ -270,29 +279,36 @@ policy action
 
 action term
   scale/clamp delta
-  differential IK to joint target
-  apply joint target / impedance-like torque
+  use current local controller path:
+    Cartesian delta target
+    IK / differential IK
+    joint target
+    impedance-like tracking
 
 physics
   decimation substeps in MuJoCo/MuJoCo Warp
 
 observations
-  q, qd
+  q
   TCP pose
   relevant task-frame poses
   zeroed force/torque
+  max contact penetration
   previous action
-  cameras later if needed
+  no cameras for the first trainer
 
 rewards
-  SDF alignment to nominal inserted pose
   insertion progress toward port bottom
+  lateral alignment penalty
   zeroed force/torque safety penalty
-  action/path regularization after behavior is stable
+  max penetration penalty
+  action regularization
+  SDF alignment later, once the basic vectorized pipeline works
 
 terminations
   success
-  excessive force/torque
+  excessive force
+  excessive penetration
   invalid state/out-of-bounds
   timeout
 ```
@@ -300,6 +316,259 @@ terminations
 Do not define reward math casually. Rewards and observations determine what the
 policy learns, so they should be chosen after deciding the exact task and
 available state.
+
+## Minimal First Trainer
+
+The first trainable system should be intentionally boring:
+
+```text
+algorithm: RSL-RL PPO
+policy:    feedforward MLP actor-critic
+action:    3D Cartesian delta
+obs:       low-dimensional privileged state
+runtime:   headless direct MuJoCo Warp
+viewer:    separate play/debug path, not used for training throughput
+```
+
+Do not start with A3C, LSTM, images, or teacher-student distillation. Those
+are all valid later, but they add extra axes of failure before the core
+environment is proven.
+
+Why PPO over A3C:
+
+- PPO with synchronous vectorized rollouts is the common practical baseline for
+  thousands of simulated environments.
+- It maps cleanly to RSL-RL and batched simulator tensors.
+- It is easier to debug because rollout collection and policy updates are
+  explicit phases.
+- A3C's asynchronous workers are less attractive when the simulator already
+  provides vectorized stepping.
+
+Why no LSTM first:
+
+- The first observation is privileged and low-dimensional.
+- The task should be Markov enough with pose, force/torque, penetration,
+  progress, and previous action.
+- Add recurrence only if partial observability becomes a real measured problem.
+
+The first actor-critic can be:
+
+```text
+actor:
+  obs_dim -> 256 -> 256 -> action_mean_dim
+  learned log_std
+
+critic:
+  obs_dim -> 256 -> 256 -> value
+```
+
+Start with `num_envs = 32` to prove resets, stepping, reward, and termination.
+Then scale upward:
+
+```text
+32 -> 128 -> 512 -> as high as MuJoCo Warp supports for this scene
+```
+
+The first success criterion is not insertion success. It is pipeline health:
+
+```text
+reset works for all envs
+step accepts batched actions
+observations are finite
+rewards are finite
+dones reset only the correct envs
+RSL-RL can collect rollouts and update a policy
+checkpoints can be played back in one viewer env
+```
+
+## Model Selection And Upgrade Path
+
+Use one action interface from the start:
+
+```text
+policy action = Cartesian delta
+```
+
+That action should stay stable across:
+
+- simple PPO teacher,
+- later privileged teacher,
+- later distilled student,
+- later camera/perception student.
+
+This matters because distillation becomes straightforward:
+
+```text
+teacher: privileged_obs -> Cartesian delta
+student: deployable_obs  -> Cartesian delta
+loss:    MSE(student_action, teacher_action)
+```
+
+The first PPO policy is effectively a privileged teacher, but we do not need
+to call it teacher-student yet. First train the low-dimensional policy. Once it
+can solve the simplified insertion task, record rollouts:
+
+```text
+privileged_obs
+future_student_obs
+teacher_action
+reward
+done
+task/randomization metadata
+```
+
+Then a student can be introduced without changing the controller, action
+space, reset logic, or reward definitions.
+
+## Engineering Architecture
+
+The MuJoCo/Warp stack should split into these layers:
+
+```text
+aic_mujoco core
+  config.py
+  utils.py
+  joints.py
+  controllers.py
+  commands.py
+
+aic_mujoco.mjlab utilities
+  reset.py
+  step.py
+  observations.py
+  rewards.py
+  logging.py
+
+aic_mujoco.warp direct prototype layer
+  env.py
+  warp_smoke.py
+  rsl_rl_wrapper.py
+  rsl_rl_cfg.py
+
+script layer
+  prepare_warp_scene.py
+  train_warp_smoke.py
+  train_rsl_rl_direct.py
+  viz_warp_envs.py
+```
+
+The production training target keeps the batch in MuJoCo Warp device state,
+not in Python loops over `mjData` objects. The inner loop is:
+
+```text
+action tensor
+  -> controller/action term
+  -> MuJoCo Warp physics
+  -> tensor observations/rewards/dones
+```
+
+No ROS messages, no controller manager, no Zenoh, no `/clock`, no
+`ros2_control` in the training process. Defaults are:
+
+```text
+backend = direct MuJoCo Warp
+device  = CUDA
+trainer = RSL-RL
+```
+
+Missing MuJoCo Warp, RSL-RL, or CUDA is a configuration error. The code
+should fail directly rather than switching to another backend.
+
+The RSL-RL wrapper should expose the expected vectorized interface:
+
+```text
+num_envs
+num_obs
+num_actions
+episode_length_buf
+reset()
+step(actions)
+get_observations()
+```
+
+The training script should be headless:
+
+```text
+scripts/train_warp_smoke.py
+  loads env config
+  runs direct MuJoCo Warp preflight
+  runs prototype env smoke loop
+  logs throughput and task metrics
+
+scripts/train_rsl_rl_direct.py
+  creates AicInsertionVecEnv
+  wraps it as an RSL-RL VecEnv
+  constructs MLP actor, MLP critic, PPO, rollout storage, and optimizer
+  saves TensorBoard logs and checkpoints
+```
+
+The play/debug script should be separate:
+
+```text
+scripts/viz_warp_envs.py
+  runs selected env copy with MuJoCo viewer
+```
+
+A Viser dashboard can be added later as a debug tool, but it should sample a
+small subset of envs. It is not the training renderer.
+
+## Visualization And Throughput
+
+Viewer speed is not training speed. The current viewer demos deliberately sleep
+or sync with a GUI. That is useful for seeing behavior, but it is the slow path.
+
+Training should log:
+
+```text
+env_steps_per_sec
+physics_steps_per_sec
+sim_seconds_per_wall_second
+rollout_time_ms
+update_time_ms
+reward_mean
+episode_length_mean
+success_rate
+force_norm_max
+max_penetration_mean
+max_penetration_max
+progress_mean
+```
+
+Visualization should log separately:
+
+```text
+viz_render_time_ms
+viz_env_count
+viewer_fps
+```
+
+Expected relationship:
+
+```text
+viewer/debug:
+  one or a few envs
+  slow, visual, human-paced
+
+headless training:
+  many envs
+  no rendering
+  no sleeps
+  much higher aggregate step throughput
+```
+
+If a Viser view is added, it should show only high-signal state:
+
+```text
+sfp_tip frame
+port_entrance frame
+port_bottom frame
+tcp frame
+insertion axis
+current tip-to-port vector
+reward/progress/force/max-penetration statistics
+```
+
+Do not render all envs during serious training.
 
 ## Nominal Insertion Pose And Stopping Condition
 
@@ -390,24 +659,90 @@ The current prototype reward utilities live in
 mesh, sampled points, current transform, and nominal target transform. This
 keeps task geometry explicit.
 
+## Current Architecture Decision
+
+Skip MJLab manager/entity composition for the first working prototype. The
+direct path is:
+
+```text
+scene.xml / scene_warp.xml
+  -> mujoco.MjModel
+  -> reset/action/observation/reward modules
+  -> MuJoCo Warp smoke preflight
+  -> direct RSL-RL wrapper later
+```
+
+The reason is practical, not philosophical: the plain MuJoCo scene, reset, IK,
+and controller path works, while the MJLab entity/spec attach layer introduced
+native failures before any useful policy-training signal was available.
+
+The active prototype code lives in:
+
+```text
+aic_mujoco/warp/env.py          direct vector env with the AIC task contract
+aic_mujoco/warp/warp_smoke.py   direct MuJoCo Warp model/data smoke test
+scripts/train_warp_smoke.py     headless prototype smoke and throughput stats
+scripts/viz_warp_envs.py        MuJoCo viewer for one selected env copy
+```
+
+Two XMLs have different roles:
+
+```text
+scene.xml:
+  semantic/debug scene with cable, plug, sensors, and viewer/controller behavior
+
+scene_warp.xml:
+  stripped Warp preflight scene with plug rigidly attached to the gripper
+  because MuJoCo Warp does not support the cable body plugin
+```
+
+The prototype env currently uses one shared `MjModel` and multiple `MjData`
+copies. That is not the final high-throughput implementation, but it preserves
+the correct task semantics in a readable place. The next implementation step is
+to replace the per-env `MjData` loop with batched MuJoCo Warp state while
+keeping the same API:
+
+```text
+reset_idx(env_ids)
+obs = get_observations()
+obs, reward, done, extras = step(action)
+```
+
 ## Recommended Development Sequence
 
-1. Load the generated AIC MuJoCo scene in a single MJLab environment.
-2. Use zero and random agents to confirm action/observation plumbing.
-3. Start with Cartesian translation deltas via `DifferentialIKAction`.
-4. Add force/torque zeroing at reset and expose zeroed wrench observation.
-5. Add task-board/NIC/port reset randomization.
-6. Define rewards and terminations after the task state is agreed.
-7. Scale `num_envs` upward.
-8. Add cameras and cable complexity only after the rigid-body version is stable.
+1. Keep `hold_fixed_target.py` and `demo_joint_target_control.py` as the visual
+   reference debuggers.
+2. Keep the direct `aic_mujoco.warp` prototype env as the source of truth for
+   reset/action/observation/reward semantics.
+3. Use 3D Cartesian delta actions only.
+4. Expose low-dimensional observations first: joint state, TCP/plug/port
+   positions, zeroed force/torque, max penetration, previous action.
+5. Add simple progress, lateral error, force, penetration, and action rewards.
+6. Run `prepare_warp_scene.py` and `train_warp_smoke.py` before any PPO work.
+7. Replace Python `MjData` loops with batched MuJoCo Warp data/state.
+8. Wrap the direct env API for RSL-RL PPO.
+9. Train headless with small `num_envs`.
+10. Scale `num_envs` upward and measure throughput.
+11. Add SDF reward after the basic pipeline works.
+12. Add randomization after the policy can solve a fixed or lightly randomized
+    scene.
+13. Add teacher-student distillation only after a privileged PPO policy is
+    competent.
+14. Add cameras only after low-dimensional training is stable.
 
 ## Open Technical Risks
 
-- MuJoCo Warp support for all plugins used by the generated scene, especially
-  elastic cable plugins, must be verified.
+- MuJoCo Warp does not support the cable body plugin, so the Warp scene uses a
+  rigidly held plug and no cable plugin.
 - The current generated XML uses AIC assets converted from Gazebo/SDF. Asset
-  paths and scene composition need to be made robust for MJLab.
-- The AIC ROS controller and MJLab action terms will not be bit-identical unless
-  we deliberately port the full controller behavior.
+  paths and scene composition need to stay robust across scene regeneration.
+- The local `aic_mujoco` controller is a training abstraction, not a
+  bit-identical port of the AIC ROS controller. That is acceptable if the
+  policy-facing action semantics remain compatible.
+- Python loops over `N` separate `mjData` objects are fine for proving the
+  pipeline, but true massive parallelism should move the same env API onto
+  batched MuJoCo Warp data/state.
 - Camera observations are expensive. They should be added after proprioception
   and force/torque training plumbing is stable.
+- Contact-rich insertion rewards can be gamed. Force and max-penetration
+  penalties must stay visible in logs from the beginning.
