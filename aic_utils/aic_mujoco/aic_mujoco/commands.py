@@ -1,3 +1,5 @@
+"""Joint command containers shared by MuJoCo controllers and demos."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -8,6 +10,8 @@ import numpy as np
 
 
 class JointControlMode(str, Enum):
+    """Supported low-level command interpretations for a joint target."""
+
     POSITION = "position"
     VELOCITY = "velocity"
 
@@ -44,6 +48,16 @@ class JointTarget:
         qd_des: Sequence[float] | None = None,
         tau_ff: Sequence[float] | None = None,
     ) -> "JointTarget":
+        """Create a position target.
+
+        Args:
+            q_des: Desired joint positions, shape ``(n,)``.
+            kp: Joint-space stiffness gains, shape ``(n,)``.
+            kd: Joint-space damping gains, shape ``(n,)``.
+            qd_des: Optional desired joint velocities; defaults to zeros.
+            tau_ff: Optional feed-forward torques; defaults to zeros.
+        """
+
         q = np.asarray(q_des, dtype=float)
         n = q.shape[0]
         return JointTarget(
@@ -62,6 +76,15 @@ class JointTarget:
         kd: Sequence[float],
         tau_ff: Sequence[float] | None = None,
     ) -> "JointTarget":
+        """Create a velocity target.
+
+        Args:
+            qd_des: Desired joint velocities, shape ``(n,)``.
+            kp: Stiffness gains for the internally integrated position target.
+            kd: Damping gains.
+            tau_ff: Optional feed-forward torques.
+        """
+
         qd = np.asarray(qd_des, dtype=float)
         n = qd.shape[0]
         return JointTarget(
@@ -74,6 +97,8 @@ class JointTarget:
         )
 
     def validate(self, n: int) -> None:
+        """Validate every vector field against the expected joint count."""
+
         fields = {
             "qd_des": self.qd_des,
             "kp": self.kp,

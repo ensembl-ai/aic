@@ -118,6 +118,14 @@ class SimComparisonNode(Node):
     """ROS2 node for recording joint state trajectories during test commands."""
 
     def __init__(self, sim_name: str, output_file: str, duration_per_step: float = 3.0):
+        """Create publishers, subscribers, and buffers for a simulator run.
+
+        Args:
+            sim_name: Label written into logs/CSV so Gazebo and MuJoCo runs can
+                be compared after recording.
+            output_file: CSV path for sampled joint positions and velocities.
+            duration_per_step: Wall/sim seconds to hold each scripted command.
+        """
         super().__init__("sim_comparison_test")
         self.sim_name = sim_name
         self.output_file = output_file
@@ -513,6 +521,12 @@ def _load_csv(filepath: str) -> dict:
 
 
 def main():
+    """Run a ROS2 trajectory recording or compare two recorded CSV files.
+
+    The recording mode sends the same joint target sequence through the AIC
+    controller interface and samples ``/joint_states``. The compare mode loads
+    two CSV files and prints trajectory error statistics.
+    """
     parser = argparse.ArgumentParser(description="MuJoCo vs Gazebo comparison test")
     parser.add_argument(
         "--sim",

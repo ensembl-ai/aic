@@ -13,9 +13,16 @@ from aic_mujoco.warp.env import AicInsertionVecEnv
 
 
 class RslRlDirectWrapper(VecEnv):
-    """Expose ``AicInsertionVecEnv`` through RSL-RL's ``VecEnv`` contract."""
+    """Expose ``AicInsertionVecEnv`` through RSL-RL's ``VecEnv`` contract.
+
+    The wrapper is intentionally thin: it does not change actions, rewards, or
+    resets. Its job is only to adapt observations to TensorDict format and add
+    the logging/time-out fields RSL-RL expects.
+    """
 
     def __init__(self, env: AicInsertionVecEnv):
+        """Store env dimensions and serialize config for RSL-RL logs."""
+
         self.env = env
         self.num_envs = env.num_envs
         self.num_actions = env.num_actions
@@ -27,6 +34,8 @@ class RslRlDirectWrapper(VecEnv):
 
     @property
     def episode_length_buf(self) -> torch.Tensor:
+        """Return episode lengths as a Torch tensor on the env device."""
+
         return torch.as_tensor(
             self.env.episode_length_buf,
             dtype=torch.long,
@@ -35,12 +44,18 @@ class RslRlDirectWrapper(VecEnv):
 
     @episode_length_buf.setter
     def episode_length_buf(self, value: torch.Tensor) -> None:
+        """Allow RSL-RL to write episode lengths back into the env buffer."""
+
         self.env.episode_length_buf[:] = value.detach().cpu().numpy()
 
     def get_observations(self) -> TensorDict:
+        """Return policy observations in the TensorDict key RSL-RL expects."""
+
         return _as_tensordict(self.env.get_observations())
 
     def step(self, actions: torch.Tensor):
+        """Step the wrapped env and attach RSL-RL logging extras."""
+
         obs, rewards, dones, extras = self.env.step(actions)
         extras = dict(extras)
         extras["time_outs"] = (
@@ -56,10 +71,14 @@ class RslRlDirectWrapper(VecEnv):
 
 
 def _as_tensordict(obs: torch.Tensor) -> TensorDict:
+    """Wrap a policy observation tensor in ``TensorDict({'policy': obs})``."""
+
     return TensorDict({"policy": obs}, batch_size=[obs.shape[0]], device=obs.device)
 
 
 def _plain_cfg(cfg: Any) -> dict[str, Any]:
+    """Convert dataclasses/paths into logging-safe plain Python values."""
+
     if is_dataclass(cfg):
         cfg = asdict(cfg)
     if isinstance(cfg, dict):
@@ -77,6 +96,8 @@ def _plain_cfg(cfg: Any) -> dict[str, Any]:
 
 
 def _log_dict(extras: dict[str, Any]) -> dict[str, float]:
+    """Extract scalar episode metrics for RSL-RL console/TensorBoard logs."""
+
     episode = extras.get("episode", {})
     return {
         str(key): float(value)

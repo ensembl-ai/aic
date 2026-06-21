@@ -13,7 +13,19 @@ def make_rsl_rl_direct_ppo_cfg(
     run_name: str = "aic_direct_ppo",
     seed: int = 1,
 ) -> dict:
-    """Return a small, explicit PPO config for the installed RSL-RL API."""
+    """Return a small, explicit PPO config for the installed RSL-RL API.
+
+    Args:
+        num_steps_per_env: Rollout horizon collected before each PPO update.
+        max_iterations: Number of PPO updates.
+        save_interval: Checkpoint interval in learning iterations.
+        run_name: Name shown in logs/checkpoint directories.
+        seed: Torch/RSL-RL seed passed through the runner config.
+
+    The config is deliberately plain Python data. That makes version mismatch
+    errors easier to read and keeps this prototype independent of MJLab manager
+    config classes.
+    """
 
     return deepcopy(
         {

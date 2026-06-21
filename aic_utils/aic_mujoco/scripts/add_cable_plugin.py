@@ -248,6 +248,14 @@ def postprocess_world_xml(
 
 
 def main():
+    """Generate controller-ready split MJCF files from a monolithic AIC world.
+
+    The converter output is convenient for inspection but not directly usable by
+    the MuJoCo ROS/control or local policy stack. This entry point separates the
+    robot and world assets, adds robot actuators, preserves the held cable/plug
+    topology, enables the cable plugin, and writes a small scene file that
+    includes both split XMLs.
+    """
     if "BUILD_WORKSPACE_DIRECTORY" in os.environ:
         os.chdir(os.environ["BUILD_WORKSPACE_DIRECTORY"])
 
@@ -318,6 +326,14 @@ def main():
         ]
 
         def is_robot_asset(name):
+            """Return whether an asset name belongs in the robot split.
+
+            Asset ownership is inferred from generated mesh/material/texture
+            names because sdformat_mjcf emits one flat asset namespace. The
+            world split must not duplicate robot assets, otherwise MuJoCo fails
+            with repeated mesh/material names when the scene includes both
+            files.
+            """
             for ek in env_keywords:
                 if ek in name:
                     return False
@@ -328,6 +344,13 @@ def main():
 
         # --- String helpers for class renaming ---
         def rename_class(xml_str, old_name, new_name):
+            """Rename default, class, and childclass references in MJCF text.
+
+            MuJoCo's MjSpec API serializes placeholder classes such as
+            ``unused``. The split robot/world files need independent class
+            namespaces so the included scene has no accidental default-class
+            collisions.
+            """
             xml_str = re.sub(
                 rf'<default\s+class="{old_name}"',
                 f'<default class="{new_name}"',
@@ -346,6 +369,12 @@ def main():
             return xml_str
 
         def strip_tag(xml_str, tag):
+            """Remove a tag from generated MJCF text.
+
+            Some sections generated in the standalone XML are either duplicated
+            or owned by the other split file. This helper handles both
+            self-closing tags and paired tag blocks.
+            """
             pattern = rf"<{tag}[^>]*/>\s*"
             xml_str = re.sub(pattern, "", xml_str)
             pattern = rf"<{tag}[^>]*>.*?</{tag}>\s*"
@@ -796,6 +825,12 @@ def main():
         print("Setting plugin on cable bodies...")
 
         def traverse_find_links(body, target_plugin):
+            """Attach the elasticity plugin/defaults to the cable chain bodies.
+
+            The cable plugin expects a single serial chain. Rigid plug links are
+            intentionally skipped because treating them as cable segments can
+            create branching topology and unstable plugin compilation.
+            """
             count = 0
 
             # Skip plug links — they are rigid attachments, not part of the
@@ -836,6 +871,12 @@ def main():
         xml_str = rename_class(xml_str, "unused", "world_default")
 
         def strip_class_from_cable_children(xml):
+            """Remove world defaults from cable joints/geoms.
+
+            Cable joints and collision spheres must inherit ``cable_default`` so
+            the plugin damping/friction settings are applied consistently. The
+            generic ``world_default`` class can otherwise override those values.
+            """
             for i in range(1, 21):
                 for elem_type in ["joint", "geom"]:
                     patterns = [

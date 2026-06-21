@@ -48,6 +48,8 @@ DEFAULT_RUNS_DIR = PACKAGE_ROOT / "runs"
 
 
 def make_parser() -> argparse.ArgumentParser:
+    """Build CLI for the direct RSL-RL PPO prototype run."""
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--xml", default=str(DEFAULT_XML))
     parser.add_argument("--config", default=str(DEFAULT_CONFIG))
@@ -63,6 +65,8 @@ def make_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    """Create env, wrap it for RSL-RL, train PPO, and save final checkpoint."""
+
     args = make_parser().parse_args()
     if str(args.device).startswith("cuda") and not torch.cuda.is_available():
         raise RuntimeError("CUDA was requested but torch.cuda.is_available() is false.")

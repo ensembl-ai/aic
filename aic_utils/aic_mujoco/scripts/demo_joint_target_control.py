@@ -93,6 +93,12 @@ DEFAULT_CONFIG_PATH = (
 
 
 def print_sites_and_bodies(model: mujoco.MjModel) -> None:
+    """Print MuJoCo site and body names for config/debug alignment.
+
+    The policy/reset config names must match the compiled MJCF names exactly.
+    This helper gives a compact inventory when a frame name changes after a new
+    SDF-to-MJCF conversion.
+    """
     print("\nSites:")
     for sid in range(model.nsite):
         name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_SITE, sid)
@@ -106,6 +112,12 @@ def print_sites_and_bodies(model: mujoco.MjModel) -> None:
 
 
 def make_reset_config(cfg: dict[str, Any]) -> PreinsertResetConfig:
+    """Build the pre-insertion reset config from merged JSON settings.
+
+    The reset layer needs only frame names, HOME joint state, payload root, and
+    pre-insertion height. Keeping this translation here lets the demo override
+    CLI values without leaking raw dictionaries into the reusable reset module.
+    """
     return PreinsertResetConfig(
         home_q=tuple(float(x) for x in cfg["ik_home_q"]),
         port_body=str(cfg["preinsert_port_body"]),
@@ -120,6 +132,12 @@ def make_reset_config(cfg: dict[str, Any]) -> PreinsertResetConfig:
 
 
 def make_wrench_config(cfg: dict[str, Any]) -> WrenchZeroingConfig:
+    """Build F/T zeroing settings for the reset-time bias estimator.
+
+    The demo reports force/torque after subtracting a bias measured at reset.
+    That mirrors how insertion policies usually consume wrist wrench feedback:
+    relative to the current episode's unloaded/held-object baseline.
+    """
     return WrenchZeroingConfig(
         force_sensor=str(cfg["force_sensor"]),
         torque_sensor=str(cfg["torque_sensor"]),
@@ -130,6 +148,12 @@ def make_wrench_config(cfg: dict[str, Any]) -> WrenchZeroingConfig:
 
 
 def make_parser() -> argparse.ArgumentParser:
+    """Create CLI arguments for the lean Cartesian down-motion demo.
+
+    The XML path is explicit because this demo is meant to be run against
+    regenerated scenes. Most behavior comes from config so the command stays
+    short and comparable to the training environment.
+    """
     parser = argparse.ArgumentParser()
     parser.add_argument("--xml", required=True)
     parser.add_argument("--config", default=str(DEFAULT_CONFIG_PATH))
@@ -144,6 +168,13 @@ def make_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    """Run a visible single-environment reset, observation, and action loop.
+
+    The script is the human-facing smoke test for the same building blocks used
+    by training: pre-insertion IK reset, zeroed wrench observation, Cartesian
+    delta stepping through differential IK, impedance torque control, reward
+    reporting, and MuJoCo viewer synchronization.
+    """
     args = make_parser().parse_args()
     cfg = load_json_config(args.config)
     if args.down_distance is not None:

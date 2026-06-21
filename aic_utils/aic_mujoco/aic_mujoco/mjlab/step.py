@@ -14,6 +14,8 @@ from aic_mujoco.joints import JointGroup, PassiveJointGroup
 
 @dataclass(frozen=True)
 class CartesianStepConfig:
+    """Numerical settings for translation-only Cartesian IK."""
+
     ik_iters: int = 20
     ik_tolerance: float = 0.00025
     ik_damping: float = 0.03
@@ -22,6 +24,8 @@ class CartesianStepConfig:
 
 @dataclass
 class CartesianStepResult:
+    """Diagnostics returned after one Cartesian target step."""
+
     q_des: np.ndarray
     tau: np.ndarray
     ee_pos: np.ndarray

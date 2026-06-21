@@ -1,3 +1,5 @@
+"""Joint-space impedance controllers for MuJoCo prototype policies."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -11,6 +13,17 @@ from aic_mujoco.joints import JointGroup
 
 @dataclass
 class JointImpedanceConfig:
+    """Tunable limits/options for ``JointImpedanceController``.
+
+    Args:
+        use_bias_compensation: Add MuJoCo ``qfrc_bias`` to compensate gravity
+            and velocity-dependent terms.
+        clamp_to_joint_limits: Clamp position targets to XML joint limits.
+        torque_limits: Optional per-joint absolute torque limits.
+        torque_rate_limits: Optional per-joint torque slew limits.
+        target_rate_limits: Optional per-joint target-position slew limits.
+    """
+
     use_bias_compensation: bool = True
     clamp_to_joint_limits: bool = True
     torque_limits: np.ndarray | None = None
@@ -32,6 +45,8 @@ class JointImpedanceController:
     """
 
     def __init__(self, joint_group: JointGroup, config: JointImpedanceConfig):
+        """Bind the controller to a MuJoCo joint group and config."""
+
         self.group = joint_group
         self.config = config
         self._internal_q_des: np.ndarray | None = None
@@ -39,6 +54,8 @@ class JointImpedanceController:
         self._lo, self._hi = self.group.joint_limits()
 
     def reset(self, q_current: Sequence[float]) -> None:
+        """Reset internal integrated target and torque history."""
+
         q = np.asarray(q_current, dtype=float)
         if q.shape != (self.group.n,):
             raise ValueError(
@@ -48,6 +65,15 @@ class JointImpedanceController:
         self._last_tau = None
 
     def compute(self, data, target: JointTarget, dt: float) -> np.ndarray:
+        """Convert a joint target into torques for the current MuJoCo state.
+
+        Args:
+            data: MuJoCo data containing current ``q/qdot/qfrc_bias``.
+            target: Position or velocity-mode joint command.
+            dt: Physics timestep used for velocity target integration and slew
+                limits.
+        """
+
         target.validate(self.group.n)
 
         q = self.group.q(data)

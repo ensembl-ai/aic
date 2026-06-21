@@ -1,3 +1,5 @@
+"""Frame transform and pre-insertion IK helpers for AIC MuJoCo scenes."""
+
 from __future__ import annotations
 
 import mujoco
@@ -8,6 +10,8 @@ def transform_from_rotation_translation(
     rotation: np.ndarray,
     translation: np.ndarray,
 ) -> np.ndarray:
+    """Build a homogeneous transform from rotation matrix and translation."""
+
     transform = np.eye(4, dtype=float)
     transform[:3, :3] = np.asarray(rotation, dtype=float).reshape(3, 3)
     transform[:3, 3] = np.asarray(translation, dtype=float).reshape(3)
@@ -15,6 +19,8 @@ def transform_from_rotation_translation(
 
 
 def inverse_transform(transform: np.ndarray) -> np.ndarray:
+    """Return the inverse of a homogeneous transform."""
+
     return np.linalg.inv(transform)
 
 
@@ -25,6 +31,8 @@ def relative_transform(frame_T_a: np.ndarray, frame_T_b: np.ndarray) -> np.ndarr
 
 
 def quaternion_from_rotation(rotation: np.ndarray) -> np.ndarray:
+    """Convert a 3x3 rotation matrix to MuJoCo ``wxyz`` quaternion."""
+
     quaternion = np.zeros(4, dtype=float)
     mujoco.mju_mat2Quat(quaternion, np.asarray(rotation, dtype=float).reshape(9))
     return quaternion
@@ -34,6 +42,8 @@ def transform_from_translation_quaternion(
     translation: np.ndarray,
     quaternion: np.ndarray,
 ) -> np.ndarray:
+    """Build a homogeneous transform from translation and MuJoCo quaternion."""
+
     rotation = np.zeros(9, dtype=float)
     mujoco.mju_quat2Mat(rotation, np.asarray(quaternion, dtype=float).reshape(4))
     return transform_from_rotation_translation(
@@ -47,6 +57,8 @@ def body_transform(
     data: mujoco.MjData,
     body_name: str,
 ) -> np.ndarray:
+    """Return ``world_T_body`` for a named MuJoCo body."""
+
     body_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, body_name)
     if body_id < 0:
         raise RuntimeError(f"Body not found in MuJoCo model: {body_name!r}")
@@ -58,6 +70,8 @@ def site_transform(
     data: mujoco.MjData,
     site_name: str,
 ) -> np.ndarray:
+    """Return ``world_T_site`` for a named MuJoCo site."""
+
     site_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SITE, site_name)
     if site_id < 0:
         raise RuntimeError(f"Site not found in MuJoCo model: {site_name!r}")
@@ -73,6 +87,8 @@ def set_freejoint_transform(
     joint_name: str,
     world_T_body: np.ndarray,
 ) -> None:
+    """Teleport a freejoint body to a world transform and zero its velocity."""
+
     joint_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, joint_name)
     if joint_id < 0:
         raise RuntimeError(f"Freejoint not found in MuJoCo model: {joint_name!r}")
@@ -121,6 +137,8 @@ def weld_body_transform(
 
 
 def print_transform(label: str, transform: np.ndarray) -> None:
+    """Print a transform as position and rotation rows for debugging."""
+
     print(f"  {label}:")
     print(f"    p: {transform[:3, 3].tolist()}")
     print("    R:")

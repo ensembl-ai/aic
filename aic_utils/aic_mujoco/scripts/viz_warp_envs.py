@@ -62,18 +62,20 @@ DEFAULT_CONFIG = PACKAGE_ROOT / "configs" / "experiments" / "train_warp_smoke.js
 
 
 def make_parser() -> argparse.ArgumentParser:
+    """Build CLI for Viser-grid and single-env MuJoCo visualization."""
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--xml", default=str(DEFAULT_XML))
     parser.add_argument("--config", default=str(DEFAULT_CONFIG))
     parser.add_argument("--num-envs", type=int, default=16)
     parser.add_argument("--env-id", type=int, default=0)
     parser.add_argument("--device", default="cuda")
-    parser.add_argument("--action-z", type=float, default=-5.0)
+    parser.add_argument("--action-z", type=float, default=-1.0)
     parser.add_argument("--down-distance", type=float, default=0.15)
     parser.add_argument("--layout", choices=("mujoco", "viser"), default="viser")
     parser.add_argument("--port", type=int, default=8080)
     parser.add_argument("--spacing", type=float, default=3.0)
-    parser.add_argument("--fps", type=float, default=10.0)
+    parser.add_argument("--fps", type=float, default=100.0)
     parser.add_argument(
         "--show-grid", action=argparse.BooleanOptionalAction, default=True
     )
@@ -90,6 +92,8 @@ def make_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    """Create the prototype env and dispatch to Viser or native MuJoCo view."""
+
     args = make_parser().parse_args()
     env = AicInsertionVecEnv(
         AicInsertionVecEnvConfig.from_files(
@@ -132,7 +136,16 @@ def run_viser_grid(
     action: torch.Tensor,
     args: argparse.Namespace,
 ) -> None:
-    """Run all envs and visualize lightweight state in a Viser grid."""
+    """Run all envs and visualize their real visual geoms in Viser.
+
+    Args:
+        env: Direct prototype vector env to step.
+        action: Reused action tensor; mutated in place each frame.
+        args: Parsed CLI namespace with layout, speed, and display controls.
+
+    Viser is deliberately debug-only. It steps the same env as training, but it
+    renders only selected visual geoms and sleeps to a target browser FPS.
+    """
 
     import viser
 
@@ -198,6 +211,17 @@ def step_visual_policy(
     action_z: float,
     down_distance: float,
 ) -> None:
+    """Advance the visual demo policy for one rendered frame.
+
+    Args:
+        env: Prototype env to step.
+        action: Preallocated action tensor.
+        traveled: Per-env accumulated downward travel in meters.
+        action_z: User speed command. Values outside [-1, 1] become repeated
+            clipped env steps because the env itself clips policy actions.
+        down_distance: Total downward travel before holding still.
+    """
+
     repeats = max(1, int(math.ceil(abs(action_z))))
     clipped_action_z = float(np.clip(action_z, -1.0, 1.0))
     for _ in range(repeats):
@@ -219,6 +243,13 @@ def set_downward_actions(
     action_z: float,
     down_distance: float,
 ) -> None:
+    """Write the downward Cartesian action for envs still in motion.
+
+    ``action_z`` should already be clipped to the env's normalized action
+    range. Env copies that reached ``down_distance`` receive zero action and
+    therefore hold through the impedance controller.
+    """
+
     action.zero_()
     active = traveled < abs(down_distance)
     if np.any(active):
@@ -235,6 +266,14 @@ def update_downward_travel(
     action_scale: float,
     decimation: int,
 ) -> None:
+    """Update the visual policy's travel bookkeeping.
+
+    The distance estimate mirrors what the env actually receives after action
+    clipping: ``abs(action_z) * action_scale * decimation`` per policy step.
+    Done envs are reset to zero so the next episode repeats the same 15 cm
+    insertion debug motion.
+    """
+
     step_distance = abs(action_z) * abs(action_scale) * int(decimation)
     active = traveled < abs(down_distance)
     traveled[active] = np.minimum(abs(down_distance), traveled[active] + step_distance)
@@ -242,6 +281,8 @@ def update_downward_travel(
 
 
 def env_offset(env_id: int, cols: int, spacing: float) -> np.ndarray:
+    """Return a flat XY grid offset for an env copy in Viser."""
+
     row = env_id // cols
     col = env_id % cols
     return np.array([col * spacing, row * spacing, 0.02], dtype=float)
@@ -258,8 +299,18 @@ def add_env_geoms(
 ) -> None:
     """Add MuJoCo geoms for one Viser env cell.
 
+    Args:
+        server: Active ``viser.ViserServer``.
+        env: Prototype env containing model/data.
+        env_id: Env copy to draw.
+        offset: XY grid offset for this env.
+        handles: Mutable map from geom ids to Viser handles.
+        opacity: Alpha cap for displayed geoms.
+        geom_mode: ``visual``, ``collision``, or ``all`` selection.
+
     Mesh geoms are shown as actual mesh vertices/faces. Primitive geoms are
-    shown with matching primitive approximations.
+    shown with matching primitive approximations. The default filter avoids
+    collision bodies and room walls so the view stays robot + part + board.
     """
 
     model = env.model
@@ -343,6 +394,8 @@ def update_env_geoms(
     handles: dict,
     offset: np.ndarray,
 ) -> None:
+    """Refresh Viser geom poses from current MuJoCo state."""
+
     data = env.datas[env_id]
     for geom_id in range(env.model.ngeom):
         handle = handles.get((env_id, "geom", geom_id))
@@ -353,6 +406,18 @@ def update_env_geoms(
 
 
 def include_geom(body_name: str, geom_name: str, geom_mode: str) -> bool:
+    """Return whether a MuJoCo geom belongs in the Viser debug scene.
+
+    Args:
+        body_name: Parent MuJoCo body name.
+        geom_name: MuJoCo geom name.
+        geom_mode: User-selected mode: ``visual``, ``collision``, or ``all``.
+
+    The default visual path intentionally excludes floor/walls, cameras, cable
+    tail, SC plug, and collision boxes. The goal is a clean robot + held SFP
+    part + NIC/task board + enclosure view.
+    """
+
     text = f"{body_name} {geom_name}".lower()
     if any(k in text for k in ("floor_link", "walls_visual", "light_visual")):
         return False
@@ -374,6 +439,12 @@ def mesh_vertices_faces(
     model: mujoco.MjModel,
     mesh_id: int,
 ) -> tuple[np.ndarray, np.ndarray]:
+    """Return vertices/faces for a MuJoCo mesh asset.
+
+    MuJoCo stores all mesh vertices/faces in flat global arrays; this slices the
+    segment for one mesh id into arrays Viser can draw.
+    """
+
     vert_adr = int(model.mesh_vertadr[mesh_id])
     vert_num = int(model.mesh_vertnum[mesh_id])
     face_adr = int(model.mesh_faceadr[mesh_id])
@@ -392,6 +463,13 @@ def geom_color_alpha(
     geom_name: str,
     opacity: float,
 ) -> tuple[tuple[int, int, int], float]:
+    """Choose display color/alpha for a MuJoCo geom.
+
+    Material colors are preferred to preserve exported scene colors. When the
+    converter leaves a neutral default gray, semantic colors make robot, plug,
+    board, and enclosure easier to distinguish in Viser.
+    """
+
     mat_id = int(model.geom_matid[geom_id])
     if mat_id >= 0:
         rgba = np.asarray(model.mat_rgba[mat_id], dtype=float)
@@ -409,6 +487,8 @@ def geom_color_alpha(
 
 
 def semantic_color(body_name: str, geom_name: str) -> tuple[int, int, int]:
+    """Return a stable debug color when material color is uninformative."""
+
     text = f"{body_name} {geom_name}".lower()
     if any(
         k in text
@@ -434,6 +514,8 @@ def semantic_color(body_name: str, geom_name: str) -> tuple[int, int, int]:
 
 
 def sanitize_name(name: str) -> str:
+    """Make a MuJoCo name safe as a Viser scene-tree path component."""
+
     return "".join(c if c.isalnum() or c in "-_." else "_" for c in name)
 
 

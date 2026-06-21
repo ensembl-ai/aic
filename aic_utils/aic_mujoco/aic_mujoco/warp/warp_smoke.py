@@ -12,7 +12,13 @@ import warp as wp
 
 @dataclass(frozen=True)
 class WarpSmokeConfig:
-    """Direct Warp model/data smoke-test config."""
+    """Inputs for a direct MuJoCo Warp compile/step smoke test.
+
+    Args:
+        xml_path: Warp-compatible scene, normally ``mjcf/scene_warp.xml``.
+        num_envs: Number of batched Warp worlds to allocate.
+        steps: Number of zero-control Warp steps to run.
+    """
 
     xml_path: Path
     num_envs: int = 32
@@ -21,6 +27,12 @@ class WarpSmokeConfig:
 
 def run_warp_smoke(cfg: WarpSmokeConfig) -> dict[str, float | int | str]:
     """Compile a MuJoCo model into Warp data and run zero-control steps.
+
+    Args:
+        cfg: XML path, batch size, and step count.
+
+    Returns:
+        Small model/time summary, including ``nq/nv/nu`` and env-0 sim time.
 
     This is intentionally direct: no MJLab, no manager layer, no hidden scene
     composition. If this fails, the failure is in the MuJoCo XML, MuJoCo Warp,

@@ -12,6 +12,8 @@ from aic_mujoco.mjlab.observations import ContactObservation
 
 @dataclass(frozen=True)
 class DemoLogRecord:
+    """Structured values printed by the Cartesian debug demo."""
+
     step: int
     sim_time: float
     wall_time: float
@@ -38,6 +40,8 @@ class DemoLogRecord:
 
 
 def format_vector(values: np.ndarray | None, precision: int = 3) -> str:
+    """Format a vector with signs and fixed precision."""
+
     if values is None:
         return "missing"
     values = np.asarray(values, dtype=float)
@@ -46,6 +50,8 @@ def format_vector(values: np.ndarray | None, precision: int = 3) -> str:
 
 
 def format_norm_vector(values: np.ndarray | None, precision: int = 3) -> str:
+    """Format a vector plus its Euclidean norm."""
+
     if values is None:
         return "missing"
     values = np.asarray(values, dtype=float)
@@ -54,6 +60,8 @@ def format_norm_vector(values: np.ndarray | None, precision: int = 3) -> str:
 
 
 def format_reward_terms(terms: Mapping[str, float]) -> str:
+    """Format named reward terms as compact scalar text."""
+
     if not terms:
         return "none"
     return ", ".join(f"{name}={value:+.5f}" for name, value in terms.items())

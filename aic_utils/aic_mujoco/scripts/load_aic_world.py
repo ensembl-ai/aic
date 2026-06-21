@@ -87,6 +87,12 @@ def apply_post_processing_fixes(output_dir):
 
 
 def main():
+    """Parse CLI args and run the legacy SDF-to-MJCF conversion helper.
+
+    This script is kept as a lightweight wrapper around the external converter.
+    The newer README flow uses the generated XML plus project-specific
+    post-processing scripts, but this remains useful for quick one-off exports.
+    """
     parser = argparse.ArgumentParser(
         description="Convert AIC Gazebo world to MuJoCo MJCF format",
         formatter_class=argparse.RawDescriptionHelpFormatter,

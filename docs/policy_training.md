@@ -110,6 +110,188 @@ This is the bridge between controller behavior and accelerated training. The
 controller still sees the correct physics `dt`; the trainer does not need to
 run in realtime.
 
+## Delta Action To Robot Motion
+
+The direct MuJoCo policy path uses a small Cartesian delta action, not direct
+joint teleportation. The current intended chain is:
+
+```text
+policy action
+  -> action clamp/scale
+  -> desired TCP Cartesian delta
+  -> differential IK
+  -> joint target
+  -> joint impedance torque
+  -> MuJoCo actuator/generalized force
+  -> mj_step physics
+  -> updated qpos/qvel/geoms/sensors
+  -> observation/reward/done
+```
+
+Concrete example:
+
+```text
+raw action       = [0, 0, -1]
+action_scale     = 0.002 m
+delta_world      = [0, 0, -0.002] m
+```
+
+That means the action layer asks the TCP to move 2 mm downward for this
+environment action. It is a request, not a guaranteed displacement. The
+achieved motion can be smaller because:
+
+- differential IK caps the joint increment with `ik_max_dq`,
+- joint targets are clipped to joint limits,
+- impedance tracking applies finite torque rather than teleporting joints,
+- contacts and constraints can block or deflect the motion,
+- the controller may need multiple physics steps to track the new target.
+
+The implementation then computes the TCP Jacobian and solves a damped least
+squares update:
+
+```text
+dq = J.T @ inv(J @ J.T + damping^2 I) @ delta_world
+```
+
+The joint target is:
+
+```text
+q_des = q_current + capped(dq)
+```
+
+The impedance layer converts that target into torque:
+
+```text
+tau = kp * (q_des - q) + kd * (qd_des - qd) + optional_bias_compensation
+```
+
+Those torques are written into `data.ctrl` for actuator-backed joints, or into
+`data.qfrc_applied` for direct generalized-force control. MuJoCo then advances
+the actual physics:
+
+```python
+mujoco.mj_step(model, data)
+```
+
+After stepping, MuJoCo updates joint state, body poses, contacts, sensor data,
+and geometry transforms. The viewer/Viser motion is just a rendering of this
+updated `mjData`.
+
+### Decimation
+
+`decimation` means "hold one policy action for multiple physics/controller
+substeps." With `decimation = 4`, the policy predicts one action, then the
+environment applies the controller and advances physics four times before
+asking the policy for the next action:
+
+```text
+policy action a_t
+  substep 1: controller(a_t), mj_step
+  substep 2: controller(a_t), mj_step
+  substep 3: controller(a_t), mj_step
+  substep 4: controller(a_t), mj_step
+next policy action a_{t+1}
+```
+
+This is not "wait in wall-clock time." It is simulated control hold time:
+
+```text
+policy_dt = decimation * model.opt.timestep
+```
+
+If `model.opt.timestep = 0.002` and `decimation = 4`, the policy step
+represents 8 ms of simulation time.
+
+Decimation does not automatically mean the robot achieves the full requested
+2 mm before the next policy action. It only gives the finite-torque controller
+four physics steps to move toward the target. If `ik_max_dq`, torque limits, or
+contacts restrict motion, the achieved TCP displacement may be much less than
+the requested action-space delta.
+
+### Wall-Clock Speed
+
+Headless training should never sleep for visualization. A full episode should
+run as fast as MuJoCo/Warp and the controller implementation allow.
+
+If robot motion looks realtime, one of these is happening:
+
+- a viewer/debug script is intentionally pacing frames with `sleep`,
+- Viser/browser rendering is the bottleneck,
+- the current prototype is looping through envs or geoms in Python,
+- the controller/action code is still CPU/NumPy instead of fully batched device
+  code,
+- the script is rendering every step instead of sampling debug frames.
+
+Realtime visualization is acceptable for inspection. It is a bug for headless
+training throughput. Training metrics should separate:
+
+```text
+physics_steps_per_second
+env_steps_per_second
+aggregate_sim_seconds_per_wall_second
+render_fps
+```
+
+For parallel training, aggregate sim seconds can exceed wall time even if each
+single env is not running faster than realtime:
+
+```text
+aggregate_sim_seconds_per_wall_second =
+  num_envs * policy_dt * env_steps_per_wall_second
+```
+
+### Episode Horizon And Happy-Path Length
+
+The maximum episode length must be derived from the commanded motion scale and
+the scene geometry, not guessed.
+
+For insertion, compute the nominal travel distance from scene frames:
+
+```text
+preinsert point  = port entrance + preinsert offset
+success point    = port bottom / calibrated inserted SFP-tip pose
+travel_distance  = distance projected along insertion axis
+```
+
+Then estimate a happy-path lower bound:
+
+```text
+requested_step_distance = action_scale * max_action_along_axis
+requested_progress_per_policy_step ~= requested_step_distance
+minimum_policy_steps ~= ceil(travel_distance / requested_progress_per_policy_step)
+```
+
+But the achieved progress can be smaller than the requested progress, so the
+episode horizon needs margin:
+
+```text
+horizon >= safety_factor * minimum_policy_steps
+```
+
+Use logs to measure:
+
+```text
+requested_delta_norm
+achieved_tcp_delta_norm
+achieved_insertion_progress_per_step
+remaining_progress
+steps_to_success_estimate
+```
+
+If the policy repeatedly exhausts a 250-step horizon before reaching the port
+bottom on a straight-line happy path, the setup is wrong. Fix one or more of:
+
+- `action_scale`,
+- `ik_max_dq`,
+- torque limits / stiffness / damping,
+- `decimation`,
+- episode horizon,
+- success-frame calibration,
+- contact geometry that blocks insertion.
+
+The sanity test should include a scripted "straight down" policy and report
+whether it can reach the nominal inserted frame within the configured horizon.
+
 ## What AIC Encourages
 
 The AIC policy API supports both:

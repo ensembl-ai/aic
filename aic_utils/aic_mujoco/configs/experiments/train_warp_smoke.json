@@ -8,7 +8,7 @@
   "backend": "mujoco_warp",
   "device": "cuda",
   "num_envs": 32,
-  "max_episode_steps": 500,
+  "max_episode_steps": 10000,
   "decimation": 4,
   "action_scale": 0.002,
   "success_progress": 0.95,

@@ -28,6 +28,8 @@ from aic_mujoco.mjlab.observations import read_sensor
 
 @dataclass(frozen=True)
 class PreinsertResetConfig:
+    """Frame names and home pose for SFP-tip pre-insertion reset."""
+
     home_q: tuple[float, ...] = (
         -0.1597,
         -1.3542,
@@ -48,6 +50,8 @@ class PreinsertResetConfig:
 
 @dataclass(frozen=True)
 class WrenchZeroingConfig:
+    """Settings for reset-time force/torque bias estimation."""
+
     force_sensor: str = "AtiForceTorqueSensor_force"
     torque_sensor: str = "AtiForceTorqueSensor_torque"
     settle_steps: int = 100
@@ -57,6 +61,8 @@ class WrenchZeroingConfig:
 
 @dataclass
 class ResetResult:
+    """State returned by a pre-insertion reset."""
+
     q_start: np.ndarray
     preinsert_diagnostics: dict[str, np.ndarray | str | float | int | None]
     force_bias: np.ndarray | None

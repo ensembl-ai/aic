@@ -124,7 +124,15 @@ DEFAULT_CONFIG_PATH = SCRIPT_DIR.parent / "configs" / "experiments" / "hold_prei
 def print_preinsert_diagnostics(
     diagnostics: dict[str, np.ndarray | str | float | int | None],
 ) -> None:
+    """Print the reset IK frame chain and resulting pose errors.
+
+    This is the diagnostic view for the pre-insertion math. It shows every
+    named ``A_T_B`` transform used to convert the desired SFP-tip pose into the
+    EnsemblRobot TCP IK target, then reports the virtual and actual SFP-tip
+    alignment errors after the payload freejoint is placed.
+    """
     def transform(key: str) -> np.ndarray:
+        """Return a diagnostic transform by key and enforce matrix type."""
         value = diagnostics[key]
         if not isinstance(value, np.ndarray):
             raise TypeError(f"Expected diagnostic transform {key!r}, got {type(value)}")
@@ -185,6 +193,7 @@ def print_preinsert_diagnostics(
 
 
 def make_parser() -> argparse.ArgumentParser:
+    """Create CLI arguments for the fixed pre-insertion hold demo."""
     p = argparse.ArgumentParser()
     p.add_argument("--xml", required=True)
     p.add_argument(
@@ -199,6 +208,12 @@ def make_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    """Hold the robot at the reset IK target and stream the MuJoCo viewer.
+
+    This script isolates reset and impedance holding from the later policy step
+    loop. If the plug starts in the wrong place here, the issue is in frame
+    naming, payload placement, or IK alignment rather than rewards/training.
+    """
     args = make_parser().parse_args()
     cfg = load_json_config(args.config)
 

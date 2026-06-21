@@ -23,6 +23,16 @@ from typing import Any
 
 
 def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    """Recursively merge config dictionaries.
+
+    Args:
+        base: Starting dictionary.
+        override: Values that should replace or recursively update ``base``.
+
+    Returns:
+        A new dictionary. Inputs are not mutated.
+    """
+
     merged = dict(base)
     for key, value in override.items():
         if (

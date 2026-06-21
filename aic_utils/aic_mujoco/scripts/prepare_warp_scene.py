@@ -36,7 +36,15 @@ MJCF_DIR = PACKAGE_ROOT / "mjcf"
 
 
 def remove_tags(root: ET.Element, tags: set[str]) -> None:
-    """Remove XML elements with matching tags while preserving the rest."""
+    """Remove direct child elements with matching tags throughout a tree.
+
+    Args:
+        root: XML tree root to mutate in place.
+        tags: Element tag names to remove.
+
+    Used for unsupported MuJoCo Warp features such as ``<plugin>`` plus viewer
+    decorations that are irrelevant for headless training.
+    """
 
     for parent in list(root.iter()):
         for child in list(parent):
@@ -45,7 +53,11 @@ def remove_tags(root: ET.Element, tags: set[str]) -> None:
 
 
 def strip_visual_geoms(root: ET.Element) -> None:
-    """Remove geoms that are visual-only in MJCF."""
+    """Remove visual-only geoms from the Warp training XML.
+
+    The Warp scene is a physics/training asset, not the Viser debug scene.
+    Keeping collision geoms lowers model size and avoids visual mesh overhead.
+    """
 
     for parent in list(root.iter()):
         for child in list(parent):
@@ -62,7 +74,13 @@ def strip_visual_geoms(root: ET.Element) -> None:
 
 
 def strip_visual_assets(root: ET.Element) -> None:
-    """Keep only mesh assets still referenced by remaining collision geoms."""
+    """Keep only mesh assets still referenced by remaining collision geoms.
+
+    Args:
+        root: Robot or world XML root to mutate.
+
+    This prevents dangling mesh/material assets after visual geoms are removed.
+    """
 
     used_meshes = {
         elem.attrib["mesh"]
@@ -79,7 +97,7 @@ def strip_visual_assets(root: ET.Element) -> None:
 
 
 def find_body(root: ET.Element, name: str) -> ET.Element:
-    """Find a body by exact MuJoCo body name."""
+    """Find a body by exact MuJoCo body name and fail if it is missing."""
 
     for body in root.iter("body"):
         if body.attrib.get("name") == name:
@@ -88,7 +106,11 @@ def find_body(root: ET.Element, name: str) -> ET.Element:
 
 
 def remove_body(root: ET.Element, name: str) -> None:
-    """Remove a body subtree by exact MuJoCo body name."""
+    """Remove a body subtree by exact MuJoCo body name.
+
+    Used to delete the plugin-driven cable root after the plug subtree is
+    rigidly attached to the gripper for Warp.
+    """
 
     for parent in root.iter():
         for child in list(parent):
@@ -127,7 +149,19 @@ def remove_cable_contacts(root: ET.Element) -> None:
 
 
 def attach_plug_to_robot(robot_root: ET.Element, world_root: ET.Element) -> None:
-    """Attach the LC/SFP plug subtree directly under ``ati/tool_link``."""
+    """Attach the LC/SFP plug subtree directly under ``ati/tool_link``.
+
+    Args:
+        robot_root: Robot XML root that receives the held plug subtree.
+        world_root: World XML root that currently owns ``lc_plug_link`` and
+            ``cable_end_0``.
+
+    Why:
+        MuJoCo Warp cannot compile the elasticity cable body plugin. For the
+        first training target we only need robot + held SFP part + NIC/task
+        board, so the held plug is made rigid with the gripper and the cable
+        chain is removed.
+    """
 
     plug = copy.deepcopy(find_body(world_root, "lc_plug_link"))
     for elem in plug.iter():
@@ -142,6 +176,8 @@ def attach_plug_to_robot(robot_root: ET.Element, world_root: ET.Element) -> None
 
 
 def main() -> int:
+    """Generate ``aic_robot_warp.xml``, ``aic_world_warp.xml``, and scene file."""
+
     robot_in = MJCF_DIR / "aic_robot.xml"
     robot_out = MJCF_DIR / "aic_robot_warp.xml"
     world_in = MJCF_DIR / "aic_world.xml"

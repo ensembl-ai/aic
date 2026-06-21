@@ -54,6 +54,8 @@ class SdfRewardTerms:
 
 @dataclass(frozen=True)
 class InsertionProgressTerms:
+    """Axial insertion progress relative to the port entrance/bottom line."""
+
     progress: float
     normalized_progress: float
     remaining: float
@@ -61,6 +63,8 @@ class InsertionProgressTerms:
 
 @dataclass(frozen=True)
 class ForcePenaltyTerms:
+    """Force/torque penalty values after reset-time wrench zeroing."""
+
     penalty: float
     force_norm: float
     torque_norm: float
@@ -70,6 +74,8 @@ class ForcePenaltyTerms:
 
 @dataclass(frozen=True)
 class RewardComposition:
+    """Weighted reward total plus named contribution dictionary."""
+
     total: float
     terms: dict[str, float]
 
@@ -122,14 +128,20 @@ class MeshSdfQuery:
     """
 
     def __init__(self, mesh):
+        """Create a proximity query around a target mesh."""
+
         self.mesh = mesh
         self.query = trimesh.proximity.ProximityQuery(mesh)
 
     @classmethod
     def from_mesh_path(cls, mesh_path: str | Path) -> "MeshSdfQuery":
+        """Load a mesh from disk and create a signed-distance query object."""
+
         return cls(load_mesh(mesh_path))
 
     def signed_distance(self, points: np.ndarray) -> np.ndarray:
+        """Evaluate signed distance for ``N x 3`` world/query points."""
+
         points = np.asarray(points, dtype=float)
         if points.ndim != 2 or points.shape[1] != 3:
             raise ValueError(f"points must have shape (N, 3), got {points.shape}")
@@ -158,6 +170,8 @@ class SampledSdfPoseReward:
         target_sdf: MeshSdfQuery,
         cfg: SdfRewardConfig | None = None,
     ):
+        """Store plug samples and target SDF query for repeated evaluation."""
+
         self.plug_surface_points_in_plug = np.asarray(
             plug_surface_points_in_plug,
             dtype=float,
@@ -166,6 +180,8 @@ class SampledSdfPoseReward:
         self.cfg = cfg or SdfRewardConfig()
 
     def evaluate(self, world_T_plug: np.ndarray) -> SdfRewardTerms:
+        """Evaluate the sampled plug points at the current plug pose."""
+
         world_points = transform_points(
             world_T_plug,
             self.plug_surface_points_in_plug,

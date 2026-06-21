@@ -22,6 +22,8 @@ import numpy as np
 
 @dataclass
 class WrenchObservation:
+    """Force/torque sensor values before and after reset-time zeroing."""
+
     force: np.ndarray | None
     torque: np.ndarray | None
     raw_force: np.ndarray | None
@@ -32,6 +34,8 @@ class WrenchObservation:
 
 @dataclass
 class ContactObservation:
+    """Minimal contact summary used by rewards and termination."""
+
     ncon: int
     max_penetration: float
 
@@ -41,6 +45,8 @@ def read_sensor(
     data: mujoco.MjData,
     sensor_name: str,
 ) -> np.ndarray | None:
+    """Read a named MuJoCo sensor vector or return ``None`` if absent."""
+
     sensor_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SENSOR, sensor_name)
     if sensor_id < 0:
         return None
@@ -54,6 +60,8 @@ def zero_sensor(
     values: np.ndarray | None,
     bias: np.ndarray | None,
 ) -> np.ndarray | None:
+    """Subtract a reset-time bias from a sensor vector when available."""
+
     if values is None:
         return None
     values = np.asarray(values, dtype=float)
@@ -70,6 +78,8 @@ def force_torque_observation(
     force_bias: np.ndarray | None = None,
     torque_bias: np.ndarray | None = None,
 ) -> WrenchObservation:
+    """Read force/torque sensors and return raw plus zeroed values."""
+
     raw_force = read_sensor(model, data, force_sensor)
     raw_torque = read_sensor(model, data, torque_sensor)
     return WrenchObservation(
@@ -119,6 +129,16 @@ class CameraHealthChecker:
         height: int = 120,
         min_std: float = 1.0,
     ):
+        """Create a renderer-backed camera sanity checker.
+
+        Args:
+            model: MuJoCo model containing camera names.
+            camera_names: Cameras to render.
+            width: Render width for cheap health checks.
+            height: Render height for cheap health checks.
+            min_std: Minimum image standard deviation considered nonblank.
+        """
+
         self.model = model
         self.camera_names = camera_names
         self.min_std = min_std
@@ -140,10 +160,14 @@ class CameraHealthChecker:
             self.error = f"renderer init failed: {exc}"
 
     def close(self) -> None:
+        """Release the MuJoCo renderer if one was created."""
+
         if self.renderer is not None:
             self.renderer.close()
 
     def summary(self, data: mujoco.MjData) -> str:
+        """Render each camera and return a compact health summary string."""
+
         if self.error is not None:
             return self.error
         assert self.renderer is not None

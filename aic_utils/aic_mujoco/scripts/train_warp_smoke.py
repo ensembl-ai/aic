@@ -53,6 +53,13 @@ DEFAULT_CONFIG = PACKAGE_ROOT / "configs" / "experiments" / "train_warp_smoke.js
 
 
 def make_parser() -> argparse.ArgumentParser:
+    """Build CLI for the two-stage smoke test.
+
+    The script first validates MuJoCo Warp compilation/stepping on
+    ``scene_warp.xml`` and then runs the direct prototype control env on
+    ``scene.xml``. Keeping both in one command catches XML/runtime drift early.
+    """
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--xml", default=str(DEFAULT_XML))
     parser.add_argument("--warp-xml", default=str(DEFAULT_WARP_XML))
@@ -66,6 +73,8 @@ def make_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    """Run Warp preflight, then run a short direct control rollout."""
+
     args = make_parser().parse_args()
     control_xml = Path(args.xml).expanduser().resolve()
     warp_xml = Path(args.warp_xml).expanduser().resolve()

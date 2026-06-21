@@ -1,3 +1,10 @@
+"""MuJoCo joint/actuator mapping utilities.
+
+These classes isolate the ugly XML/address bookkeeping: joint names become
+qpos/qvel addresses and optional actuator ids, while controllers can work with
+plain vectors.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -17,6 +24,8 @@ class TorqueMode(str, Enum):
 
 @dataclass(frozen=True)
 class JointHandle:
+    """Resolved MuJoCo addresses for one hinge/slide joint."""
+
     name: str
     joint_id: int
     qpos_addr: int
@@ -43,6 +52,15 @@ class JointGroup:
         torque_mode: TorqueMode = TorqueMode.ACTUATOR_CTRL,
         allow_missing_actuators: bool = False,
     ):
+        """Resolve names and validate actuator availability.
+
+        Args:
+            model: MuJoCo model containing the named joints.
+            joint_names: Ordered joints controlled by this group.
+            torque_mode: Whether torques go through actuators or qfrc_applied.
+            allow_missing_actuators: Permit missing actuators for debug paths.
+        """
+
         self.model = model
         self.joint_names = list(joint_names)
         self.torque_mode = TorqueMode(torque_mode)
@@ -59,9 +77,13 @@ class JointGroup:
 
     @property
     def n(self) -> int:
+        """Number of joints in this group."""
+
         return len(self.handles)
 
     def _make_handle(self, joint_name: str) -> JointHandle:
+        """Resolve one MuJoCo joint into qpos/qvel/actuator addresses."""
+
         jid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, joint_name)
         if jid < 0:
             raise RuntimeError(f"Joint not found: {joint_name!r}")
@@ -84,6 +106,8 @@ class JointGroup:
         )
 
     def _find_direct_joint_actuator(self, joint_id: int) -> tuple[int | None, float]:
+        """Find a direct joint actuator and its first gear scalar."""
+
         for aid in range(self.model.nu):
             if self.model.actuator_trntype[aid] != mujoco.mjtTrn.mjTRN_JOINT:
                 continue
@@ -98,12 +122,21 @@ class JointGroup:
         return None, 1.0
 
     def q(self, data: mujoco.MjData) -> np.ndarray:
+        """Return current joint positions in group order."""
+
         return np.asarray([data.qpos[h.qpos_addr] for h in self.handles], dtype=float)
 
     def qd(self, data: mujoco.MjData) -> np.ndarray:
+        """Return current joint velocities in group order."""
+
         return np.asarray([data.qvel[h.qvel_addr] for h in self.handles], dtype=float)
 
     def set_q(self, data: mujoco.MjData, q: Sequence[float], zero_velocity: bool = True) -> None:
+        """Set joint positions directly and run ``mj_forward``.
+
+        This is a state reset/teleport helper, not a physical control action.
+        """
+
         q = np.asarray(q, dtype=float)
         if q.shape != (self.n,):
             raise ValueError(f"q must have shape ({self.n},), got {q.shape}")
@@ -116,6 +149,8 @@ class JointGroup:
         mujoco.mj_forward(self.model, data)
 
     def joint_limits(self) -> tuple[np.ndarray, np.ndarray]:
+        """Return lower/upper limits in group order, using infinities if free."""
+
         lo = np.empty(self.n, dtype=float)
         hi = np.empty(self.n, dtype=float)
         for i, h in enumerate(self.handles):
@@ -138,6 +173,8 @@ class JointGroup:
         return np.asarray([data.qfrc_bias[h.qvel_addr] for h in self.handles], dtype=float)
 
     def apply_torque(self, data: mujoco.MjData, tau: Sequence[float]) -> None:
+        """Apply joint torques through actuators or ``qfrc_applied``."""
+
         tau = np.asarray(tau, dtype=float)
         if tau.shape != (self.n,):
             raise ValueError(f"tau must have shape ({self.n},), got {tau.shape}")
@@ -152,11 +189,15 @@ class JointGroup:
                 data.qfrc_applied[h.qvel_addr] = float(effort)
 
     def zero_owned_actuators(self, data: mujoco.MjData) -> None:
+        """Set direct actuator controls for this group to zero."""
+
         for h in self.handles:
             if h.actuator_id is not None:
                 data.ctrl[h.actuator_id] = 0.0
 
     def print_mapping(self, title: str = "JointGroup") -> None:
+        """Print joint/qpos/qvel/actuator mapping for debugging XML changes."""
+
         print(f"{title}:")
         for h in self.handles:
             actuator_name = "-"
@@ -185,6 +226,8 @@ class PassiveJointGroup:
     """
 
     def __init__(self, model: mujoco.MjModel, joint_names: Sequence[str], mode: str = "free"):
+        """Resolve passive joints and configure free/freeze behavior."""
+
         self.model = model
         self.joint_names = list(joint_names)
         self.mode = mode
@@ -210,12 +253,16 @@ class PassiveJointGroup:
         self._q_frozen: np.ndarray | None = None
 
     def snapshot(self, data: mujoco.MjData) -> None:
+        """Capture current passive joint positions for freeze mode."""
+
         if not self.handles:
             self._q_frozen = np.zeros(0)
             return
         self._q_frozen = np.asarray([data.qpos[h.qpos_addr] for h in self.handles], dtype=float)
 
     def enforce(self, data: mujoco.MjData) -> None:
+        """Re-apply frozen passive joint positions when mode is ``freeze``."""
+
         if self.mode != "freeze" or self._q_frozen is None:
             return
         for q, h in zip(self._q_frozen, self.handles):
@@ -223,6 +270,8 @@ class PassiveJointGroup:
             data.qvel[h.qvel_addr] = 0.0
 
     def print_mapping(self, title: str = "PassiveJointGroup") -> None:
+        """Print passive joint address mapping."""
+
         print(f"{title} mode={self.mode}:")
         if not self.handles:
             print("  <none>")
@@ -232,6 +281,8 @@ class PassiveJointGroup:
 
 
 def print_model_summary(model: mujoco.MjModel) -> None:
+    """Print joints, actuators, and equality constraints for XML inspection."""
+
     print("\nJoints:")
     for jid in range(model.njnt):
         name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_JOINT, jid)
