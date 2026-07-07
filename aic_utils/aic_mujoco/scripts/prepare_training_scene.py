@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
-"""Create the MuJoCo Warp training scene from the controller/viewer MJCF.
+"""Prepare the AIC insertion training scene from the controller/viewer MJCF.
 
-MuJoCo Warp does not support MuJoCo body plugins. The controller/viewer scene
-uses ``mujoco.elasticity.cable`` plugin instances on the cable bodies, so this
-script creates a separate Warp scene for headless training. It keeps bodies,
-joints, actuators, collision geoms, welds, and task geometry, but removes:
+The viewer/controller scene keeps the full AIC semantics, including the cable
+plugin. The headless training scene is a backend-compatible physics asset:
+robot, held SFP/LC plug, NIC/task board, joints, actuators, visual geoms,
+collision geoms, welds, and task geometry. MuJoCo Warp does not support the
+cable body plugin, so this preparation step rigidly attaches the plug to the
+gripper and removes:
 
 * top-level ``<extension>`` declarations
 * body-level ``<plugin .../>`` elements
-* visual-only geoms and visual assets
 * cameras, lights, and sensors
 
 The resulting files are:
@@ -22,7 +23,16 @@ Run from a new ``aic_eval`` distrobox terminal:
 cd /home/rmalhan/Software/ws_aic/src/aic
 pixi shell
 export PYTHONNOUSERSITE=1
-python3 aic_utils/aic_mujoco/scripts/prepare_warp_scene.py
+python3 aic_utils/aic_mujoco/scripts/prepare_training_scene.py
+
+Then run the training physics command:
+
+PYTHONPATH=/home/rmalhan/Software/ws_aic/src/aic/aic_utils/aic_mujoco \
+python3 aic_utils/aic_mujoco/scripts/train.py \
+  --num-envs 4096 \
+  --steps 1000 \
+  --log-interval 100 \
+  --device cuda
 """
 
 from __future__ import annotations
@@ -50,50 +60,6 @@ def remove_tags(root: ET.Element, tags: set[str]) -> None:
         for child in list(parent):
             if child.tag in tags:
                 parent.remove(child)
-
-
-def strip_visual_geoms(root: ET.Element) -> None:
-    """Remove visual-only geoms from the Warp training XML.
-
-    The Warp scene is a physics/training asset, not the Viser debug scene.
-    Keeping collision geoms lowers model size and avoids visual mesh overhead.
-    """
-
-    for parent in list(root.iter()):
-        for child in list(parent):
-            if child.tag != "geom":
-                continue
-            contype = child.attrib.get("contype")
-            conaffinity = child.attrib.get("conaffinity")
-            group = child.attrib.get("group")
-            name = child.attrib.get("name", "")
-            if contype == "0" and conaffinity == "0":
-                parent.remove(child)
-            elif group in {"0", "1", "2"} and "collision" not in name:
-                parent.remove(child)
-
-
-def strip_visual_assets(root: ET.Element) -> None:
-    """Keep only mesh assets still referenced by remaining collision geoms.
-
-    Args:
-        root: Robot or world XML root to mutate.
-
-    This prevents dangling mesh/material assets after visual geoms are removed.
-    """
-
-    used_meshes = {
-        elem.attrib["mesh"]
-        for elem in root.iter()
-        if elem.tag == "geom" and "mesh" in elem.attrib
-    }
-    remove_tags(root, {"visual", "sensor"})
-    for asset in list(root.findall("asset")):
-        for child in list(asset):
-            if child.tag != "mesh" or child.attrib.get("name") not in used_meshes:
-                asset.remove(child)
-        if len(list(asset)) == 0:
-            root.remove(asset)
 
 
 def find_body(root: ET.Element, name: str) -> ET.Element:
@@ -189,15 +155,13 @@ def main() -> int:
     source_world_root = ET.parse(world_in).getroot()
     attach_plug_to_robot(robot_root, source_world_root)
     remove_tags(robot_root, {"camera", "light"})
-    strip_visual_geoms(robot_root)
-    strip_visual_assets(robot_root)
+    remove_tags(robot_root, {"sensor"})
     robot_tree.write(robot_out, encoding="unicode", xml_declaration=False)
 
     tree = ET.ElementTree(source_world_root)
     world_root = source_world_root
     remove_tags(world_root, {"extension", "plugin", "camera", "light"})
-    strip_visual_geoms(world_root)
-    strip_visual_assets(world_root)
+    remove_tags(world_root, {"sensor"})
     tree.write(world_out, encoding="unicode", xml_declaration=False)
 
     scene_out.write_text(

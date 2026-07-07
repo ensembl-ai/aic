@@ -1,24 +1,33 @@
-"""Direct MuJoCo/MuJoCo Warp prototype stack for AIC insertion.
+"""Direct MuJoCo Warp stack for AIC insertion.
 
 This package is the default R&D path:
 
-  scene.xml / scene_warp.xml -> MuJoCo model -> reset/action/observation/reward
+  scene_warp.xml -> MuJoCo model -> MuJoCo Warp model/data -> batched stepping
 
-The plain MuJoCo vector env preserves the known-good Cartesian pre-insertion
-and impedance-control semantics. The Warp helpers validate the GPU-facing model
-directly with ``mujoco_warp`` without using MJLab manager/entity composition.
+The exported public API is Warp-first and does not expose the old CPU
+``mujoco.MjData`` vector prototype as a training interface.
 """
 
-from .env import AicInsertionVecEnv, AicInsertionVecEnvConfig
-from .rsl_rl_cfg import make_rsl_rl_direct_ppo_cfg
-from .rsl_rl_wrapper import RslRlDirectWrapper
-from .warp_smoke import WarpSmokeConfig, run_warp_smoke
+from .physics import (
+    DebugJointPolicy,
+    SampleObservation,
+    TrainingPhysicsConfig,
+    apply_debug_joint_policy,
+    initialize_data_from_config,
+    make_debug_joint_policy,
+    run_training_physics,
+    sample_observations,
+    task_entity_ids,
+)
 
 __all__ = [
-    "AicInsertionVecEnv",
-    "AicInsertionVecEnvConfig",
-    "RslRlDirectWrapper",
-    "WarpSmokeConfig",
-    "make_rsl_rl_direct_ppo_cfg",
-    "run_warp_smoke",
+    "DebugJointPolicy",
+    "SampleObservation",
+    "TrainingPhysicsConfig",
+    "apply_debug_joint_policy",
+    "initialize_data_from_config",
+    "make_debug_joint_policy",
+    "run_training_physics",
+    "sample_observations",
+    "task_entity_ids",
 ]

@@ -761,156 +761,97 @@ There are two XMLs:
 
 ```text
 mjcf/scene.xml       known-good semantic scene with cable, sensors, and viewer/debug behavior
-mjcf/scene_warp.xml  MuJoCo Warp preflight scene with cable plugin removed and robot actuators kept
+mjcf/scene_warp.xml  training scene with cable plugin removed, visuals preserved, and robot actuators kept
 ```
 
-Warp does not support the MuJoCo cable body plugin, so `prepare_warp_scene.py`
+Warp does not support the MuJoCo cable body plugin, so `prepare_training_scene.py`
 creates `scene_warp.xml` with the SFP/LC plug rigidly held by the gripper.
-The generated Warp scene keeps the robot joints and actuators. The prototype
-control env still defaults to `scene.xml` so the live reset, force/torque, and
-contact semantics match the viewer/debug scene.
+The generated training scene keeps visual meshes for debug rendering and
+collision geoms for physics. Training-facing commands should use
+`scene_warp.xml` and `mujoco_warp`; the old Python loop over CPU
+`mujoco.MjData` is not part of the active training path.
 
-Fresh run from a new `aic_eval` distrobox terminal. Source ROS only to make
-`EnsemblRobot` find `aic_description`, `ur_description`, and the other robot
-description packages for pre-insertion IK. No ROS nodes are launched.
+Fresh run from a new terminal. These direct MuJoCo/Warp scripts do not launch
+ROS nodes and do not require ROS sourcing; they load the prepared MJCF and the
+training config directly.
 
 ```bash
 cd /home/rmalhan/Software/ws_aic/src/aic
 pixi shell
-
-source /opt/ros/kilted/setup.bash
-source /home/rmalhan/Software/ws_aic/install/setup.bash
 
 export PYTHONNOUSERSITE=1
 export MUJOCO_PLUGIN_PATH=/home/rmalhan/Software/ws_aic/install/opt/mujoco_vendor/lib
 export XDG_CACHE_HOME=/tmp/$USER-cache
 mkdir -p "$XDG_CACHE_HOME"
 
-python3 aic_utils/aic_mujoco/scripts/prepare_warp_scene.py
+python3 aic_utils/aic_mujoco/scripts/prepare_training_scene.py
 
-PYTHONPATH=/home/rmalhan/Software/ws_aic/src/aic/aic_utils/aic_mujoco:/home/rmalhan/Software/ws_aic/src/aic/aic_model \
-python3 aic_utils/aic_mujoco/scripts/train_warp_smoke.py \
-  --num-envs 4 \
-  --steps 20 \
-  --warp-steps 1 \
+PYTHONPATH=/home/rmalhan/Software/ws_aic/src/aic/aic_utils/aic_mujoco \
+python3 aic_utils/aic_mujoco/scripts/train.py \
+  --config /home/rmalhan/Software/ws_aic/src/aic/aic_utils/aic_mujoco/configs/experiments/train.json \
+  --num-envs 4096 \
+  --steps 1000 \
+  --log-interval 100 \
   --device cuda
 ```
 
 Expected output:
 
 ```text
-[warp-smoke] direct MuJoCo Warp preflight
+[training-physics] direct MuJoCo Warp batched physics
+  device: cuda
+  num_envs: ...
+  steps: ...
+  physics_steps: ...
+  step_wall_s: ...
+  physics_steps_per_sec: ...
+  aggregate_sim_seconds_per_wall_second: ...
+  reward mean: ...
+  progress mean: ...
+  lateral error mean: ...
+  contact normal force max: ...
+  max penetration: ...
+  action norm mean: ...
+  qpos std mean across sample: ...
   nbody: ...
   njnt: ...
   sim_time_env0: ...
-
-[prototype-env] direct MuJoCo vector control smoke
-  obs_shape=(4, 31) num_actions=3 ...
-  env_steps_per_s: ...
-  phys_steps_per_s: ...
-  reward_mean: ...
-  extras: ...
 ```
 
-Visualize the same prototype behavior in Viser or the normal MuJoCo viewer:
+Visualize sampled training envs in Viser while physics runs on CUDA:
 
 ```bash
-cd /home/rmalhan/Software/ws_aic/src/aic
-pixi shell
-
-source /opt/ros/kilted/setup.bash
-source /home/rmalhan/Software/ws_aic/install/setup.bash
-
-export PYTHONNOUSERSITE=1
-export MUJOCO_PLUGIN_PATH=/home/rmalhan/Software/ws_aic/install/opt/mujoco_vendor/lib
-
-PYTHONPATH=/home/rmalhan/Software/ws_aic/src/aic/aic_utils/aic_mujoco:/home/rmalhan/Software/ws_aic/src/aic/aic_model \
-python3 aic_utils/aic_mujoco/scripts/viz_warp_envs.py \
-  --num-envs 16 \
+PYTHONPATH=/home/rmalhan/Software/ws_aic/src/aic/aic_utils/aic_mujoco \
+python3 aic_utils/aic_mujoco/scripts/visualize.py \
+  --config /home/rmalhan/Software/ws_aic/src/aic/aic_utils/aic_mujoco/configs/experiments/train.json \
+  --num-envs 4096 \
+  --display-envs 16 \
+  --steps-per-frame 4 \
+  --fps 30 \
   --device cuda
 ```
 
-Open `http://localhost:8080`. The Viser view lays out all env copies in a
-flat floor grid and shows the real MuJoCo visual geoms selected by
-`--geom-mode visual`. It draws robot, held LC/SFP plug, NIC/task board, and
-enclosure visuals only. It does not draw collision geoms, frames, labels, fake
-boxes, force arrows, floor, room walls, or cable tail.
-
-The default demo moves downward by `0.15 m`, then holds. The policy/action path
-clips each action component to `[-1, 1]`, so the visualizer treats
-`abs(--action-z) > 1` as a speed multiplier by running multiple clipped env
-steps per rendered frame. For example, `--action-z -5` runs five clipped
-downward env steps per frame. To make the browser playback update faster,
-increase `--fps`:
-
-```bash
-PYTHONPATH=/home/rmalhan/Software/ws_aic/src/aic/aic_utils/aic_mujoco:/home/rmalhan/Software/ws_aic/src/aic/aic_model \
-python3 aic_utils/aic_mujoco/scripts/viz_warp_envs.py \
-  --num-envs 16 \
-  --action-z -5 \
-  --fps 40 \
-  --device cuda
-```
-
-This is a visual debugger, not the live PPO training process.
-
-For one selected env in the native MuJoCo viewer:
-
-```bash
-PYTHONPATH=/home/rmalhan/Software/ws_aic/src/aic/aic_utils/aic_mujoco:/home/rmalhan/Software/ws_aic/src/aic/aic_model \
-python3 aic_utils/aic_mujoco/scripts/viz_warp_envs.py \
-  --layout mujoco \
-  --env-id 0 \
-  --device cuda
-```
+Open `http://localhost:8080`. Physics still advances for all `--num-envs`
+worlds through MuJoCo Warp. Viser downloads only the selected `--display-envs`
+worlds each frame, so it is a debug view rather than part of the training
+inner loop. Viser renders useful visual geoms only: robot, held plug/module,
+task board, NIC mount/card, and tabletop. Collision geoms plus floor/wall and
+enclosure shells remain in the model for physics but are hidden from this debug
+view. Increase ``--steps-per-frame`` to fast-forward playback; decrease it for
+smoother browser motion.
 
 Current layout:
 
 ```text
-aic_mujoco/warp/env.py          direct vector env, reset/action/obs/reward contract
-aic_mujoco/warp/warp_smoke.py   direct MuJoCo Warp model/data preflight
-aic_mujoco/warp/rsl_rl_wrapper.py  RSL-RL VecEnv adapter
-aic_mujoco/warp/rsl_rl_cfg.py      minimal PPO actor/critic config
-scripts/train_warp_smoke.py     prototype training-loop smoke and throughput stats
-scripts/train_rsl_rl_direct.py   real RSL-RL PPO training over the direct env
-scripts/viz_warp_envs.py        Viser grid for all envs or MuJoCo viewer for one env
-```
-
-Run a tiny real PPO training job:
-
-```bash
-cd /home/rmalhan/Software/ws_aic/src/aic
-pixi shell
-
-source /opt/ros/kilted/setup.bash
-source /home/rmalhan/Software/ws_aic/install/setup.bash
-
-export PYTHONNOUSERSITE=1
-export MUJOCO_PLUGIN_PATH=/home/rmalhan/Software/ws_aic/install/opt/mujoco_vendor/lib
-export XDG_CACHE_HOME=/tmp/$USER-cache
-mkdir -p "$XDG_CACHE_HOME"
-
-PYTHONPATH=/home/rmalhan/Software/ws_aic/src/aic/aic_utils/aic_mujoco:/home/rmalhan/Software/ws_aic/src/aic/aic_model \
-python3 aic_utils/aic_mujoco/scripts/train_rsl_rl_direct.py \
-  --num-envs 4 \
-  --max-iterations 2 \
-  --num-steps-per-env 4 \
-  --device cuda
-```
-
-This creates:
-
-```text
-aic_utils/aic_mujoco/runs/<timestamp>_aic_direct_ppo/
-  events.out.tfevents...
-  model_*.pt
-  final.pt
+aic_mujoco/warp/physics.py      direct MuJoCo Warp model/data stepping
+scripts/prepare_training_scene.py   creates scene_warp.xml from the controller/viewer scene
+scripts/train.py           headless MuJoCo Warp physics throughput command
+scripts/visualize.py       Viser debug view backed by MuJoCo Warp physics
 ```
 
 Next upgrade:
 
 ```text
-replace the plain MuJoCo per-env data copies in env.py
-with batched MuJoCo Warp state tensors using the same reset/action/obs/reward API,
-then wrap that API for RSL-RL PPO.
+replace the built-in debug joint policy with the learned policy action tensor,
+add reset masks/episode accounting, and wrap the same batched state for RSL-RL.
 ```

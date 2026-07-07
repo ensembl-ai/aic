@@ -441,7 +441,7 @@ The existing local MuJoCo stack already contains the pieces that matter:
 - force/torque and contact observations,
 - progress, force, penetration, and future SDF reward utilities,
 - modular JSON config composition,
-- direct MuJoCo Warp model/data smoke testing.
+- direct MuJoCo Warp model/data physics stepping.
 
 Those pieces should be lifted into a batched MuJoCo Warp env, not replaced
 with a ROS controller process.
@@ -621,17 +621,13 @@ aic_mujoco.mjlab utilities
   rewards.py
   logging.py
 
-aic_mujoco.warp direct prototype layer
-  env.py
-  warp_smoke.py
-  rsl_rl_wrapper.py
-  rsl_rl_cfg.py
+aic_mujoco.warp direct physics layer
+  physics.py
 
 script layer
-  prepare_warp_scene.py
-  train_warp_smoke.py
-  train_rsl_rl_direct.py
-  viz_warp_envs.py
+  prepare_training_scene.py
+  train.py
+  visualize.py
 ```
 
 The production training target keeps the batch in MuJoCo Warp device state,
@@ -656,7 +652,7 @@ trainer = RSL-RL
 Missing MuJoCo Warp, RSL-RL, or CUDA is a configuration error. The code
 should fail directly rather than switching to another backend.
 
-The RSL-RL wrapper should expose the expected vectorized interface:
+The future RSL-RL wrapper should expose the expected vectorized interface:
 
 ```text
 num_envs
@@ -671,24 +667,14 @@ get_observations()
 The training script should be headless:
 
 ```text
-scripts/train_warp_smoke.py
-  loads env config
-  runs direct MuJoCo Warp preflight
-  runs prototype env smoke loop
-  logs throughput and task metrics
+scripts/train.py
+  loads scene_warp.xml
+  runs direct MuJoCo Warp batched physics stepping
+  logs physics throughput and aggregate simulated seconds per wall second
 
-scripts/train_rsl_rl_direct.py
-  creates AicInsertionVecEnv
-  wraps it as an RSL-RL VecEnv
-  constructs MLP actor, MLP critic, PPO, rollout storage, and optimizer
-  saves TensorBoard logs and checkpoints
-```
-
-The play/debug script should be separate:
-
-```text
-scripts/viz_warp_envs.py
-  runs selected env copy with MuJoCo viewer
+scripts/visualize.py
+  runs the same batched physics state on MuJoCo Warp/CUDA
+  downloads only selected worlds to host MjData for Viser rendering
 ```
 
 A Viser dashboard can be added later as a debug tool, but it should sample a
@@ -850,7 +836,7 @@ direct path is:
 scene.xml / scene_warp.xml
   -> mujoco.MjModel
   -> reset/action/observation/reward modules
-  -> MuJoCo Warp smoke preflight
+  -> MuJoCo Warp physics command
   -> direct RSL-RL wrapper later
 ```
 
@@ -858,13 +844,12 @@ The reason is practical, not philosophical: the plain MuJoCo scene, reset, IK,
 and controller path works, while the MJLab entity/spec attach layer introduced
 native failures before any useful policy-training signal was available.
 
-The active prototype code lives in:
+The active Warp code lives in:
 
 ```text
-aic_mujoco/warp/env.py          direct vector env with the AIC task contract
-aic_mujoco/warp/warp_smoke.py   direct MuJoCo Warp model/data smoke test
-scripts/train_warp_smoke.py     headless prototype smoke and throughput stats
-scripts/viz_warp_envs.py        MuJoCo viewer for one selected env copy
+aic_mujoco/warp/physics.py      direct MuJoCo Warp model/data stepping
+scripts/prepare_training_scene.py   generates scene_warp.xml
+scripts/train.py           headless MuJoCo Warp throughput command
 ```
 
 Two XMLs have different roles:
@@ -878,11 +863,10 @@ scene_warp.xml:
   because MuJoCo Warp does not support the cable body plugin
 ```
 
-The prototype env currently uses one shared `MjModel` and multiple `MjData`
-copies. That is not the final high-throughput implementation, but it preserves
-the correct task semantics in a readable place. The next implementation step is
-to replace the per-env `MjData` loop with batched MuJoCo Warp state while
-keeping the same API:
+The old CPU prototype used one shared `MjModel` and multiple `MjData` copies.
+That path is no longer the active training interface. The next implementation
+step is to add policy actions, observations, rewards, dones, reset masks, and
+RSL-RL wrapping directly around batched MuJoCo Warp state:
 
 ```text
 reset_idx(env_ids)
@@ -894,15 +878,16 @@ obs, reward, done, extras = step(action)
 
 1. Keep `hold_fixed_target.py` and `demo_joint_target_control.py` as the visual
    reference debuggers.
-2. Keep the direct `aic_mujoco.warp` prototype env as the source of truth for
-   reset/action/observation/reward semantics.
+2. Keep the visual/debug scripts as the source of truth for reset frame
+   semantics until the same logic is implemented directly on batched training
+   physics state.
 3. Use 3D Cartesian delta actions only.
 4. Expose low-dimensional observations first: joint state, TCP/plug/port
    positions, zeroed force/torque, max penetration, previous action.
 5. Add simple progress, lateral error, force, penetration, and action rewards.
-6. Run `prepare_warp_scene.py` and `train_warp_smoke.py` before any PPO work.
-7. Replace Python `MjData` loops with batched MuJoCo Warp data/state.
-8. Wrap the direct env API for RSL-RL PPO.
+6. Run `prepare_training_scene.py` and `train.py` before any PPO work.
+7. Implement batched reset/action/observation/reward directly on MuJoCo Warp data/state.
+8. Wrap the Warp env API for RSL-RL PPO.
 9. Train headless with small `num_envs`.
 10. Scale `num_envs` upward and measure throughput.
 11. Add SDF reward after the basic pipeline works.
@@ -914,7 +899,7 @@ obs, reward, done, extras = step(action)
 
 ## Open Technical Risks
 
-- MuJoCo Warp does not support the cable body plugin, so the Warp scene uses a
+- MuJoCo Warp does not support the cable body plugin, so the training scene uses a
   rigidly held plug and no cable plugin.
 - The current generated XML uses AIC assets converted from Gazebo/SDF. Asset
   paths and scene composition need to stay robust across scene regeneration.

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Lean pre-insertion Cartesian policy demo.
 
-This script is intentionally a thin demo over the local prototype modules:
+This script is intentionally a thin visual reference over the local reset,
+step, observation, and reward modules:
 
   reset:
     reset to the SFP-tip pre-insertion pose and zero the F/T sensor baseline
@@ -14,9 +15,9 @@ This script is intentionally a thin demo over the local prototype modules:
     read reset-zeroed force/torque and camera health diagnostics
 
 The demo policy is deliberately boring: start at pre-insertion, then walk the
-TCP down in world Z. That gives us the same behavior we were testing before,
-but with code organized closer to the reset/step/observation split we need for
-policy training.
+TCP down in world Z. It runs the full semantic ``scene.xml`` in regular MuJoCo
+so we can inspect reset frames, force/torque zeroing, contacts, and controller
+behavior. It is not the high-throughput MuJoCo Warp training loop.
 
 Fresh run from a new ``aic_eval`` distrobox terminal:
 
@@ -170,7 +171,7 @@ def make_parser() -> argparse.ArgumentParser:
 def main() -> int:
     """Run a visible single-environment reset, observation, and action loop.
 
-    The script is the human-facing smoke test for the same building blocks used
+    The script is the human-facing sanity check for the same building blocks used
     by training: pre-insertion IK reset, zeroed wrench observation, Cartesian
     delta stepping through differential IK, impedance torque control, reward
     reporting, and MuJoCo viewer synchronization.
