@@ -38,6 +38,11 @@ Useful demo knobs:
   --step-size 0.001
   --duration 10
   --no-camera-check
+  --record --record-dir presentation/videos
+
+Recording writes synchronized ``insertion_overview.mp4`` and
+``insertion_center_camera.mp4`` files. The overview uses a repeatable free
+camera; the center-camera video uses the named wrist camera in the MJCF.
 
 The config supplies the robot joints, controller gains, pre-insertion frame
 names, F/T sensor names, and reset-time zeroing settings. ROS is sourced only
@@ -48,10 +53,12 @@ are launched.
 from __future__ import annotations
 
 import argparse
+from contextlib import nullcontext
 import time
 from pathlib import Path
 from typing import Any
 
+import imageio.v2 as imageio
 import mujoco
 import mujoco.viewer
 import numpy as np
@@ -91,6 +98,101 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 DEFAULT_CONFIG_PATH = (
     SCRIPT_DIR.parent / "configs" / "experiments" / "demo_cartesian_down.json"
 )
+
+
+def xyz(value: str) -> tuple[float, float, float]:
+    """Parse a comma-separated XYZ vector from a command-line argument."""
+    try:
+        result = tuple(float(item.strip()) for item in value.split(","))
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("expected three comma-separated numbers") from exc
+    if len(result) != 3:
+        raise argparse.ArgumentTypeError("expected three comma-separated numbers")
+    return result
+
+
+class DualVideoRecorder:
+    """Write synchronized overview and robot-camera frames from one MjData."""
+
+    def __init__(
+        self,
+        model: mujoco.MjModel,
+        output_dir: Path,
+        *,
+        fps: float,
+        overview_width: int,
+        overview_height: int,
+        center_width: int,
+        center_height: int,
+        center_camera: str,
+        lookat: tuple[float, float, float],
+        distance: float,
+        azimuth: float,
+        elevation: float,
+    ) -> None:
+        if fps <= 0:
+            raise ValueError("record FPS must be positive")
+        if min(overview_width, overview_height, center_width, center_height) <= 0:
+            raise ValueError("record dimensions must be positive")
+        if mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_CAMERA, center_camera) < 0:
+            raise ValueError(f"record camera not found in model: {center_camera!r}")
+
+        output_dir.mkdir(parents=True, exist_ok=True)
+        self.output_dir = output_dir
+        self.fps = float(fps)
+        self.frame_period = 1.0 / self.fps
+        self.next_frame_time = 0.0
+        self.frame_count = 0
+        self.center_camera = center_camera
+
+        # MuJoCo's off-screen framebuffer must fit the largest requested view.
+        model.vis.global_.offwidth = max(overview_width, center_width)
+        model.vis.global_.offheight = max(overview_height, center_height)
+        self.overview_renderer = mujoco.Renderer(
+            model, height=overview_height, width=overview_width
+        )
+        self.center_renderer = mujoco.Renderer(
+            model, height=center_height, width=center_width
+        )
+
+        self.overview_camera = mujoco.MjvCamera()
+        mujoco.mjv_defaultCamera(self.overview_camera)
+        self.overview_camera.type = mujoco.mjtCamera.mjCAMERA_FREE
+        self.overview_camera.lookat[:] = lookat
+        self.overview_camera.distance = float(distance)
+        self.overview_camera.azimuth = float(azimuth)
+        self.overview_camera.elevation = float(elevation)
+
+        writer_options = {
+            "fps": self.fps,
+            "codec": "libx264",
+            "quality": 8,
+            "macro_block_size": 2,
+            "ffmpeg_log_level": "error",
+        }
+        self.overview_path = output_dir / "insertion_overview.mp4"
+        self.center_path = output_dir / "insertion_center_camera.mp4"
+        self.overview_writer = imageio.get_writer(self.overview_path, **writer_options)
+        self.center_writer = imageio.get_writer(self.center_path, **writer_options)
+
+    def capture(self, data: mujoco.MjData, *, force: bool = False) -> None:
+        """Append one synchronized pair when the simulation-time clock is due."""
+        sim_time = float(data.time)
+        if not force and sim_time + 1e-12 < self.next_frame_time:
+            return
+        self.overview_renderer.update_scene(data, camera=self.overview_camera)
+        self.center_renderer.update_scene(data, camera=self.center_camera)
+        self.overview_writer.append_data(self.overview_renderer.render())
+        self.center_writer.append_data(self.center_renderer.render())
+        self.frame_count += 1
+        self.next_frame_time = sim_time + self.frame_period
+
+    def close(self) -> None:
+        """Flush encoders and release the two MuJoCo render contexts."""
+        self.overview_writer.close()
+        self.center_writer.close()
+        self.overview_renderer.close()
+        self.center_renderer.close()
 
 
 def print_sites_and_bodies(model: mujoco.MjModel) -> None:
@@ -163,6 +265,19 @@ def make_parser() -> argparse.ArgumentParser:
     parser.add_argument("--duration", type=float, default=0.0)
     parser.add_argument("--log-period", type=float, default=None)
     parser.add_argument("--no-camera-check", action="store_true")
+    parser.add_argument("--no-viewer", action="store_true")
+    parser.add_argument("--record", action="store_true")
+    parser.add_argument("--record-dir", type=Path, default=Path("presentation/videos"))
+    parser.add_argument("--record-fps", type=float, default=30.0)
+    parser.add_argument("--record-overview-width", type=int, default=1920)
+    parser.add_argument("--record-overview-height", type=int, default=1080)
+    parser.add_argument("--record-center-width", type=int, default=1152)
+    parser.add_argument("--record-center-height", type=int, default=1024)
+    parser.add_argument("--record-center-camera", default="center_camera")
+    parser.add_argument("--record-lookat", type=xyz, default=(0.18, 0.0, 1.18))
+    parser.add_argument("--record-distance", type=float, default=1.7)
+    parser.add_argument("--record-azimuth", type=float, default=200.0)
+    parser.add_argument("--record-elevation", type=float, default=-28.0)
     parser.add_argument("--print-model", action="store_true")
     parser.add_argument("--print-sites", action="store_true")
     return parser
@@ -248,6 +363,24 @@ def main() -> int:
             camera_names=list(cfg["camera_names"]),
         )
 
+    recorder = None
+    if args.record:
+        recorder = DualVideoRecorder(
+            model,
+            args.record_dir.expanduser().resolve(),
+            fps=args.record_fps,
+            overview_width=args.record_overview_width,
+            overview_height=args.record_overview_height,
+            center_width=args.record_center_width,
+            center_height=args.record_center_height,
+            center_camera=args.record_center_camera,
+            lookat=args.record_lookat,
+            distance=args.record_distance,
+            azimuth=args.record_azimuth,
+            elevation=args.record_elevation,
+        )
+        recorder.capture(data, force=True)
+
     diagnostics = reset_result.preinsert_diagnostics
     desired_sfp_tip = diagnostics["desired_world_T_sfp_tip"]
     actual_sfp_tip = diagnostics["actual_world_T_sfp_tip_after_payload_set"]
@@ -291,8 +424,12 @@ def main() -> int:
         f"  torque_zero:          {None if reset_result.torque_bias is None else reset_result.torque_bias.tolist()}"
     )
     print("  gripper controller:   none")
+    if recorder is not None:
+        print(f"  record overview:      {recorder.overview_path}")
+        print(f"  record center camera: {recorder.center_path}")
+        print(f"  record fps:           {recorder.fps:g}")
     print()
-    print("Close viewer to stop.")
+    print("Press Ctrl-C to stop." if args.no_viewer else "Close viewer to stop.")
     print()
 
     waypoint_i = 0
@@ -305,8 +442,18 @@ def main() -> int:
     max_steps_per_waypoint = int(cfg["max_steps_per_waypoint"])
 
     try:
-        with mujoco.viewer.launch_passive(model, data) as viewer:
-            while viewer.is_running():
+        viewer_context = (
+            nullcontext(None)
+            if args.no_viewer
+            else mujoco.viewer.launch_passive(model, data)
+        )
+        with viewer_context as viewer:
+            if viewer is not None:
+                viewer.cam.lookat[:] = args.record_lookat
+                viewer.cam.distance = args.record_distance
+                viewer.cam.azimuth = args.record_azimuth
+                viewer.cam.elevation = args.record_elevation
+            while viewer is None or viewer.is_running():
                 t = time.time() - t0
                 if args.duration > 0.0 and t >= args.duration:
                     break
@@ -325,7 +472,10 @@ def main() -> int:
                     cfg=step_cfg,
                 )
                 physics_step += 1
-                viewer.sync()
+                if recorder is not None:
+                    recorder.capture(data)
+                if viewer is not None:
+                    viewer.sync()
 
                 steps_on_waypoint += 1
                 if (
@@ -431,6 +581,12 @@ def main() -> int:
     finally:
         if camera_checker is not None:
             camera_checker.close()
+        if recorder is not None:
+            recorder.close()
+            print(
+                f"Recorded {recorder.frame_count} synchronized frames to "
+                f"{recorder.output_dir}"
+            )
 
     return 0
 
