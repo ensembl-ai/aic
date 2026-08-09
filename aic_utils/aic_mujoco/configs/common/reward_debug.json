@@ -1,7 +1,0 @@
-{
-  "reward_progress_weight": 1.0,
-  "reward_force_weight": 0.05,
-  "reward_action_weight": 0.01,
-  "reward_force_limit": 15.0,
-  "terminate_force_limit": 20.0
-}

@@ -1,0 +1,92 @@
+{
+  "scene": {
+    "model_name": "aic_sfp_nic_warp",
+    "source_robot": "../mjcf/aic_robot.xml",
+    "source_world": "../mjcf/aic_world.xml",
+    "output": "../mjcf/scene_warp.xml",
+    "gripper_fixed_position": 0.0073,
+    "names": {
+      "robot_root_body": "tabletop",
+      "tool_body": "ati/tool_link",
+      "left_finger_body": "gripper/hande_finger_link_l",
+      "right_finger_body": "gripper/hande_finger_link_r",
+      "left_finger_joint": "gripper/left_finger_joint",
+      "right_finger_joint": "gripper/right_finger_joint",
+      "sfp_source_body": "sfp_module_link",
+      "lc_source_body": "lc_plug_link",
+      "board_source_body": "task_board_base_link",
+      "nic_source_body": "nic_card_mount_0::nic_card_mount_link",
+      "board_body": "task_board",
+      "nic_body": "target_nic",
+      "light": "ceiling_01",
+      "joints": [
+        "shoulder_pan_joint",
+        "shoulder_lift_joint",
+        "elbow_joint",
+        "wrist_1_joint",
+        "wrist_2_joint",
+        "wrist_3_joint"
+      ],
+      "actuators": [
+        "shoulder_pan_joint_motor",
+        "shoulder_lift_joint_motor",
+        "elbow_joint_motor",
+        "wrist_1_joint_motor",
+        "wrist_2_joint_motor",
+        "wrist_3_joint_motor"
+      ],
+      "cameras": {
+        "center": "center_camera",
+        "left": "left_camera",
+        "right": "right_camera"
+      },
+      "sensors": {
+        "force": "AtiForceTorqueSensor_force",
+        "torque": "AtiForceTorqueSensor_torque"
+      }
+    }
+  },
+  "physics": {
+    "timestep": 0.002,
+    "integrator": "implicitfast",
+    "solver": "Newton",
+    "iterations": 200,
+    "tolerance": 0.000001,
+    "gravity": [0.0, 0.0, -9.8],
+    "nconmax": 256,
+    "njmax": 512
+  },
+  "control": {
+    "home": [-0.1597, -1.3542, -1.6648, -1.6933, 1.571, 1.411],
+    "reset_perturbation_lower": [-0.02, -0.02, -0.02, -0.02, -0.02, -0.02],
+    "reset_perturbation_upper": [0.02, 0.02, 0.02, 0.02, 0.02, 0.02],
+    "stiffness": [100.0, 100.0, 100.0, 50.0, 50.0, 50.0],
+    "damping": [40.0, 40.0, 40.0, 15.0, 15.0, 15.0],
+    "torque_limits": [120.0, 120.0, 120.0, 60.0, 60.0, 60.0]
+  },
+  "domain_randomization": {
+    "board_position_lower": [0.16, -0.21, 1.14],
+    "board_position_upper": [0.16, 0.05, 1.14],
+    "board_yaw_deviation_lower": -0.041592653589793,
+    "board_yaw_deviation_upper": 0.041592653589793,
+    "nic_rail_indices": [2, 4],
+    "nic_rail_x_base": -0.081418,
+    "nic_rail_y_by_index": [-0.1745, -0.1345, -0.0945, -0.0545, -0.0145],
+    "nic_rail_z": 0.012,
+    "nic_translation_lower": -0.0215,
+    "nic_translation_upper": 0.0234
+  },
+  "sensors": {
+    "physics_sample_hz": 100,
+    "publication_hz": 50,
+    "tare_settle_steps": 250,
+    "tare_sample_count": 50
+  },
+  "cameras": {
+    "width": 1152,
+    "height": 1024,
+    "fps": 20,
+    "use_textures": true,
+    "use_shadows": false
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "physics": {
+    "device": "cuda:0",
+    "graph_capture": true
+  },
+  "runtime": {
+    "num_envs": 2,
+    "seed": 7
+  },
+  "visualization": {
+    "enabled": true,
+    "host": "127.0.0.1",
+    "port": 8080,
+    "env_ids": "all",
+    "jpeg_quality": 85,
+    "realtime": true,
+    "environment_spacing": [2.0, 0.0, 0.0],
+    "initial_camera_position": [2.5, -3.0, 2.0],
+    "initial_camera_look_at": [0.0, 0.0, 1.0]
+  },
+  "recording": {
+    "enabled": false,
+    "output_directory": "../recordings",
+    "env_ids": [0],
+    "codec": "libx264"
+  }
+}

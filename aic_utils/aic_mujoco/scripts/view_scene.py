@@ -89,7 +89,6 @@ def launch_viewer(scene_path: str):
 
 
 def main():
-    """Parse the scene path and launch the passive MuJoCo viewer."""
     parser = argparse.ArgumentParser(
         description="Launch MuJoCo viewer with an MJCF scene file",
         formatter_class=argparse.RawDescriptionHelpFormatter,

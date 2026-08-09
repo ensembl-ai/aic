@@ -62,44 +62,7 @@ python3 -c "import sdformat; print('sdformat OK')"
 python3 -c "from gz.math import Vector3d; print('gz.math OK')"
 ```
 
-#### 2. Install MuJoCo Policy-Training Geometry Dependencies
-
-The direct prototype reward utilities use established geometry libraries rather
-than custom nearest-point or signed-distance implementations:
-
-- `trimesh`: mesh loading, surface sampling, and signed-distance/proximity queries
-- `scipy`: numerical routines and proximity support
-- `rtree`: spatial acceleration used by `trimesh.proximity`
-
-If you are using the AIC pixi environment, these are listed in the root
-`pixi.toml`. Refresh the environment from `/home/rmalhan/Software/ws_aic/src/aic`:
-
-```bash
-cd /home/rmalhan/Software/ws_aic/src/aic
-pixi install
-pixi shell
-```
-
-If you are using a separate Python environment:
-
-```bash
-python3 -m pip install trimesh scipy rtree
-```
-
-Verify:
-
-```bash
-python3 - <<'PY'
-import trimesh
-import scipy
-import rtree
-print("trimesh", trimesh.__version__)
-print("scipy", scipy.__version__)
-print("rtree OK")
-PY
-```
-
-#### 3. Build the Converter
+#### 2. Build the Converter
 
 Build the `sdformat_mjcf` package:
 
@@ -243,55 +206,6 @@ simulate ~/ws_aic/src/aic/aic_utils/aic_mujoco/mjcf/scene.xml
 
 ---
 
-### Prototype R&D Configs
-
-The prototype MuJoCo policy-training scripts use composable JSON configs:
-
-```text
-configs/common/
-  ur5e_control.json        robot joints, passive joints, impedance gains
-  preinsert_sfp_nic.json   SFP/NIC frame names and pre-insertion height
-  sensors.json             force/torque sensor names and zeroing settings
-  cameras.json             debug camera names
-  reward_debug.json        temporary reward/log thresholds and weights
-
-configs/experiments/
-  hold_preinsert.json      fixed-target pre-insertion hold demo
-  demo_cartesian_down.json Cartesian Z-down policy/reward debug demo
-```
-
-Config files support an `include` list. Includes are resolved relative to the
-file declaring them, and later values override earlier values. This keeps robot
-constants separate from task frames, sensors, rewards, and per-demo settings.
-
-Run the Cartesian policy/reward debug demo:
-
-```bash
-cd /home/rmalhan/Software/ws_aic/src/aic
-pixi shell
-
-PYTHONPATH=/home/rmalhan/Software/ws_aic/src/aic/aic_utils/aic_mujoco:/home/rmalhan/Software/ws_aic/src/aic/aic_model \
-python3 aic_utils/aic_mujoco/scripts/demo_joint_target_control.py \
-  --xml /home/rmalhan/Software/ws_aic/src/aic/aic_utils/aic_mujoco/mjcf/scene.xml
-```
-
-Run the fixed pre-insertion hold demo:
-
-```bash
-cd /home/rmalhan/Software/ws_aic/src/aic
-pixi shell
-
-PYTHONPATH=/home/rmalhan/Software/ws_aic/src/aic/aic_utils/aic_mujoco:/home/rmalhan/Software/ws_aic/src/aic/aic_model \
-python3 aic_utils/aic_mujoco/scripts/hold_fixed_target.py \
-  --xml /home/rmalhan/Software/ws_aic/src/aic/aic_utils/aic_mujoco/mjcf/scene.xml
-```
-
-Pass `--config path/to/experiment.json` only when you want to run a different
-experiment config. Use CLI flags like `--duration 10` or `--down-distance 0.03`
-as temporary overrides.
-
----
-
 ## Part 2: MuJoCo with ROS 2 Control
 
 ![](../../../media/wave_arm_policy_mujoco.gif)
@@ -379,8 +293,7 @@ The `aic_mujoco_bringup.launch.py` launch file starts MuJoCo simulation with ros
 # terminal 1: Start the Zenoh router if not already running
 source ~/ws_aic/install/setup.bash
 export RMW_IMPLEMENTATION=rmw_zenoh_cpp
-export ZENOH_ROUTER_CONFIG_URI=~/ws_aic/src/aic/docker/aic_eval/aic_zenoh_config.json5
-export ZENOH_CONFIG_OVERRIDE='mode="router";listen/endpoints=["tcp/[::]:7447"];connect/endpoints=[];routing/router/peers_failover_brokering=true;transport/shared_memory/enabled=false'
+export ZENOH_CONFIG_OVERRIDE='transport/shared_memory/enabled=true'
 ros2 run rmw_zenoh_cpp rmw_zenohd
 ```
 
@@ -388,9 +301,7 @@ ros2 run rmw_zenoh_cpp rmw_zenohd
 # terminal 2: Launch MuJoCo simulation with ros2_control
 source ~/ws_aic/install/setup.bash
 export RMW_IMPLEMENTATION=rmw_zenoh_cpp
-export ZENOH_SESSION_CONFIG_URI=~/ws_aic/src/aic/docker/aic_eval/aic_zenoh_config.json5
-export ZENOH_CONFIG_OVERRIDE='connect/endpoints=["tcp/127.0.0.1:7447"];transport/shared_memory/enabled=false'
-export ZENOH_ROUTER_CHECK_ATTEMPTS=-1
+export ZENOH_CONFIG_OVERRIDE='transport/shared_memory/enabled=true'
 ros2 launch aic_mujoco aic_mujoco_bringup.launch.py
 ```
 
@@ -398,9 +309,7 @@ The robot can now be teleoperated using the `aic_teleoperation` package. See the
 
 ```bash
 export RMW_IMPLEMENTATION=rmw_zenoh_cpp 
-export ZENOH_SESSION_CONFIG_URI=~/ws_aic/src/aic/docker/aic_eval/aic_zenoh_config.json5
-export ZENOH_CONFIG_OVERRIDE='connect/endpoints=["tcp/127.0.0.1:7447"];transport/shared_memory/enabled=false'
-export ZENOH_ROUTER_CHECK_ATTEMPTS=-1
+export ZENOH_CONFIG_OVERRIDE='transport/shared_memory/enabled=false'
 source ~/ws_aic/install/setup.bash
 ros2 run aic_teleoperation cartesian_keyboard_teleop
 ```
@@ -414,444 +323,403 @@ Any of the policies in `aic_example_policies` can be used to control the robot i
 - [AIC Getting Started Guide](../../docs/getting_started.md)
 - [AIC Scene Description](../../docs/scene_description.md)
 
-## NOTES
-Getting the NIC scene for mujoco
+---
 
-ros2 launch aic_bringup spawn_task_board.launch.py   task_board_x:=0.15 task_board_y:=-0.2 task_board_z:=1.14   task_board_roll:=0.0 task_board_pitch:=0.0 task_board_yaw:=3.1415   nic_card_mount_0_present:=true nic_card_mount_0_translation:=0.0
+## AIC MuJoCo-Warp foundation
 
+This package provides two deliberately separate capabilities:
 
-## Fresh SDF generation
+1. the existing one-time conversion utilities that turn an exported AIC Gazebo
+   world into MJCF and its mesh/texture assets; and
+2. a small, ROS-free MuJoCo-Warp runtime for independently randomized SFP/NIC
+   HOLD environments.
 
-Run all commands in this section from inside the `aic_eval` distrobox. Do not use strict shell modes like `set -u`; ROS setup scripts may reference unset environment variables while sourcing.
+The foundation runtime uses MuJoCo-Warp for every physics step, camera frame,
+and F/T observation. Regular MuJoCo is used only on the host to compile and
+validate MJCF before the model is uploaded. It does not call `mj_step`, create a
+CPU `Renderer`, or download worlds for visualization.
 
-```bash
-cd /home/rmalhan/Software/ws_aic
-
-source /opt/ros/kilted/setup.bash
-source install/setup.bash
-
-cp /home/rmalhan/Software/ws_aic/install/share/aic_description/world/aic.sdf /tmp/aic_export_world.sdf
-
-python3 - <<'PY'
-from pathlib import Path
-p = Path("/tmp/aic_export_world.sdf")
-s = p.read_text()
-s = s.replace("<save_world_delay_s>0.1</save_world_delay_s>", "<save_world_delay_s>20.0</save_world_delay_s>")
-s = s.replace("<save_world_delay_s>0.0</save_world_delay_s>", "<save_world_delay_s>20.0</save_world_delay_s>")
-p.write_text(s)
-print("Wrote delayed export world:", p)
-PY
-
-/entrypoint.sh \
-  world_file:=/tmp/aic_export_world.sdf \
-  spawn_task_board:=true \
-  spawn_cable:=true \
-  task_board_x:=0.15 task_board_y:=-0.2 task_board_z:=1.14 \
-  task_board_roll:=0.0 task_board_pitch:=0.0 task_board_yaw:=3.1415 \
-  nic_card_mount_0_present:=true nic_card_mount_0_translation:=0.0 \
-  cable_type:=sfp_sc_cable \
-  attach_cable_to_gripper:=true \
-  cable_x:=0.172 cable_y:=0.024 cable_z:=1.518 \
-  cable_roll:=0.4432 cable_pitch:=-0.48 cable_yaw:=1.3303 \
-  ground_truth:=true \
-  start_aic_engine:=false \
-  gazebo_gui:=true \
-  launch_rviz:=false
-```
-
-## Sanity check SDF
-```bash
-python3 - <<'PY'
-from pathlib import Path
-import re
-
-p = Path("/tmp/aic.sdf")
-print("exists:", p.exists())
-print("size:", p.stat().st_size if p.exists() else None)
-s = p.read_text(errors="replace")
-
-for term in [
-    "task_board",
-    "task_board_base",
-    "nic_card",
-    "nic_card_mount",
-    "sfp_port",
-    "cable_0",
-    "sfp_sc_cable",
-    "sfp_tip",
-    "sfp_module",
-    "sc_plug",
-    "lc_plug",
-    "ur5e",
-]:
-    print(f"{term}: {s.count(term)}")
-
-print("\nmodels:")
-for name in re.findall(r"<model\\s+name=[\"']([^\"']+)[\"']", s):
-    print("-", name)
-PY
-```
-
-## Stable converter env
-
-Run this inside `aic_eval`. This creates a Python venv for SDF-to-MJCF conversion and MuJoCo XML post-processing.
+The committed run is configured in [`configs/run.json`](configs/run.json). Run it
+from the repository root without command-line arguments:
 
 ```bash
-cd /home/rmalhan/Software/ws_aic
-
-sudo apt update
-sudo apt install -y \
-  python3-venv \
-  python3-pip \
-  libsdformat16 \
-  python3-sdformat16 \
-  python3-gz-math9
-
-python3 -m venv --system-site-packages /home/rmalhan/.venvs/aic_sdf2mjcf
-source /home/rmalhan/.venvs/aic_sdf2mjcf/bin/activate
-
-python -m pip install --upgrade pip
-python -m pip install "numpy<2" scipy trimesh pycollada "mujoco==3.5.0" "dm-control"
-
-python - <<'PY'
-import sys
-import numpy
-import scipy
-import trimesh
-import collada
-import dm_control
-import mujoco
-import sdformat
-from gz.math import Vector3d
-
-print("python:", sys.executable)
-print("numpy:", numpy.__version__, numpy.__file__)
-print("scipy:", scipy.__version__, scipy.__file__)
-print("trimesh:", trimesh.__version__, trimesh.__file__)
-print("pycollada:", collada.__file__)
-print("dm_control:", dm_control.__file__)
-print("mujoco:", mujoco.__version__, mujoco.__file__)
-assert mujoco.__version__ == "3.5.0", mujoco.__version__
-print("sdformat OK")
-print("gz.math OK")
-PY
+pixi run python aic_utils/aic_mujoco/run.py
 ```
 
-## Conversion
+The committed run requires a CUDA device. A missing CUDA device is an error;
+there is no CPU fallback. It runs until `Ctrl+C`. Viser displays the reduced
+scene's actual meshes and the RGB tensors produced by the MJWarp batch renderer
+at `http://127.0.0.1:8080`.
 
-Start this block in a fresh `aic_eval` terminal. Do not run it from a shell where `/opt/ros/kilted/setup.bash`, `install/setup.bash`, Zenoh exports, or other ROS setup has already been sourced.
+### Algorithmic design
 
-This produces a **standalone raw MuJoCo file**:
+#### Reduced SFP/NIC scene
+
+[`scene.py`](aic_mujoco/scene.py) deterministically derives
+`mjcf/scene_warp.xml` from the converted `aic_robot.xml` and `aic_world.xml`.
+The source conversion outputs are not edited.
+
+The reduced scene contains only:
+
+- the six-joint UR5e;
+- ATI wrist F/T site and force/torque sensors;
+- the fixed Hand-E geometry;
+- one SFP fixed directly to the tool;
+- the task-board base and one target NIC fixture;
+- the center, left, and right Basler cameras; and
+- one AIC ceiling light.
+
+It intentionally excludes the cable, LC plug, cable plugin, SC task, distractor
+cards, enclosure, walls, and floor. The cable is irrelevant to this HOLD
+foundation and is one of the model features that makes a Warp upload and large
+batched simulation unnecessarily complicated.
+
+The two finger joints and gripper actuator are removed from the reduced MJCF.
+Before removal, the generator bakes the configured AIC SFP grasp position of
+0.0073 m into each finger body transform. This is the `sfp_sc_cable` override
+in `aic_bringup/launch/aic_gz_bringup.launch.py`, not the generic 0.00655 m
+gripper value. The resulting closed finger geometry is fixed, and its collision
+masks are disabled. The SFP subtree is rigidly attached to `ati/tool_link`
+using the composed
+tool-to-LC and LC-to-SFP transforms from the converted AIC scene. Consequently:
+
+- the grasp needs no gripper controller;
+- no finger/SFP internal contact can contaminate the wrist F/T reading; and
+- SFP contact with the target NIC remains active.
+
+Scene preparation then compiles the output and requires this exact contract:
 
 ```text
-/home/rmalhan/aic_mujoco_world_nic_cable/aic_world.xml
+nq=6  nv=6  nu=6
+ncam=3  nsensor=2  nsensordata=6
+nmocap=2  nplugin=0
 ```
 
-That file contains the robot and the world together. It is useful for visual inspection, but it is **not** the file that should be included directly by the ROS-control package `scene.xml`.
+Any missing MJCF name, asset, sensor, camera, actuator, or unexpected model
+dimension raises an error before MJWarp is created.
 
-```bash
-cd /home/rmalhan/Software/ws_aic
+#### Independent environment reset
 
-source /home/rmalhan/.venvs/aic_sdf2mjcf/bin/activate
-
-rm -rf /home/rmalhan/aic_mujoco_world_nic_cable
-mkdir -p /home/rmalhan/aic_mujoco_world_nic_cable
-
-cp /tmp/aic.sdf /home/rmalhan/aic_mujoco_world_nic_cable/aic.sdf
-
-sed -i 's|file://<urdf-string>/model://|model://|g' /home/rmalhan/aic_mujoco_world_nic_cable/aic.sdf
-sed -i 's|file:///lc_plug_visual.glb|model://LC Plug/lc_plug_visual.glb|g' /home/rmalhan/aic_mujoco_world_nic_cable/aic.sdf
-sed -i 's|file:///sc_plug_visual.glb|model://SC Plug/sc_plug_visual.glb|g' /home/rmalhan/aic_mujoco_world_nic_cable/aic.sdf
-sed -i 's|file:///sfp_module_visual.glb|model://SFP Module/sfp_module_visual.glb|g' /home/rmalhan/aic_mujoco_world_nic_cable/aic.sdf
-
-python /home/rmalhan/Software/ws_aic/install/bin/sdf2mjcf \
-  /home/rmalhan/aic_mujoco_world_nic_cable/aic.sdf \
-  /home/rmalhan/aic_mujoco_world_nic_cable/aic_world.xml
-```
-
-## Sanity check MJCF
-
-```bash
-cd /home/rmalhan/Software/ws_aic/src/aic
-
-source /home/rmalhan/.venvs/aic_sdf2mjcf/bin/activate
-
-python - <<'PY'
-import mujoco
-
-path = "/home/rmalhan/aic_mujoco_world_nic_cable/aic_world.xml"
-m = mujoco.MjModel.from_xml_path(path)
-
-print("Loaded:", path)
-print("nbody:", m.nbody, "njnt:", m.njnt, "ngeom:", m.ngeom, "nsite:", m.nsite, "nu:", m.nu)
-
-print("\nKey bodies:")
-for i in range(m.nbody):
-    name = mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_BODY, i)
-    if name and any(k in name.lower() for k in [
-        "task_board",
-        "nic_card",
-        "sfp_port",
-        "cable",
-        "sfp",
-        "sc_plug",
-        "lc_plug",
-        "gripper",
-        "tool",
-    ]):
-        print("-", name)
-PY
-
-deactivate
-```
-
-## View in mujoco
-
-View the standalone raw file here. This is only a visual check that the Gazebo export and SDF-to-MJCF conversion worked.
-
-```bash
-cd /home/rmalhan/Software/ws_aic/src/aic
-
-source /home/rmalhan/.venvs/aic_sdf2mjcf/bin/activate
-
-python3 aic_utils/aic_mujoco/scripts/view_scene.py \
-  /home/rmalhan/aic_mujoco_world_nic_cable/aic_world.xml
-
-deactivate
-```
-
-## Run with controller
-
-Start the first block in a fresh `aic_eval` terminal. Do not source ROS before the staging split/validation step.
-
-The controller launch does **not** load the standalone raw file directly. It loads:
+One compiled host model is uploaded once, then `N` device worlds are allocated.
+Every world owns its own dynamic and reset state:
 
 ```text
-src/aic/aic_utils/aic_mujoco/mjcf/scene.xml
+shared MJWarp model
+├── env 0: qpos, qvel, HOLD target, board/NIC pose, wrench tare, contacts
+├── env 1: qpos, qvel, HOLD target, board/NIC pose, wrench tare, contacts
+└── env N-1: independent copies of the same state
 ```
 
-and `scene.xml` includes:
+Randomness is derived from `(configured seed, environment ID, reset count)`.
+Resetting environment 7 therefore does not alter environment 3 and does not
+depend on the order in which other environments were reset.
+
+The robot reset target is:
+
+```text
+q_hold[env] = AIC_HOME + uniform(joint_lower, joint_upper)
+```
+
+The AIC HOME values come from `aic_engine/config/eval_config.yaml`. AIC does not
+publish an arm reset-noise standard, so `base.json` exposes the initial
+prototype range explicitly as ±0.02 rad per joint. It is not hidden in code.
+
+The board/NIC ranges are also explicit:
+
+- board `x`: 0.16 m;
+- board `y`: uniform from -0.21 to 0.05 m;
+- board `z`: 1.14 m;
+- board yaw: π plus a deviation in ±0.04159265 rad, wrapped at ±π;
+- target NIC rail: rail 2 or rail 4;
+- NIC rail translation: -0.0215 to 0.0234 m.
+
+The board envelope and target rails span AIC evaluation SFP trials 1 and 2.
+The NIC translation limits are the canonical `task_board_limits.nic_rail`
+values in the AIC evaluation config. Sampling yaw uniformly from -3.1 to +3.1
+would be wrong: it would include almost every orientation instead of the small
+neighborhood around π represented by the two trials.
+
+Both fixtures are MJCF mocap bodies. Their positions and quaternions are stored
+per world in `data.mocap_pos` and `data.mocap_quat`; the shared model's static
+body arrays are never mutated.
+
+#### HOLD control
+
+Each 2 ms step executes:
+
+```text
+mjw.step1
+    computes current kinematics, velocity terms, sensors, and qfrc_bias
+        ↓
+Warp HOLD kernel
+        ↓
+mjw.step2
+    actuation, acceleration, constraint solve, acceleration sensors, integration
+```
+
+For each world and each of the six arm joints, the Warp kernel computes:
+
+```text
+tau = kp * (q_hold - qpos) - kd * qvel + qfrc_bias
+```
+
+- `kp` is stiffness: restoring torque per unit position error.
+- `kd` is damping: torque opposing joint velocity and oscillation.
+- `qfrc_bias` is MuJoCo-Warp's current gravity, Coriolis, and centrifugal bias
+  force for that DOF. It is a library-computed device tensor, not a constant or
+  a separate controller.
+
+The AIC engine HOME command supplies the configured stiffness
+`[100,100,100,50,50,50]` and damping `[40,40,40,15,15,15]`. Torque is clipped
+again in the kernel even though MJCF actuator control ranges are also bounded.
+This prevents a large reset error or transient from writing an unbounded
+control value. The current 120/60 N·m limits are an explicit prototype safety
+envelope inherited from the branch control configuration; unlike HOME and the
+gains, they are not claimed to be an AIC evaluation constant and remain
+editable in `base.json`.
+
+The important ordering is `step1 → controller → step2`. Computing control after
+a complete `mjw.step` would use the previous step's `qfrc_bias`.
+
+The control path is deliberately explicit:
+
+```text
+AICRobot
+  └── ArmJoints: names → qpos/dof/actuator addresses
+          ↓
+HoldPositionCommand.position  (N, 6)
+          ↓
+JointHoldController Warp kernel
+          ↓
+MJWarp data.ctrl              (N, 6)
+```
+
+`AICRobot` is the simulation-side robot interface, not the Tesseract
+`EnsemblRobot` planning facade. It validates the compiled MJCF and owns the
+resolved arm, camera, wrench-sensor, and fixture interfaces. `ArmJoints` owns
+only ordered joint/actuator bookkeeping. `HoldPositionCommand` is the actual
+per-world command object. `JointHoldController` owns the gains, limits, device
+address arrays, and the impedance kernel. `AICWarpRuntime` orchestrates those
+objects and owns the changing MJWarp state.
+
+#### RGB observations
+
+The AIC cameras are RGB-only at their native 1152 × 1024 resolution and 20 Hz.
+At the 500 Hz physics rate, one camera update occurs every 25 physics steps.
+MJWarp internally stores packed pixels in flat per-camera regions. The runtime
+unpacks them in a Warp kernel and exposes named device tensors:
+
+```text
+rgb.center  (N, 1024, 1152, 3) uint8
+rgb.left    (N, 1024, 1152, 3) uint8
+rgb.right   (N, 1024, 1152, 3) uint8
+```
+
+There is no depth allocation and no implicit training resize. A future resize
+must be added as an explicit configured operation.
+
+Native RGB is expensive: three cameras produce 3,538,944 rays per environment
+per frame. Choose `runtime.num_envs` against actual GPU memory and measured
+throughput rather than assuming the low-dimensional physics batch size will
+also be a sensible image batch size.
+
+#### F/T observations and taring
+
+The reduced MJCF preserves the standard MuJoCo force and torque sensors:
 
 ```xml
-<include file="aic_robot.xml"/>
-<include file="aic_world.xml"/>
+<force name="AtiForceTorqueSensor_force" site="AtiForceTorqueSensor"/>
+<torque name="AtiForceTorqueSensor_torque" site="AtiForceTorqueSensor"/>
 ```
 
-So the package `mjcf/aic_world.xml` must be the **split world-only file**, not the raw standalone file. Generate the split files in a staging directory first, validate `scene.xml`, and only then copy them into the ROS package.
-
-Do not source `/opt/ros/kilted/setup.bash` or `install/setup.bash` before running `add_cable_plugin.py`. The post-processing script uses Python MuJoCo's `MjSpec`; the ROS workspace setup can place other build/install paths ahead of the venv and can corrupt `MjSpec` name access. Source ROS only after the split files are generated and validated.
-
-```bash
-cd /home/rmalhan/Software/ws_aic
-
-source /home/rmalhan/.venvs/aic_sdf2mjcf/bin/activate
-
-rm -rf /tmp/aic_mujoco_controller_stage
-mkdir -p /tmp/aic_mujoco_controller_stage
-
-cp -a /home/rmalhan/aic_mujoco_world_nic_cable/. /tmp/aic_mujoco_controller_stage/
-
-python3 src/aic/aic_utils/aic_mujoco/scripts/add_cable_plugin.py \
-  --input /tmp/aic_mujoco_controller_stage/aic_world.xml \
-  --output /tmp/aic_mujoco_controller_stage/aic_world.xml \
-  --robot_output /tmp/aic_mujoco_controller_stage/aic_robot.xml \
-  --scene_output /tmp/aic_mujoco_controller_stage/scene.xml
-
-python3 - <<'PY'
-import mujoco
-from xml.etree import ElementTree as ET
-
-scene = "/tmp/aic_mujoco_controller_stage/scene.xml"
-world = "/tmp/aic_mujoco_controller_stage/aic_world.xml"
-robot = "/tmp/aic_mujoco_controller_stage/aic_robot.xml"
-
-m = mujoco.MjModel.from_xml_path(scene)
-print("Validated scene:", scene)
-print("MuJoCo:", mujoco.__version__)
-print("nbody:", m.nbody, "njnt:", m.njnt, "ngeom:", m.ngeom, "nu:", m.nu)
-
-world_root = ET.parse(world).getroot()
-robot_root = ET.parse(robot).getroot()
-world_meshes = [x.attrib.get("name") for x in world_root.findall(".//mesh")]
-robot_meshes = [x.attrib.get("name") for x in robot_root.findall(".//mesh")]
-dups = sorted(set(world_meshes).intersection(robot_meshes))
-assert not dups, f"duplicate mesh names across split files: {dups[:10]}"
-assert not any(b.attrib.get("name") == "tabletop" for b in world_root.findall(".//body")), "split world still contains tabletop"
-assert any(b.attrib.get("name") == "cable_end_0" for b in world_root.findall(".//body")), "split world is missing cable_end_0"
-print("Split files are clean.")
-PY
-
-cp -a /tmp/aic_mujoco_controller_stage/. src/aic/aic_utils/aic_mujoco/mjcf/
-
-deactivate
-
-source /opt/ros/kilted/setup.bash
-source install/setup.bash
-
-colcon build --merge-install --symlink-install --packages-select aic_mujoco
-
-source install/setup.bash
-```
-
-Terminal 1: Zenoh router
-
-Open a new `aic_eval` terminal for this.
-
-```bash
-cd /home/rmalhan/Software/ws_aic
-source /opt/ros/kilted/setup.bash
-source install/setup.bash
-
-export RMW_IMPLEMENTATION=rmw_zenoh_cpp
-export ZENOH_ROUTER_CONFIG_URI=/home/rmalhan/Software/ws_aic/src/aic/docker/aic_eval/aic_zenoh_config.json5
-export ZENOH_CONFIG_OVERRIDE='mode="router";listen/endpoints=["tcp/[::]:7447"];connect/endpoints=[];routing/router/peers_failover_brokering=true;transport/shared_memory/enabled=false'
-
-ros2 run rmw_zenoh_cpp rmw_zenohd
-```
-
-Terminal 2: MuJoCo ROS-control simulation
-
-Open a new `aic_eval` terminal for this.
-
-```bash
-cd /home/rmalhan/Software/ws_aic
-source /opt/ros/kilted/setup.bash
-source install/setup.bash
-
-export RMW_IMPLEMENTATION=rmw_zenoh_cpp
-export ZENOH_SESSION_CONFIG_URI=/home/rmalhan/Software/ws_aic/src/aic/docker/aic_eval/aic_zenoh_config.json5
-export ZENOH_CONFIG_OVERRIDE='connect/endpoints=["tcp/127.0.0.1:7447"];transport/shared_memory/enabled=false'
-export ZENOH_ROUTER_CHECK_ATTEMPTS=-1
-
-ros2 launch aic_mujoco aic_mujoco_bringup.launch.py launch_rviz:=false
-```
-
-Terminal 3: Controller checks
-
-Open a new `aic_eval` terminal for this.
-
-```bash
-cd /home/rmalhan/Software/ws_aic
-source /opt/ros/kilted/setup.bash
-source install/setup.bash
-
-export RMW_IMPLEMENTATION=rmw_zenoh_cpp
-export ZENOH_SESSION_CONFIG_URI=/home/rmalhan/Software/ws_aic/src/aic/docker/aic_eval/aic_zenoh_config.json5
-export ZENOH_CONFIG_OVERRIDE='connect/endpoints=["tcp/127.0.0.1:7447"];transport/shared_memory/enabled=false'
-export ZENOH_ROUTER_CHECK_ATTEMPTS=-1
-
-ros2 control list_controllers
-ros2 topic hz /joint_states
-ros2 topic hz /observations
-```
-
-## Direct MuJoCo/Warp prototype path
-
-This is the current R&D path. It deliberately skips MJLab manager/entity
-composition and uses the direct MuJoCo contract we already validated in the
-demo scripts:
+MJWarp exposes one `sensordata` row per environment. The generator/runtime
+validate the addresses and dimensions instead of assuming them. In this scene:
 
 ```text
-reset -> SFP-tip pre-insertion IK -> observation
-      -> Cartesian delta action -> IK/impedance step
-      -> zeroed force/torque -> reward/termination
+sensordata       (N, 6)
+force address    0, dimensions 0:3
+torque address   3, dimensions 3:6
 ```
 
-There are two XMLs:
+The public observations are:
 
 ```text
-mjcf/scene.xml       known-good semantic scene with cable, sensors, and viewer/debug behavior
-mjcf/scene_warp.xml  training scene with cable plugin removed, visuals preserved, and robot actuators kept
+wrench.raw        (N, 6) float32
+wrench.tared      (N, 6) float32
+wrench.tare_ready (N,)   bool
 ```
 
-Warp does not support the MuJoCo cable body plugin, so `prepare_training_scene.py`
-creates `scene_warp.xml` with the SFP/LC plug rigidly held by the gripper.
-The generated training scene keeps visual meshes for debug rendering and
-collision geoms for physics. Training-facing commands should use
-`scene_warp.xml` and `mujoco_warp`; the old Python loop over CPU
-`mujoco.MjData` is not part of the active training path.
+For each reset environment independently, taring:
 
-Fresh run from a new terminal. These direct MuJoCo/Warp scripts do not launch
-ROS nodes and do not require ROS sourcing; they load the prepared MJCF and the
-training config directly.
+1. holds the robot while `tare_settle_steps` elapse;
+2. samples its raw wrench at 100 Hz;
+3. averages `tare_sample_count` samples on the device; and
+4. subtracts that baseline from subsequent readings.
 
-```bash
-cd /home/rmalhan/Software/ws_aic/src/aic
-pixi shell
+This is asynchronous. A reset environment can settle and retare while all
+other environments continue stepping. Raw wrench is sampled every 5 physics
+steps (100 Hz); the 50 Hz publication clock fires every 10 steps for future
+evaluation-interface integration. Each environment's simulation time is reset
+when its tare completes, and its independent `episode_steps` counter advances
+only while `tare_ready` is true.
 
-export PYTHONNOUSERSITE=1
-export MUJOCO_PLUGIN_PATH=/home/rmalhan/Software/ws_aic/install/opt/mujoco_vendor/lib
-export XDG_CACHE_HOME=/tmp/$USER-cache
-mkdir -p "$XDG_CACHE_HOME"
+### Software design
 
-python3 aic_utils/aic_mujoco/scripts/prepare_training_scene.py
-
-PYTHONPATH=/home/rmalhan/Software/ws_aic/src/aic/aic_utils/aic_mujoco \
-python3 aic_utils/aic_mujoco/scripts/train.py \
-  --config /home/rmalhan/Software/ws_aic/src/aic/aic_utils/aic_mujoco/configs/experiments/train.json \
-  --num-envs 4096 \
-  --steps 1000 \
-  --log-interval 100 \
-  --device cuda
-```
-
-Expected output:
+#### Minimal file layout
 
 ```text
-[training-physics] direct MuJoCo Warp batched physics
-  device: cuda
-  num_envs: ...
-  steps: ...
-  physics_steps: ...
-  step_wall_s: ...
-  physics_steps_per_sec: ...
-  aggregate_sim_seconds_per_wall_second: ...
-  reward mean: ...
-  progress mean: ...
-  lateral error mean: ...
-  contact normal force max: ...
-  max penetration: ...
-  action norm mean: ...
-  qpos std mean across sample: ...
-  nbody: ...
-  njnt: ...
-  sim_time_env0: ...
+aic_mujoco/
+├── aic_mujoco/
+│   ├── commands.py     per-environment HOLD command tensor
+│   ├── config.py       strict JSON merge and validation
+│   ├── controllers.py  Warp joint impedance controller
+│   ├── joints.py       named joint/actuator address mapping
+│   ├── outputs.py      selected-world Viser and recording bridge
+│   ├── robot.py        validated AIC simulation robot interface
+│   ├── runtime.py      reset, MJWarp physics, RGB, and F/T tensors
+│   └── scene.py        deterministic reduced-MJCF generator
+├── run.py              configured continuous rollout entry point
+├── configs/
+│   ├── base.json    stable scene/task/control configuration
+│   └── run.json     execution/device/output configuration
+├── mjcf/
+│   ├── aic_robot.xml
+│   ├── aic_world.xml
+│   └── scene_warp.xml
+├── scripts/         pre-existing conversion/ROS comparison utilities
+└── test/
+    └── test_foundation.py
 ```
 
-Visualize sampled training envs in Viser while physics runs on CUDA:
+There is one command and one controller because the foundation has one required
+behavior: joint-position HOLD. There are no unused velocity/Cartesian commands,
+trajectory, IK, `EnsemblRobot`, MJLab, reward, or policy layers. Cartesian
+insertion can extend the command/controller boundary later when there is an
+actual consumer; it does not need to replace this backbone.
 
-```bash
-PYTHONPATH=/home/rmalhan/Software/ws_aic/src/aic/aic_utils/aic_mujoco \
-python3 aic_utils/aic_mujoco/scripts/visualize.py \
-  --config /home/rmalhan/Software/ws_aic/src/aic/aic_utils/aic_mujoco/configs/experiments/train.json \
-  --num-envs 4096 \
-  --display-envs 16 \
-  --steps-per-frame 4 \
-  --fps 30 \
-  --device cuda
+#### Base configuration and run overlay
+
+The two files are complementary and contain no repeated keys. `base.json`
+contains stable scene, physics, control, randomization, sensor, and camera
+values. `run.json` supplies the device/graph choices, number of worlds, seed,
+visualization, and recording values. The application always loads both files
+and validates the complete result after merging them. Runtime duration is not
+a configuration key: the foundation intentionally remains alive until
+`Ctrl+C`.
+
+The loader performs a recursive deep merge. For example:
+
+```jsonc
+// base.json
+{"physics": {"timestep": 0.002, "iterations": 200}}
+
+// run.json
+{"physics": {"device": "cuda:0", "graph_capture": true}}
+
+// result
+{"physics": {
+  "timestep": 0.002,
+  "iterations": 200,
+  "device": "cuda:0",
+  "graph_capture": true
+}}
 ```
 
-Open `http://localhost:8080`. Physics still advances for all `--num-envs`
-worlds through MuJoCo Warp. Viser downloads only the selected `--display-envs`
-worlds each frame, so it is a debug view rather than part of the training
-inner loop. Viser renders useful visual geoms only: robot, held plug/module,
-task board, NIC mount/card, and tabletop. Collision geoms plus floor/wall and
-enclosure shells remain in the model for physics but are hidden from this debug
-view. Increase ``--steps-per-frame`` to fast-forward playback; decrease it for
-smoother browser motion.
+A shallow top-level merge would replace the entire `physics` object and lose
+`timestep` and `iterations`. Deep merge preserves them while adding `device`
+and `graph_capture`. Objects merge recursively; scalar values and arrays
+replace a matching base value in full. Arrays are never combined element by
+element because that would make six-joint configuration ambiguous.
 
-Current layout:
+There are no include graphs, environment-variable overrides, CLI overrides,
+defaults, or fallback values. After the merge, validation rejects:
+
+- missing or unknown keys;
+- wrong scalar types or vector lengths;
+- duplicate/missing MJCF names;
+- invalid environment IDs;
+- inverted/non-finite ranges;
+- cadences that do not divide the physics rate; and
+- CPU graph capture or an unavailable configured device.
+
+This fail-fast contract keeps downstream code direct: it indexes known config
+keys instead of carrying `.get(...)` defaults throughout the simulation.
+
+#### Runtime ownership
+
+`AICWarpRuntime` owns the shared device model, batched device data, observation
+tensors, reset metadata, and captured execution graph. It composes the robot,
+command, and controller objects rather than duplicating their responsibilities.
+Its public surface is small:
+
+```python
+runtime = AICWarpRuntime(config)
+events = runtime.step()
+observations = runtime.observations()
+reset_parameters = runtime.reset_state()
+runtime.reset([3, 9])
+```
+
+`observations()` returns Warp arrays. A training framework can consume these on
+device; it does not need to flatten cameras or split `sensordata` itself.
+`reset_state()` exposes the sampled joint target, board/NIC transforms, rail,
+and NIC translation for debugging and future episode logging.
+
+On CUDA, the physics/HOLD/tare sequence is captured as a Warp graph when
+`physics.graph_capture` is true. Camera rendering remains on its independent
+20 Hz clock. Contact and constraint capacities are explicit config values and
+are checked after initial settling; they are not silently guessed.
+
+#### MJWarp boundary and known constraints
+
+The implementation is intentionally designed around the supported subset in
+the pinned MuJoCo-Warp 3.5.0 stack:
+
+- MuJoCo still parses/compiles MJCF on the host; MJWarp accepts the resulting
+  model and owns all application physics stepping.
+- Cable plugins are not uploaded. The reduced model has `nplugin=0` and no
+  flexible cable topology.
+- Per-world fixture randomization uses `mocap_pos`/`mocap_quat`; changing the
+  shared model's `body_pos` would move the fixture identically in every world.
+- `nconmax` and `njmax` are explicit allocations because MJWarp cannot grow
+  contact/constraint buffers transparently during a captured training loop.
+- Device physics is float32 and GPU contact reductions may not be bitwise
+  deterministic. Seeded reset samples are reproducible; a full trajectory is
+  not promised to be bit-identical across GPU architectures.
+- MJWarp's native ray renderer supplies the policy RGB tensors. Its appearance
+  should not be assumed pixel-identical to Gazebo or MuJoCo's OpenGL viewer.
+
+These are deliberate boundaries of this foundation, not silent fallbacks.
+
+#### Visualization and recording
+
+The Viser path downloads only selected-world visualization data. It sends the
+compiled visual meshes once, then updates selected MJWarp `geom_xpos` and
+`geom_xmat` poses at the camera cadence. It shows the native center/left/right
+MJWarp RGB tensors in named GUI panels. It never calls regular MuJoCo physics or
+`mujoco.Renderer`.
+
+`visualization.env_ids` explicitly selects the displayed worlds. The committed
+value `"all"` expands to every environment ID from `0` through `N-1`; an
+explicit integer list remains supported for selected-world debugging. Multiple
+displayed worlds are separated by the configured `environment_spacing`; this
+affects only the human view, not physics. Initial viewer position/look-at, JPEG
+quality, and real-time pacing are all explicit in `run.json`.
+
+The full AIC cell, enclosure, walls, and floor are intentionally absent because
+they are absent from the reduced simulation scene. The 3D viewer shows the
+actual foundation contents: tabletop/robot, fixed gripper and SFP, randomized
+board/NIC, and camera hardware geometry. It does not invent display-only cell
+geometry that the policy's physics world does not contain or project images
+into the 3D scene.
+
+Recording uses those same RGB frames. When enabled, it writes:
 
 ```text
-aic_mujoco/warp/physics.py      direct MuJoCo Warp model/data stepping
-scripts/prepare_training_scene.py   creates scene_warp.xml from the controller/viewer scene
-scripts/train.py           headless MuJoCo Warp physics throughput command
-scripts/visualize.py       Viser debug view backed by MuJoCo Warp physics
+recordings/env_0000_center.mp4
+recordings/env_0000_left.mp4
+recordings/env_0000_right.mp4
 ```
 
-Next upgrade:
-
-```text
-replace the built-in debug joint policy with the learned policy action tensor,
-add reset masks/episode accounting, and wrap the same batched state for RSL-RL.
-```
+Only configured environment IDs cross from the device to the host. Policies
+still retain device access to images and wrench observations for every world.

@@ -140,37 +140,8 @@ export DBX_CONTAINER_MANAGER=docker
 # Create and enter the eval container
 docker pull ghcr.io/intrinsic-dev/aic/aic_eval:latest
 # If you do *not* have an NVIDIA GPU, remove the --nvidia flag for GPU support
-distrobox create \
-  --root \
-  --name aic_eval \
-  --image ghcr.io/intrinsic-dev/aic/aic_eval:latest \
-  --nvidia \
-  --volume /usr/lib/wsl:/usr/lib/wsl:ro \
-  --volume /mnt/wslg:/mnt/wslg \
-  --volume /tmp/.X11-unix:/tmp/.X11-unix \
-  --additional-flags "--device=/dev/dxg" \
-  --additional-flags "--env DISPLAY=$DISPLAY" \
-  --additional-flags "--env WAYLAND_DISPLAY=$WAYLAND_DISPLAY" \
-  --additional-flags "--env XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR" \
-  --additional-flags "--env PULSE_SERVER=$PULSE_SERVER" \
-  --additional-flags "--env LD_LIBRARY_PATH=/usr/lib/wsl/lib" \
-  --additional-flags "--env MESA_D3D12_DEFAULT_ADAPTER_NAME=NVIDIA" \
-  --additional-flags "--env GALLIUM_DRIVER=d3d12" \
-  --additional-flags "--env QT_QPA_PLATFORM=xcb"
-
-distrobox enter --root aic_eval
-
-echo "=== paths ==="
-ls -ld /usr/lib/wsl /usr/lib/wsl/lib
-ls -l /dev/dxg
-ls -ld /mnt/wslg /tmp/.X11-unix
-
-echo "=== env ==="
-env | grep -Ei 'DISPLAY|WAYLAND|XDG|PULSE|GALLIUM|MESA|LD_LIBRARY|QT_QPA' | sort
-
-echo "=== GL ==="
-glxinfo -B | grep -E "OpenGL vendor|OpenGL renderer|OpenGL version"
-
+distrobox create -r --nvidia -i ghcr.io/intrinsic-dev/aic/aic_eval:latest aic_eval
+distrobox enter -r aic_eval
 
 # Inside the container, start the environment
 /entrypoint.sh ground_truth:=false start_aic_engine:=true

@@ -1,6 +1,0 @@
-{
-  "force_sensor": "AtiForceTorqueSensor_force",
-  "torque_sensor": "AtiForceTorqueSensor_torque",
-  "sensor_zero_settle_steps": 100,
-  "sensor_zero_samples": 30
-}

@@ -14,15 +14,6 @@
 #  limitations under the License.
 #
 
-"""Launch MuJoCo ROS2 control for the AIC scene.
-
-This launch file is the ROS-facing validation path, separate from the direct
-MuJoCo/Warp policy-training path. It starts robot_state_publisher,
-mujoco_ros2_control, the AIC adapter, and the controller spawners against the
-generated ``scene.xml`` while preserving the MuJoCo plugin environment from the
-sourced workspace.
-"""
-
 import os
 from ament_index_python.packages import get_package_share_directory
 
@@ -47,12 +38,6 @@ from launch_ros.substitutions import FindPackageShare
 
 
 def launch_setup(context, *args, **kwargs):
-    """Build launch actions after substitutions are available.
-
-    ROS launch substitutions require a runtime context, so node parameters,
-    xacro command construction, controller spawner ordering, and MuJoCo plugin
-    environment propagation are assembled inside this opaque setup function.
-    """
     # UR arguments
     ur_type = LaunchConfiguration("ur_type")
     safety_limits = LaunchConfiguration("safety_limits")
@@ -315,7 +300,6 @@ def launch_setup(context, *args, **kwargs):
 
 
 def generate_launch_description():
-    """Declare launch arguments and return the MuJoCo bringup description."""
     declared_arguments = []
     # UR specific arguments
     declared_arguments.append(

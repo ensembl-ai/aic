@@ -1,6 +1,0 @@
-{
-  "include": [
-    "../common/ur5e_control.json",
-    "../common/preinsert_sfp_nic.json"
-  ]
-}

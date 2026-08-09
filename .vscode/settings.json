@@ -1,0 +1,11 @@
+{
+    "python-envs.defaultEnvManager": "renan-r-santos.pixi-code:pixi",
+    "python-envs.defaultPackageManager": "renan-r-santos.pixi-code:pixi",
+    "python.defaultInterpreterPath": "${workspaceFolder}/.pixi/envs/default/bin/python",
+    "python.analysis.stubPath": "${workspaceFolder}/typings",
+    "python.analysis.extraPaths": [
+        "${workspaceFolder}/aic_model",
+        "${workspaceFolder}/aic_utils/aic_mujoco",
+        "${workspaceFolder}/aic_utils/lerobot_robot_aic"
+    ]
+}
