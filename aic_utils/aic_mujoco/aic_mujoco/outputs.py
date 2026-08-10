@@ -205,13 +205,20 @@ class RuntimeOutputs:
         self._server.initial_camera.position = tuple(visual["initial_camera_position"])
         self._server.initial_camera.look_at = tuple(visual["initial_camera_look_at"])
 
-        spacing = np.asarray(visual["environment_spacing"], dtype=np.float64)
+        grid_spacing = np.asarray(visual["grid_spacing"], dtype=np.float64)
+        grid_columns = visual["grid_columns"]
         for local_index, env_id in enumerate(self._visual_envs):
             env_root = f"/environments/{env_id}"
+            column = local_index % grid_columns
+            row = local_index // grid_columns
             self._server.scene.add_frame(
                 env_root,
                 show_axes=False,
-                position=local_index * spacing,
+                position=(
+                    column * grid_spacing[0],
+                    row * grid_spacing[1],
+                    0.0,
+                ),
             )
             for geom_id in self._visual_geom_ids:
                 mesh_id = int(model.geom_dataid[geom_id])

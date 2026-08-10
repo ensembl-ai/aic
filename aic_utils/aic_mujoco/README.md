@@ -702,9 +702,10 @@ MJWarp RGB tensors in named GUI panels. It never calls regular MuJoCo physics or
 `visualization.env_ids` explicitly selects the displayed worlds. The committed
 value `"all"` expands to every environment ID from `0` through `N-1`; an
 explicit integer list remains supported for selected-world debugging. Multiple
-displayed worlds are separated by the configured `environment_spacing`; this
-affects only the human view, not physics. Initial viewer position/look-at, JPEG
-quality, and real-time pacing are all explicit in `run.json`.
+displayed worlds are arranged row-by-row using the configured `grid_columns`
+and `[x, y]` `grid_spacing`. This affects only the human view, not physics.
+Initial viewer position/look-at, JPEG quality, and real-time pacing are all
+explicit in `run.json`.
 
 The full AIC cell, enclosure, walls, and floor are intentionally absent because
 they are absent from the reduced simulation scene. The 3D viewer shows the

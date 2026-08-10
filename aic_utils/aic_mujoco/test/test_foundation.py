@@ -101,6 +101,7 @@ def test_reduced_scene_contract(configured_scene: dict) -> None:
 
 def test_independent_warp_worlds_and_observations(configured_scene: dict) -> None:
     config = copy.deepcopy(configured_scene)
+    config["runtime"]["num_envs"] = 2
     config["physics"].update({"device": "cpu", "graph_capture": False})
     config["sensors"].update({"tare_settle_steps": 5, "tare_sample_count": 2})
     config["cameras"].update(

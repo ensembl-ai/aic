@@ -109,7 +109,8 @@ _SCHEMA: dict[str, Any] = {
         "env_ids": (list, str),
         "jpeg_quality": int,
         "realtime": bool,
-        "environment_spacing": list,
+        "grid_columns": int,
+        "grid_spacing": list,
         "initial_camera_position": list,
         "initial_camera_look_at": list,
     },
@@ -221,7 +222,7 @@ def _validate(config: dict[str, Any]) -> None:
         "domain_randomization.board_position_lower": 3,
         "domain_randomization.board_position_upper": 3,
         "domain_randomization.nic_rail_y_by_index": 5,
-        "visualization.environment_spacing": 3,
+        "visualization.grid_spacing": 2,
         "visualization.initial_camera_position": 3,
         "visualization.initial_camera_look_at": 3,
     }
@@ -314,6 +315,10 @@ def _validate(config: dict[str, Any]) -> None:
         raise ValueError("visualization.port must be in [1, 65535]")
     if not 1 <= visualization["jpeg_quality"] <= 100:
         raise ValueError("visualization.jpeg_quality must be in [1, 100]")
+    if visualization["grid_columns"] <= 0:
+        raise ValueError("visualization.grid_columns must be positive")
+    if any(value <= 0.0 for value in vectors["visualization.grid_spacing"]):
+        raise ValueError("visualization.grid_spacing values must be positive")
     if vectors["visualization.initial_camera_position"] == vectors[
         "visualization.initial_camera_look_at"
     ]:
@@ -333,17 +338,6 @@ def _validate(config: dict[str, Any]) -> None:
             raise ValueError(f"{section}.env_ids contains duplicates")
         if config[section]["enabled"] and not env_ids:
             raise ValueError(f"{section}.env_ids cannot be empty when enabled")
-    visual_env_count = (
-        runtime["num_envs"]
-        if visual_env_ids == "all"
-        else len(visual_env_ids)
-    )
-    if visual_env_count > 1 and not any(
-        vectors["visualization.environment_spacing"]
-    ):
-        raise ValueError(
-            "visualization.environment_spacing cannot be zero for multiple environments"
-        )
     if not config["recording"]["output_directory"]:
         raise ValueError("recording.output_directory cannot be empty")
     if not config["recording"]["codec"]:
