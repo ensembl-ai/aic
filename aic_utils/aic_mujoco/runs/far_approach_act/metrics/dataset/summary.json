@@ -1,0 +1,42 @@
+{
+  "dataset": "far_approach",
+  "final_orientation_error_rad": {
+    "maximum": 0.0017634689575061202,
+    "mean": 0.0010120981012732954
+  },
+  "final_position_error_m": {
+    "maximum": 0.0019922410137951374,
+    "mean": 0.0016674031521408603
+  },
+  "format_version": 1,
+  "sample_acceptance_rate": 0.5351996706463565,
+  "sampled_attempts": 2429,
+  "splits": {
+    "test": {
+      "episodes": 200,
+      "frames": 29046
+    },
+    "train": {
+      "episodes": 1000,
+      "frames": 149458
+    },
+    "validation": {
+      "episodes": 100,
+      "frames": 15191
+    }
+  },
+  "success_values": {
+    "true": 1300
+  },
+  "successful_episodes": 1300,
+  "termination_counts": {
+    "pose_tolerance": 1300
+  },
+  "trajectory_steps": {
+    "maximum": 200,
+    "mean": 148.99615384615385,
+    "median": 151.0,
+    "minimum": 84,
+    "p95": 195.0
+  }
+}

@@ -17,7 +17,11 @@ aic_utils/aic_mujoco/mjcf/*.png
 
 # Local MuJoCo-Warp policy artifacts
 /aic_utils/aic_mujoco/data/
-/aic_utils/aic_mujoco/runs/
+/aic_utils/aic_mujoco/runs/*
+!/aic_utils/aic_mujoco/runs/*/
+/aic_utils/aic_mujoco/runs/*/*
+!/aic_utils/aic_mujoco/runs/*/metrics/
+!/aic_utils/aic_mujoco/runs/*/metrics/**
 /aic_utils/aic_mujoco/checkpoints/
 
 # Ignore aic_isaac usd assets

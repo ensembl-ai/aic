@@ -1,0 +1,27 @@
+{
+  "format_version": 1,
+  "history_records": 100,
+  "latest_metrics": {
+    "_step": 10000,
+    "_timestamp": 1786362412.431861,
+    "checkpoint/latest": "step_00010000",
+    "dataset/train_episodes": 1000,
+    "dataset/train_frames": 149458,
+    "dataset/validation_episodes": 100,
+    "epoch": 8,
+    "model/parameters": 17130502,
+    "throughput/samples_per_second": 341.2497198720906,
+    "timing/data_seconds": 0.0001478789999964647,
+    "timing/update_seconds": 0.3749440039998717,
+    "train/backbone_learning_rate": 1e-05,
+    "train/gradient_norm": 2.7191405296325684,
+    "train/kld_loss": 0.0036801949609071016,
+    "train/l1_loss": 0.040903955698013306,
+    "train/learning_rate": 0.0001,
+    "train/loss": 0.07770590484142303,
+    "validation/action_mae_normalized": 0.03949196956422757,
+    "validation/action_mae_rad": 0.0007457285313387344
+  },
+  "status": "finished",
+  "wandb_run_path": "rmalhan0112-na/aic-far-approach/gfsuj4qx"
+}
