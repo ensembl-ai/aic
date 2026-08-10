@@ -109,7 +109,7 @@ def test_independent_warp_worlds_and_observations(configured_scene: dict) -> Non
     )
     config["visualization"]["enabled"] = False
 
-    runtime = AICWarpRuntime(config)
+    runtime = AICWarpRuntime(config, render_cameras=True)
     assert isinstance(runtime.robot, AICRobot)
     assert isinstance(runtime.robot.joints, ArmJoints)
     assert isinstance(runtime.hold_command, HoldPositionCommand)

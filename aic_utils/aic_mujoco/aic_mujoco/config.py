@@ -145,11 +145,11 @@ COLLECTION_SCHEMA = deep_merge(
             "instruction": str,
             "image_width": int,
             "image_height": int,
+            "replay_batch_size": int,
             "video_codec": str,
             "video_pixel_format": str,
             "video_crf": int,
-            "keep_failed_trajectories": bool,
-            "maximum_failed_trajectories": int,
+            "video_threads": int,
             "splits": {
                 "train": int,
                 "validation": int,
@@ -526,8 +526,10 @@ def validate_collection_config(config: dict[str, Any]) -> None:
         raise ValueError("Dataset images cannot exceed the native camera resolution")
     if not 0 <= dataset["video_crf"] <= 51:
         raise ValueError("dataset.video_crf must be in [0, 51]")
-    if dataset["maximum_failed_trajectories"] < 0:
-        raise ValueError("dataset.maximum_failed_trajectories cannot be negative")
+    if dataset["replay_batch_size"] <= 0:
+        raise ValueError("dataset.replay_batch_size must be positive")
+    if dataset["video_threads"] <= 0:
+        raise ValueError("dataset.video_threads must be positive")
     split_counts = dataset["splits"]
     if any(count < 0 for count in split_counts.values()):
         raise ValueError("Dataset split trajectory counts cannot be negative")

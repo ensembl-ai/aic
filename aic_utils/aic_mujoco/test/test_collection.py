@@ -17,7 +17,7 @@ sys.path.insert(0, str(PACKAGE))
 
 from aic_mujoco.config import load_collection_config
 from aic_mujoco.controllers import CartesianMoveController
-from aic_mujoco.dataset import EpisodeWriter, SyntheticDataset
+from aic_mujoco.dataset import ReplayWriter, RolloutWriter, SyntheticDataset
 from aic_mujoco.joints import required_model_id
 from aic_mujoco.runtime import AICWarpRuntime
 from aic_mujoco.scene import prepare_scene
@@ -103,7 +103,8 @@ def test_collection_config_is_strict(tmp_path: Path) -> None:
 def test_cartesian_teacher_uses_bounded_device_actions() -> None:
     config = small_collection_config()
     prepare_scene(config)
-    runtime = AICWarpRuntime(config)
+    runtime = AICWarpRuntime(config, render_cameras=False)
+    assert runtime.rgb == {}
     controlled_body_id = required_model_id(
         runtime.host_model,
         mujoco.mjtObj.mjOBJ_BODY,
@@ -191,14 +192,10 @@ def test_episode_dataset_is_atomic_resumable_and_valid(tmp_path: Path) -> None:
     dataset = SyntheticDataset(config)
     assignment = dataset.next_assignment()
     assert assignment is not None
-    writer = EpisodeWriter(
-        dataset,
-        assignment,
-        {
-            "joint_hold": np.zeros(6, dtype=np.float32),
-            "board_position": np.zeros(3, dtype=np.float32),
-        },
-    )
+    reset_state = {
+        "joint_hold": np.zeros(6, dtype=np.float32),
+        "board_position": np.zeros(3, dtype=np.float32),
+    }
     frames = {
         camera_name: np.zeros((12, 16, 3), dtype=np.uint8)
         for camera_name in config["scene"]["names"]["cameras"]
@@ -215,10 +212,33 @@ def test_episode_dataset_is_atomic_resumable_and_valid(tmp_path: Path) -> None:
         "orientation_error_rad": 0.001,
         "tared_wrench": np.zeros(6, dtype=np.float32),
     }
-    writer.append(frames, sample)
-    writer.append(frames, sample)
-    writer.finish(True, "pose_tolerance")
-    dataset.validate()
+    samples = {
+        name: np.expand_dims(np.asarray(value), axis=0)
+        for name, value in sample.items()
+    }
+
+    failed_writer = RolloutWriter(dataset, assignment, reset_state)
+    failed_writer.append(samples, 0)
+    assignment = dataset.retry_assignment(assignment)
+    assert not (dataset.root / "failures").exists()
+    assert not any(dataset.rollouts_root.rglob("episode_*"))
+
+    writer = RolloutWriter(dataset, assignment, reset_state)
+    writer.append(samples, 0)
+    writer.append(samples, 0)
+    writer.finish("pose_tolerance")
+    assert dataset.rollouts_complete()
+    assert not dataset.is_complete()
+
+    staged = SyntheticDataset(config)
+    assert staged.rollout_counts() == {"train": 1, "validation": 0, "test": 0}
+    replay_assignments = staged.pending_replay_assignments()
+    assert len(replay_assignments) == 1
+    replay = ReplayWriter(staged, replay_assignments[0])
+    replay.append(frames)
+    replay.append(frames)
+    replay.finish()
+    staged.validate()
 
     resumed = SyntheticDataset(config)
     assert resumed.counts() == {"train": 1, "validation": 0, "test": 0}

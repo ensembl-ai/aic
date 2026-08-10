@@ -75,6 +75,31 @@ def rotation_matrix_from_quaternion(quaternion: Sequence[float]) -> np.ndarray:
     return result.reshape(3, 3)
 
 
+def quaternion_from_rotation_matrix(rotation: Sequence[Sequence[float]]) -> np.ndarray:
+    """Convert a three-by-three rotation matrix to MuJoCo WXYZ format.
+
+    Args:
+        rotation: Finite three-by-three SO(3) matrix.
+
+    Returns:
+        Normalized four-element MuJoCo WXYZ quaternion.
+
+    Raises:
+        ValueError: If the matrix is malformed or is not in SO(3).
+    """
+
+    matrix = np.asarray(rotation, dtype=np.float64)
+    if matrix.shape != (3, 3) or not np.all(np.isfinite(matrix)):
+        raise ValueError("A rotation matrix must contain nine finite values")
+    if not np.allclose(matrix.T @ matrix, np.eye(3), rtol=0.0, atol=1.0e-6):
+        raise ValueError("A rotation matrix must be orthonormal")
+    if not np.isclose(np.linalg.det(matrix), 1.0, rtol=0.0, atol=1.0e-6):
+        raise ValueError("A rotation matrix must have determinant one")
+    quaternion = np.empty(4, dtype=np.float64)
+    mujoco.mju_mat2Quat(quaternion, matrix.reshape(9))
+    return normalized_quaternion(quaternion)
+
+
 def compose_pose(
     parent_position: Sequence[float],
     parent_quaternion: Sequence[float],

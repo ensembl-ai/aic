@@ -361,11 +361,11 @@ pixi run python aic_utils/aic_mujoco/scripts/collect_data.py
 ```
 
 The collector stops after the configured train, validation, and test counts are
-complete. `Ctrl+C` safely closes active videos; rerunning the same command
-removes only incomplete episode directories and resumes from completed
-episodes. The configured environments are also published through the same
-Viser scene used by the HOLD runtime, allowing trajectories to be inspected
-while they are collected.
+complete. It first generates compact controller trajectories across every
+configured rollout world without allocating RGB, then replays successful
+trajectories through a bounded camera batch for video export. `Ctrl+C` preserves
+completed rollouts and episodes so the same command can resume either stage.
+When enabled, Viser can inspect rollout geometry without downloading images.
 
 ### Algorithmic design
 
@@ -535,7 +535,7 @@ exact SFP-tip pose + configured goal pose
                     ↓
        HoldPositionCommand.position
                     ↓
-       JointHoldController at 500 Hz
+       JointHoldController at 200 Hz
                     ↓
              MJWarp physics
 ```
@@ -576,13 +576,14 @@ target.
 
 Success requires both configured position and orientation tolerances for five
 consecutive 20 Hz samples. A 200-sample limit bounds every attempt. Failed
-attempts are kept for diagnosis and resampled until the requested successful
-trajectory counts are reached, subject to the explicit failure limit.
+attempts are discarded and resampled until the requested successful trajectory
+counts are reached.
 
 #### RGB observations
 
 The AIC cameras are RGB-only at their native 1152 × 1024 resolution and 20 Hz.
-At the 500 Hz physics rate, one camera update occurs every 25 physics steps.
+At the committed 200 Hz physics rate, one camera update occurs every 10 physics
+steps.
 MJWarp internally stores packed pixels in flat per-camera regions. The runtime
 unpacks them in a Warp kernel and exposes named device tensors:
 
@@ -593,16 +594,17 @@ rgb.right   (N, 1024, 1152, 3) uint8
 ```
 
 There is no depth allocation and the runtime performs no implicit resize. The
-dataset writer explicitly downsamples the native device tensors to the
-`dataset.image_width` and `dataset.image_height` values before host transfer.
+rollout runtime allocates no camera buffers. During the second stage, a bounded
+replay runtime renders saved robot states and downsamples native device tensors
+to `dataset.image_width` and `dataset.image_height` before host transfer.
 The committed 288 × 256 size preserves the native 9:8 aspect ratio while
 reducing video encoding and storage cost. It is a dataset choice, not a change
 to the simulated AIC cameras.
 
 Native RGB is expensive: three cameras produce 3,538,944 rays per environment
-per frame. Choose `runtime.num_envs` against actual GPU memory and measured
-throughput rather than assuming the low-dimensional physics batch size will
-also be a sensible image batch size.
+per frame. `runtime.num_envs` therefore controls large-scale physics rollout
+parallelism, while `dataset.replay_batch_size` independently bounds simultaneous
+camera worlds and video writers.
 
 #### F/T observations and taring
 
@@ -638,8 +640,8 @@ For each reset environment independently, taring:
 4. subtracts that baseline from subsequent readings.
 
 This is asynchronous. A reset environment can settle and retare while all
-other environments continue stepping. Raw wrench is sampled every 5 physics
-steps (100 Hz); the 50 Hz publication clock fires every 10 steps for future
+other environments continue stepping. Raw wrench is sampled every 2 physics
+steps (100 Hz); the 50 Hz publication clock fires every 4 steps for future
 evaluation-interface integration. Each environment's simulation time is reset
 when its tare completes, and its independent `episode_steps` counter advances
 only while `tare_ready` is true.
@@ -667,11 +669,11 @@ foundation and policy branches.
 ```text
 aic_mujoco/
 ├── aic_mujoco/
-│   ├── collection.py   asynchronous teacher/data orchestration
+│   ├── collection.py   rollout and bounded RGB-replay orchestration
 │   ├── commands.py     HOLD, Cartesian-pose, and joint-delta objects
 │   ├── config.py       strict JSON merge and validation
 │   ├── controllers.py  Warp impedance and Cartesian DLS controllers
-│   ├── dataset.py      atomic episode/video storage and resume logic
+│   ├── dataset.py      compact rollout and final episode storage
 │   ├── joints.py       named joint/actuator address mapping
 │   ├── outputs.py      selected-world Viser geometry bridge
 │   ├── robot.py        validated AIC simulation robot interface
@@ -760,7 +762,7 @@ command, and controller objects rather than duplicating their responsibilities.
 Its public surface is small:
 
 ```python
-runtime = AICWarpRuntime(config)
+runtime = AICWarpRuntime(config, render_cameras=True)
 events = runtime.step()
 observations = runtime.observations()
 reset_parameters = runtime.reset_state()
@@ -779,9 +781,10 @@ episode's randomized scene reproducible even if asynchronous scheduling assigns
 it to a different environment after a restart.
 
 On CUDA, the physics/HOLD/tare sequence is captured as a Warp graph when
-`physics.graph_capture` is true. Camera rendering remains on its independent
-20 Hz clock. Contact and constraint capacities are explicit config values and
-are checked after initial settling; they are not silently guessed.
+`physics.graph_capture` is true. Camera rendering is an explicit runtime
+capability and remains on its independent 20 Hz clock when enabled. Contact and
+constraint capacities are explicit config values and are checked after initial
+settling; they are not silently guessed.
 
 #### MJWarp boundary and known constraints
 
@@ -806,14 +809,18 @@ These are deliberate boundaries of this foundation, not silent fallbacks.
 
 #### Dataset contract
 
-The collector records observations and the teacher action before that action is
-tracked over the next 50 ms. Every successful episode is published atomically:
+The collector records state and the teacher action before that action is tracked
+over the next 50 ms. Compact successful rollouts are staged atomically, and the
+bounded replay stage reconstructs the corresponding camera observation from the
+saved joint state and deterministic scene sample before publishing the final
+episode atomically:
 
 ```text
 data/far_approach/
 ├── dataset.json              exact generation contract
-├── collection_state.json    next randomization ID and failure count
+├── collection_state.json    next randomization ID
 ├── manifest.jsonl            successful episode index
+├── rollouts/                  compact episodes awaiting RGB replay
 ├── train/
 │   └── episode_000000/
 │       ├── center.mp4
@@ -822,8 +829,7 @@ data/far_approach/
 │       ├── trajectory.npz
 │       └── episode.json
 ├── validation/
-├── test/
-└── failures/
+└── test/
 ```
 
 `trajectory.npz` contains aligned arrays for ordered `qpos`, `qvel`, bounded
@@ -835,10 +841,11 @@ Language and reset/randomization metadata live in `episode.json`. Videos are
 H.264 rather than loose PNG files.
 
 The committed split requests 1,000 training, 100 validation, and 200 test
-trajectories across 16 asynchronous worlds. Finishing one environment resets
-and re-tares only that environment; all others continue. These are distinct
-held-out samples from the configured randomization distribution, not a claim of
-a held-out real-world or out-of-distribution test set.
+trajectories across 1,024 asynchronous rollout worlds. Finishing one environment
+resets and re-tares only that environment; all others continue. RGB replay is
+bounded separately by `dataset.replay_batch_size`. These are distinct held-out
+samples from the configured randomization distribution, not a claim of a
+held-out real-world or out-of-distribution test set.
 
 The local `data`, `runs`, and `checkpoints` directories are ignored by Git.
 Source, configs, dataset contracts, metrics, and intentionally selected report

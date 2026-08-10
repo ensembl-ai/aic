@@ -243,11 +243,12 @@ class StepEvents:
 class AICWarpRuntime:
     """One shared MJCF model with independently randomized MJWarp worlds."""
 
-    def __init__(self, config: dict[str, Any]):
-        """Compile, upload, reset, tare, and render all configured worlds.
+    def __init__(self, config: dict[str, Any], render_cameras: bool):
+        """Compile, upload, reset, and optionally render configured worlds.
 
         Args:
             config: Strict merged runtime or collection configuration.
+            render_cameras: Whether to allocate and execute MJWarp RGB rendering.
 
         Raises:
             ValueError: If graph capture is requested on a non-CUDA device or
@@ -257,6 +258,10 @@ class AICWarpRuntime:
         self.config = config
         self.num_envs = config["runtime"]["num_envs"]
         self.device = wp.get_device(config["physics"]["device"])
+        self.render_cameras = render_cameras
+        self.render_context: Any = None
+        self.rgb: dict[str, Any] = {}
+        self.rgb_addresses: dict[str, int] = {}
         if config["physics"]["graph_capture"] and not self.device.is_cuda:
             raise ValueError("physics.graph_capture requires a CUDA device")
 
@@ -272,13 +277,15 @@ class AICWarpRuntime:
                 njmax=config["physics"]["njmax"],
             )
             self.allocate_state()
-            self.create_renderer()
+            if self.render_cameras:
+                self.create_renderer()
             self.compile_physics_step()
             self.reset_counts = np.zeros(self.num_envs, dtype=np.uint64)
             self.episode_step = 0
             self.reset()
             self.finish_initial_tare()
-            self.render()
+            if self.render_cameras:
+                self.render()
             self.check_capacities()
             self.check_internal_grasp_contacts()
 
@@ -646,23 +653,31 @@ class AICWarpRuntime:
         )
 
     def render(self) -> None:
-        """Update all three RGB tensors from MJWarp's batched ray renderer."""
+        """Update all three RGB tensors from MJWarp's batched ray renderer.
 
-        mjw.fwd_position(self.model, self.data)
-        mjw.render(self.model, self.data, self.render_context)
-        camera = self.config["cameras"]
-        for key, output in self.rgb.items():
-            wp.launch(
-                unpack_rgb,
-                dim=(self.num_envs, camera["height"], camera["width"]),
-                inputs=[
-                    self.render_context.rgb_data,
-                    self.rgb_addresses[key],
-                    camera["width"],
-                ],
-                outputs=[output],
-                device=self.device,
-            )
+        Raises:
+            RuntimeError: If this runtime was created without camera rendering.
+        """
+
+        if not self.render_cameras:
+            raise RuntimeError("Camera rendering is disabled for this runtime")
+
+        with wp.ScopedDevice(self.device):
+            mjw.fwd_position(self.model, self.data)
+            mjw.render(self.model, self.data, self.render_context)
+            camera = self.config["cameras"]
+            for key, output in self.rgb.items():
+                wp.launch(
+                    unpack_rgb,
+                    dim=(self.num_envs, camera["height"], camera["width"]),
+                    inputs=[
+                        self.render_context.rgb_data,
+                        self.rgb_addresses[key],
+                        camera["width"],
+                    ],
+                    outputs=[output],
+                    device=self.device,
+                )
 
     def step(self) -> StepEvents:
         """Advance every independent world once and update due observations."""
@@ -674,9 +689,106 @@ class AICWarpRuntime:
             publication = self.episode_step % self.publication_interval == 0
             if wrench_sample:
                 self.sample_wrench_now()
-            if camera:
+            if camera and self.render_cameras:
                 self.render()
         return StepEvents(camera, wrench_sample, publication)
+
+    def set_joint_positions(self, positions: np.ndarray) -> None:
+        """Set every world's generalized position for deterministic rendering.
+
+        Args:
+            positions: Finite array shaped ``(num_envs, nq)``.
+
+        Raises:
+            ValueError: If the array shape or values are invalid.
+        """
+
+        values = np.asarray(positions, dtype=np.float32)
+        expected_shape = (self.num_envs, self.host_model.nq)
+        if values.shape != expected_shape:
+            raise ValueError(
+                f"Joint positions must have shape {expected_shape}, got {values.shape}"
+            )
+        if not np.all(np.isfinite(values)):
+            raise ValueError("Joint positions must be finite")
+        wp.copy(
+            self.data.qpos,
+            wp.array(values, dtype=float, device=self.device),
+        )
+
+    def set_scene_poses(
+        self,
+        board_positions: np.ndarray,
+        board_quaternions: np.ndarray,
+        nic_positions: np.ndarray,
+        nic_quaternions: np.ndarray,
+    ) -> None:
+        """Restore exact per-world board and NIC poses for visual replay.
+
+        Args:
+            board_positions: Board translations shaped ``(num_envs, 3)``.
+            board_quaternions: Board WXYZ rotations shaped ``(num_envs, 4)``.
+            nic_positions: NIC translations shaped ``(num_envs, 3)``.
+            nic_quaternions: NIC WXYZ rotations shaped ``(num_envs, 4)``.
+
+        Raises:
+            ValueError: If an input has the wrong shape or invalid values.
+        """
+
+        positions = {
+            "board": np.asarray(board_positions, dtype=np.float32),
+            "nic": np.asarray(nic_positions, dtype=np.float32),
+        }
+        quaternions = {
+            "board": np.asarray(board_quaternions, dtype=np.float32),
+            "nic": np.asarray(nic_quaternions, dtype=np.float32),
+        }
+        for name, values in positions.items():
+            if values.shape != (self.num_envs, 3) or not np.all(np.isfinite(values)):
+                raise ValueError(
+                    f"{name} positions must have shape ({self.num_envs}, 3) "
+                    "and be finite"
+                )
+        for name, values in quaternions.items():
+            if values.shape != (self.num_envs, 4) or not np.all(np.isfinite(values)):
+                raise ValueError(
+                    f"{name} quaternions must have shape ({self.num_envs}, 4) "
+                    "and be finite"
+                )
+            norms = np.linalg.norm(values, axis=1)
+            if not np.allclose(norms, 1.0, rtol=0.0, atol=1.0e-5):
+                raise ValueError(f"{name} quaternions must be normalized")
+
+        mocap_positions = self.data.mocap_pos.numpy()
+        mocap_quaternions = self.data.mocap_quat.numpy()
+        mocap_positions[:, self.robot.board_mocap_id] = positions["board"]
+        mocap_positions[:, self.robot.nic_mocap_id] = positions["nic"]
+        mocap_quaternions[:, self.robot.board_mocap_id] = quaternions["board"]
+        mocap_quaternions[:, self.robot.nic_mocap_id] = quaternions["nic"]
+        wp.copy(
+            self.data.mocap_pos,
+            wp.array(mocap_positions, dtype=wp.vec3, device=self.device),
+        )
+        wp.copy(
+            self.data.mocap_quat,
+            wp.array(mocap_quaternions, dtype=wp.quat, device=self.device),
+        )
+        wp.copy(
+            self.board_position,
+            wp.array(positions["board"], dtype=wp.vec3, device=self.device),
+        )
+        wp.copy(
+            self.board_quaternion,
+            wp.array(quaternions["board"], dtype=wp.quat, device=self.device),
+        )
+        wp.copy(
+            self.nic_position,
+            wp.array(positions["nic"], dtype=wp.vec3, device=self.device),
+        )
+        wp.copy(
+            self.nic_quaternion,
+            wp.array(quaternions["nic"], dtype=wp.quat, device=self.device),
+        )
 
     def observations(self) -> dict[str, Any]:
         """Return named device tensors; no packed renderer storage leaks out."""

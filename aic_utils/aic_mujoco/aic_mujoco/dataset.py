@@ -1,4 +1,4 @@
-"""Portable trajectory storage for controller-generated AIC demonstrations."""
+"""Resumable two-stage storage for synthetic AIC demonstrations."""
 
 from __future__ import annotations
 
@@ -14,20 +14,37 @@ from aic_mujoco.utils.images import resize_rgb_bilinear
 
 
 SPLIT_NAMES = ("train", "validation", "test")
-DATASET_FORMAT_VERSION = 2
+DATASET_FORMAT_VERSION = 3
+TRAJECTORY_SHAPES = {
+    "qpos": (6,),
+    "qvel": (6,),
+    "action_delta_q": (6,),
+    "sfp_tip_position": (3,),
+    "sfp_tip_rotation_matrix": (3, 3),
+    "goal_position": (3,),
+    "goal_rotation_matrix": (3, 3),
+    "position_error_m": (),
+    "orientation_error_rad": (),
+    "tared_wrench": (6,),
+}
 
 
 class DatasetImageBuffer:
-    """Resize all policy images on-device, then download only resized tensors."""
+    """Resize replay images on-device, then download only policy resolution."""
 
     def __init__(self, config: dict[str, Any], runtime: Any):
         """Allocate one resized RGB tensor for every configured camera.
 
         Args:
             config: Strict merged collection configuration.
-            runtime: Initialized MJWarp runtime containing native RGB tensors.
+            runtime: Camera-enabled MJWarp replay runtime.
+
+        Raises:
+            ValueError: If the supplied runtime has no RGB outputs.
         """
 
+        if not runtime.rgb:
+            raise ValueError("Dataset image buffers require a camera-enabled runtime")
         native = config["cameras"]
         dataset = config["dataset"]
         self.device = runtime.device
@@ -51,7 +68,7 @@ class DatasetImageBuffer:
         }
 
     def download(self, source_images: dict[str, Any]) -> dict[str, np.ndarray]:
-        """Return one host RGB batch for every named camera."""
+        """Resize and return one host RGB batch for every named camera."""
 
         downloaded: dict[str, np.ndarray] = {}
         for camera_name, source in source_images.items():
@@ -74,7 +91,7 @@ class DatasetImageBuffer:
 
 
 class EpisodeAssignment:
-    """One reserved output trajectory and its deterministic scene sample."""
+    """One reserved output episode and its deterministic scene sample."""
 
     def __init__(self, split: str, episode_index: int, randomization_id: int):
         """Record a split slot and deterministic randomization identifier.
@@ -91,10 +108,10 @@ class EpisodeAssignment:
 
 
 class SyntheticDataset:
-    """Own dataset layout, resume state, split allocation, and validation."""
+    """Own rollout staging, RGB export, resume state, and validation."""
 
     def __init__(self, config: dict[str, Any]):
-        """Prepare or resume the configured dataset directory.
+        """Prepare or resume the configured two-stage dataset directory.
 
         Args:
             config: Strict merged collection configuration.
@@ -103,14 +120,15 @@ class SyntheticDataset:
         self.config = config
         self.settings = config["dataset"]
         self.root = Path(self.settings["output_directory"])
+        self.rollouts_root = self.root / "rollouts"
         self.requested = dict(self.settings["splits"])
         self.completed = {split: set() for split in SPLIT_NAMES}
+        self.rollout_ready = {split: set() for split in SPLIT_NAMES}
         self.reserved = {split: set() for split in SPLIT_NAMES}
         self.state_path = self.root / "collection_state.json"
         self.manifest_path = self.root / "manifest.jsonl"
         self.contract_path = self.root / "dataset.json"
         self.next_randomization_id = 0
-        self.failed_trajectories = 0
         self.prepare_directory()
 
     def contract(self) -> dict[str, Any]:
@@ -139,12 +157,11 @@ class SyntheticDataset:
         }
 
     def prepare_directory(self) -> None:
-        """Create the dataset layout and recover resumable state.
+        """Create the two-stage layout and recover resumable state.
 
         Raises:
             FileExistsError: If output exists while resume is disabled.
-            ValueError: If an existing dataset has a different contract or
-                malformed state.
+            ValueError: If existing data violates the configured contract.
         """
 
         if self.root.exists() and not self.settings["resume"]:
@@ -152,9 +169,10 @@ class SyntheticDataset:
                 f"Dataset directory already exists and resume is disabled: {self.root}"
             )
         self.root.mkdir(parents=True, exist_ok=True)
+        self.rollouts_root.mkdir(exist_ok=True)
         for split in SPLIT_NAMES:
             (self.root / split).mkdir(exist_ok=True)
-        (self.root / "failures").mkdir(exist_ok=True)
+            (self.rollouts_root / split).mkdir(exist_ok=True)
 
         expected_contract = self.contract()
         if self.contract_path.exists():
@@ -163,7 +181,8 @@ class SyntheticDataset:
             )
             if existing_contract != expected_contract:
                 raise ValueError(
-                    "Existing dataset contract differs from the collection configuration"
+                    "Existing dataset contract differs from the collection "
+                    "configuration"
                 )
         else:
             self.write_json_atomic(self.contract_path, expected_contract)
@@ -173,55 +192,123 @@ class SyntheticDataset:
                 shutil.rmtree(incomplete)
 
         self.scan_completed()
+        self.scan_rollouts()
         if self.state_path.exists():
             state = json.loads(self.state_path.read_text(encoding="utf-8"))
-            expected_keys = {"next_randomization_id", "failed_trajectories"}
+            expected_keys = {"next_randomization_id"}
             if set(state) != expected_keys:
                 raise ValueError("Dataset collection_state.json has an invalid shape")
             self.next_randomization_id = int(state["next_randomization_id"])
-            self.failed_trajectories = int(state["failed_trajectories"])
         else:
             self.write_state()
 
-    def scan_completed(self) -> None:
-        """Discover and validate completed episode directories.
+    def validate_episode_files(
+        self,
+        path: Path,
+        split: str,
+        episode_index: int,
+    ) -> dict[str, Any]:
+        """Validate compact trajectory and metadata files for one episode.
+
+        Args:
+            path: Episode directory.
+            split: Expected split name.
+            episode_index: Expected split-local index.
+
+        Returns:
+            Parsed metadata.
 
         Raises:
-            ValueError: If an episode is malformed, duplicated, or out of its
-                configured split range.
+            ValueError: If metadata or trajectory arrays violate the contract.
         """
 
+        metadata_path = path / "episode.json"
+        trajectory_path = path / "trajectory.npz"
+        if not metadata_path.is_file() or not trajectory_path.is_file():
+            raise ValueError(f"Episode is missing metadata or trajectory: {path}")
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        if (
+            metadata.get("split") != split
+            or metadata.get("episode_index") != episode_index
+            or metadata.get("success") is not True
+        ):
+            raise ValueError(f"Invalid episode metadata: {metadata_path}")
+        with np.load(trajectory_path) as trajectory:
+            if set(trajectory.files) != set(TRAJECTORY_SHAPES):
+                raise ValueError(f"Unexpected trajectory arrays in {path}")
+            sample_count = int(trajectory["qpos"].shape[0])
+            for name, shape in TRAJECTORY_SHAPES.items():
+                if trajectory[name].shape != (sample_count, *shape):
+                    raise ValueError(f"Invalid {name} shape in {path}")
+                if trajectory[name].dtype != np.float32:
+                    raise ValueError(f"Invalid {name} dtype in {path}")
+                if not np.all(np.isfinite(trajectory[name])):
+                    raise ValueError(f"Non-finite {name} values in {path}")
+        if metadata.get("steps") != sample_count or sample_count <= 0:
+            raise ValueError(f"Invalid metadata step count in {path}")
+        return metadata
+
+    def scan_completed(self) -> None:
+        """Discover and validate fully exported RGB episodes."""
+
+        expected_cameras = set(self.config["scene"]["names"]["cameras"])
         for split in SPLIT_NAMES:
-            for episode_directory in (self.root / split).glob("episode_*"):
-                if not episode_directory.is_dir():
+            for path in (self.root / split).glob("episode_*"):
+                if not path.is_dir():
                     continue
-                metadata_path = episode_directory / "episode.json"
-                trajectory_path = episode_directory / "trajectory.npz"
-                if not metadata_path.is_file() or not trajectory_path.is_file():
+                try:
+                    episode_index = int(path.name.removeprefix("episode_"))
+                except ValueError as error:
                     raise ValueError(
-                        f"Completed episode is missing metadata or state: {episode_directory}"
-                    )
-                metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-                if metadata.get("split") != split or metadata.get("success") is not True:
-                    raise ValueError(f"Invalid completed episode metadata: {metadata_path}")
-                episode_index = int(metadata["episode_index"])
+                        f"Invalid episode directory name: {path}"
+                    ) from error
                 if episode_index < 0 or episode_index >= self.requested[split]:
                     raise ValueError(
-                        f"Episode index is outside configured {split} split: {episode_index}"
+                        f"Episode index is outside configured {split}: {path}"
                     )
+                self.validate_episode_files(path, split, episode_index)
+                videos = {video.stem for video in path.glob("*.mp4")}
+                if videos != expected_cameras:
+                    raise ValueError(f"Episode camera videos differ in {path}")
                 if episode_index in self.completed[split]:
-                    raise ValueError(f"Duplicate {split} episode index: {episode_index}")
+                    raise ValueError(
+                        f"Duplicate {split} episode index: {episode_index}"
+                    )
                 self.completed[split].add(episode_index)
+
+    def scan_rollouts(self) -> None:
+        """Discover compact successful trajectories awaiting RGB replay."""
+
+        for split in SPLIT_NAMES:
+            for path in (self.rollouts_root / split).glob("episode_*"):
+                if not path.is_dir():
+                    continue
+                try:
+                    episode_index = int(path.name.removeprefix("episode_"))
+                except ValueError as error:
+                    raise ValueError(
+                        f"Invalid rollout directory name: {path}"
+                    ) from error
+                if episode_index in self.completed[split]:
+                    shutil.rmtree(path)
+                    continue
+                if episode_index < 0 or episode_index >= self.requested[split]:
+                    raise ValueError(
+                        f"Rollout index is outside configured {split}: {path}"
+                    )
+                self.validate_episode_files(path, split, episode_index)
+                if any(path.glob("*.mp4")):
+                    raise ValueError(
+                        f"Compact rollout unexpectedly contains videos: {path}"
+                    )
+                self.rollout_ready[split].add(episode_index)
 
     def write_state(self) -> None:
         """Atomically persist resumable collection counters."""
 
         self.write_json_atomic(
             self.state_path,
-            {
-                "next_randomization_id": self.next_randomization_id,
-                "failed_trajectories": self.failed_trajectories,
-            },
+            {"next_randomization_id": self.next_randomization_id},
         )
 
     @staticmethod
@@ -241,96 +328,155 @@ class SyntheticDataset:
         temporary.replace(path)
 
     def reserve_randomization_id(self) -> int:
-        """Reserve and persist the next deterministic scene sample ID.
+        """Reserve and persist the next deterministic scene sample ID."""
 
-        Returns:
-            The reserved nonnegative identifier.
-        """
+        return self.reserve_randomization_ids(1)[0]
 
-        randomization_id = self.next_randomization_id
-        self.next_randomization_id += 1
+    def reserve_randomization_ids(self, count: int) -> list[int]:
+        """Reserve and persist a contiguous batch of scene sample IDs."""
+
+        if count <= 0:
+            raise ValueError("Randomization ID reservation count must be positive")
+        first = self.next_randomization_id
+        self.next_randomization_id += count
         self.write_state()
-        return randomization_id
+        return list(range(first, self.next_randomization_id))
 
     def next_assignment(self) -> EpisodeAssignment | None:
-        """Reserve the next missing trajectory in split order.
+        """Reserve the next episode lacking a compact successful rollout."""
 
-        Returns:
-            A new assignment, or ``None`` when all slots are reserved.
-        """
+        assignments = self.next_assignments(1)
+        return assignments[0] if assignments else None
 
+    def next_assignments(self, count: int) -> list[EpisodeAssignment]:
+        """Reserve up to ``count`` missing episodes with one state write."""
+
+        if count <= 0:
+            raise ValueError("Episode assignment count must be positive")
+        slots: list[tuple[str, int]] = []
         for split in SPLIT_NAMES:
-            unavailable = self.completed[split] | self.reserved[split]
+            unavailable = (
+                self.completed[split]
+                | self.rollout_ready[split]
+                | self.reserved[split]
+            )
             for episode_index in range(self.requested[split]):
                 if episode_index not in unavailable:
                     self.reserved[split].add(episode_index)
-                    return EpisodeAssignment(
-                        split,
-                        episode_index,
-                        self.reserve_randomization_id(),
-                    )
-        return None
+                    slots.append((split, episode_index))
+                    if len(slots) == count:
+                        break
+            if len(slots) == count:
+                break
+        if not slots:
+            return []
+        randomization_ids = self.reserve_randomization_ids(len(slots))
+        return [
+            EpisodeAssignment(split, episode_index, randomization_id)
+            for (split, episode_index), randomization_id in zip(
+                slots,
+                randomization_ids,
+                strict=True,
+            )
+        ]
 
     def retry_assignment(self, assignment: EpisodeAssignment) -> EpisodeAssignment:
-        """Resample a failed split slot with a new randomization ID.
+        """Resample a failed output slot with a new randomization ID."""
 
-        Args:
-            assignment: Failed assignment whose output slot is retained.
+        return self.retry_assignments([assignment])[0]
 
-        Returns:
-            Replacement assignment for the same split and episode index.
-        """
+    def retry_assignments(
+        self, assignments: list[EpisodeAssignment]
+    ) -> list[EpisodeAssignment]:
+        """Resample failed output slots with one counter state write."""
 
-        return EpisodeAssignment(
-            assignment.split,
-            assignment.episode_index,
-            self.reserve_randomization_id(),
+        if not assignments:
+            return []
+        randomization_ids = self.reserve_randomization_ids(len(assignments))
+        return [
+            EpisodeAssignment(
+                assignment.split,
+                assignment.episode_index,
+                randomization_id,
+            )
+            for assignment, randomization_id in zip(
+                assignments,
+                randomization_ids,
+                strict=True,
+            )
+        ]
+
+    def rollout_path(self, assignment: EpisodeAssignment) -> Path:
+        """Return the compact staging directory for an assignment."""
+
+        return (
+            self.rollouts_root
+            / assignment.split
+            / f"episode_{assignment.episode_index:06d}"
         )
 
-    def mark_completed(self, assignment: EpisodeAssignment, metadata: dict[str, Any]) -> None:
-        """Record a successfully finalized episode in memory and the manifest.
+    def final_path(self, assignment: EpisodeAssignment) -> Path:
+        """Return the final RGB episode directory for an assignment."""
 
-        Args:
-            assignment: Completed dataset assignment.
-            metadata: Episode metadata written to the manifest.
-        """
+        return self.root / assignment.split / f"episode_{assignment.episode_index:06d}"
+
+    def mark_rollout_ready(self, assignment: EpisodeAssignment) -> None:
+        """Register a successful compact rollout for later RGB replay."""
+
+        self.rollout_ready[assignment.split].add(assignment.episode_index)
+
+    def pending_replay_assignments(self) -> list[EpisodeAssignment]:
+        """Return all staged but unexported assignments in split order."""
+
+        assignments: list[EpisodeAssignment] = []
+        for split in SPLIT_NAMES:
+            for episode_index in sorted(self.rollout_ready[split]):
+                path = self.rollouts_root / split / f"episode_{episode_index:06d}"
+                metadata = json.loads(
+                    (path / "episode.json").read_text(encoding="utf-8")
+                )
+                assignments.append(
+                    EpisodeAssignment(
+                        split,
+                        episode_index,
+                        metadata["randomization_id"],
+                    )
+                )
+        return assignments
+
+    def mark_completed(
+        self,
+        assignment: EpisodeAssignment,
+        metadata: dict[str, Any],
+    ) -> None:
+        """Register one fully exported RGB episode and update its manifest."""
 
         self.completed[assignment.split].add(assignment.episode_index)
+        self.rollout_ready[assignment.split].discard(assignment.episode_index)
         with self.manifest_path.open("a", encoding="utf-8") as manifest:
             manifest.write(json.dumps(metadata, sort_keys=True) + "\n")
 
-    def mark_failed(self, metadata: dict[str, Any]) -> int:
-        """Record one failed trajectory and enforce the configured limit.
-
-        Args:
-            metadata: Failed episode metadata.
-
-        Returns:
-            Zero-based failure index used for optional storage.
-
-        Raises:
-            RuntimeError: If failures exceed the configured maximum.
-        """
-
-        failure_index = self.failed_trajectories
-        self.failed_trajectories += 1
-        self.write_state()
-        failure_manifest = self.root / "failures.jsonl"
-        with failure_manifest.open("a", encoding="utf-8") as manifest:
-            manifest.write(json.dumps(metadata, sort_keys=True) + "\n")
-        if self.failed_trajectories > self.settings["maximum_failed_trajectories"]:
-            raise RuntimeError(
-                "Expert exceeded dataset.maximum_failed_trajectories; inspect failures"
-            )
-        return failure_index
-
     def counts(self) -> dict[str, int]:
-        """Return completed trajectory counts by split."""
+        """Return fully exported episode counts by split."""
 
         return {split: len(self.completed[split]) for split in SPLIT_NAMES}
 
+    def rollout_counts(self) -> dict[str, int]:
+        """Return compact staged rollout counts by split."""
+
+        return {split: len(self.rollout_ready[split]) for split in SPLIT_NAMES}
+
+    def rollouts_complete(self) -> bool:
+        """Return whether every requested slot is exported or ready to replay."""
+
+        return all(
+            len(self.completed[split] | self.rollout_ready[split])
+            == self.requested[split]
+            for split in SPLIT_NAMES
+        )
+
     def is_complete(self) -> bool:
-        """Return whether every requested dataset slot is complete."""
+        """Return whether every requested dataset slot has RGB and labels."""
 
         return all(
             len(self.completed[split]) == self.requested[split]
@@ -338,50 +484,25 @@ class SyntheticDataset:
         )
 
     def validate(self) -> None:
-        """Validate every stored episode against the dataset contract.
-
-        Raises:
-            RuntimeError: If collection has not completed.
-            ValueError: If arrays, metadata, or videos are inconsistent.
-        """
+        """Validate every final episode against the dataset contract."""
 
         if not self.is_complete():
             raise RuntimeError(
-                f"Dataset is incomplete: completed={self.counts()}, requested={self.requested}"
+                f"Dataset is incomplete: completed={self.counts()}, "
+                f"requested={self.requested}"
             )
         expected_cameras = set(self.config["scene"]["names"]["cameras"])
         for split in SPLIT_NAMES:
             for episode_index in range(self.requested[split]):
                 path = self.root / split / f"episode_{episode_index:06d}"
-                metadata = json.loads((path / "episode.json").read_text(encoding="utf-8"))
-                with np.load(path / "trajectory.npz") as trajectory:
-                    keys = set(trajectory.files)
-                    required = {
-                        "qpos",
-                        "qvel",
-                        "action_delta_q",
-                        "sfp_tip_position",
-                        "sfp_tip_rotation_matrix",
-                        "goal_position",
-                        "goal_rotation_matrix",
-                        "position_error_m",
-                        "orientation_error_rad",
-                        "tared_wrench",
-                    }
-                    if keys != required:
-                        raise ValueError(f"Unexpected trajectory arrays in {path}")
-                    sample_count = int(trajectory["qpos"].shape[0])
-                    if any(trajectory[key].shape[0] != sample_count for key in required):
-                        raise ValueError(f"Misaligned trajectory arrays in {path}")
-                if metadata["steps"] != sample_count:
-                    raise ValueError(f"Metadata step count differs in {path}")
+                self.validate_episode_files(path, split, episode_index)
                 videos = {video.stem for video in path.glob("*.mp4")}
                 if videos != expected_cameras:
                     raise ValueError(f"Episode camera videos differ in {path}")
 
 
-class EpisodeWriter:
-    """Write one synchronized observation/action trajectory atomically."""
+class RolloutWriter:
+    """Buffer one compact controller rollout without images or subprocesses."""
 
     def __init__(
         self,
@@ -389,40 +510,132 @@ class EpisodeWriter:
         assignment: EpisodeAssignment,
         reset_state: dict[str, Any],
     ):
-        """Create one temporary episode directory and its video streams.
+        """Preallocate one bounded trajectory buffer.
 
         Args:
-            dataset: Dataset that owns this episode.
+            dataset: Dataset receiving the compact rollout.
             assignment: Reserved output slot and randomization identifier.
-            reset_state: Per-environment reset metadata.
+            reset_state: Per-environment deterministic reset metadata.
         """
-
-        import imageio.v2 as imageio
 
         self.dataset = dataset
         self.assignment = assignment
         self.reset_state = reset_state
         self.steps = 0
         self.success_steps = 0
-        self.arrays: dict[str, list[np.ndarray | float]] = {
-            "qpos": [],
-            "qvel": [],
-            "action_delta_q": [],
-            "sfp_tip_position": [],
-            "sfp_tip_rotation_matrix": [],
-            "goal_position": [],
-            "goal_rotation_matrix": [],
-            "position_error_m": [],
-            "orientation_error_rad": [],
-            "tared_wrench": [],
+        maximum_steps = dataset.config["expert"]["maximum_episode_steps"]
+        self.arrays = {
+            name: np.empty((maximum_steps, *shape), dtype=np.float32)
+            for name, shape in TRAJECTORY_SHAPES.items()
         }
-        split_directory = dataset.root / assignment.split
-        self.incomplete_path = (
-            split_directory / f"episode_{assignment.episode_index:06d}.incomplete"
+
+    def append(self, samples: dict[str, np.ndarray], env_id: int) -> None:
+        """Append one environment from synchronized batched host samples.
+
+        Args:
+            samples: Batched state/action arrays.
+            env_id: Environment row to append.
+
+        Raises:
+            RuntimeError: If the configured trajectory capacity is exceeded.
+        """
+
+        if self.steps >= self.arrays["qpos"].shape[0]:
+            raise RuntimeError("Rollout exceeds expert.maximum_episode_steps")
+        for name, output in self.arrays.items():
+            output[self.steps] = samples[name][env_id]
+        self.steps += 1
+
+    def metadata(self, reason: str) -> dict[str, Any]:
+        """Build portable metadata for the current compact rollout."""
+
+        if self.steps == 0:
+            raise RuntimeError("Cannot describe an empty rollout")
+        return {
+            "split": self.assignment.split,
+            "episode_index": self.assignment.episode_index,
+            "randomization_id": self.assignment.randomization_id,
+            "success": True,
+            "termination": reason,
+            "steps": self.steps,
+            "instruction": self.dataset.settings["instruction"],
+            "control_hz": self.dataset.config["expert"]["control_hz"],
+            "pose_frame": "MJCF world",
+            "reset": json_value(self.reset_state),
+            "final_position_error_m": float(
+                self.arrays["position_error_m"][self.steps - 1]
+            ),
+            "final_orientation_error_rad": float(
+                self.arrays["orientation_error_rad"][self.steps - 1]
+            ),
+        }
+
+    def write(self, path: Path, metadata: dict[str, Any]) -> None:
+        """Atomically write compact arrays and metadata into a new directory."""
+
+        incomplete = path.with_name(path.name + ".incomplete")
+        if incomplete.exists():
+            shutil.rmtree(incomplete)
+        if path.exists():
+            raise FileExistsError(f"Episode already exists: {path}")
+        incomplete.mkdir(parents=True)
+        np.savez_compressed(
+            incomplete / "trajectory.npz",
+            qpos=self.arrays["qpos"][: self.steps],
+            qvel=self.arrays["qvel"][: self.steps],
+            action_delta_q=self.arrays["action_delta_q"][: self.steps],
+            sfp_tip_position=self.arrays["sfp_tip_position"][: self.steps],
+            sfp_tip_rotation_matrix=self.arrays["sfp_tip_rotation_matrix"][
+                : self.steps
+            ],
+            goal_position=self.arrays["goal_position"][: self.steps],
+            goal_rotation_matrix=self.arrays["goal_rotation_matrix"][: self.steps],
+            position_error_m=self.arrays["position_error_m"][: self.steps],
+            orientation_error_rad=self.arrays["orientation_error_rad"][: self.steps],
+            tared_wrench=self.arrays["tared_wrench"][: self.steps],
+        )
+        SyntheticDataset.write_json_atomic(incomplete / "episode.json", metadata)
+        incomplete.rename(path)
+
+    def finish(self, reason: str) -> None:
+        """Stage one successful compact rollout for RGB replay."""
+
+        metadata = self.metadata(reason)
+        path = self.dataset.rollout_path(self.assignment)
+        self.write(path, metadata)
+        self.dataset.mark_rollout_ready(self.assignment)
+
+
+class ReplayWriter:
+    """Encode RGB for one staged rollout within a bounded replay batch."""
+
+    def __init__(self, dataset: SyntheticDataset, assignment: EpisodeAssignment):
+        """Create one final temporary directory and three lazy video writers.
+
+        Args:
+            dataset: Dataset containing the staged rollout.
+            assignment: Staged episode being exported.
+        """
+
+        import imageio.v2 as imageio
+
+        self.dataset = dataset
+        self.assignment = assignment
+        self.source_path = dataset.rollout_path(assignment)
+        self.final_path = dataset.final_path(assignment)
+        self.incomplete_path = self.final_path.with_name(
+            self.final_path.name + ".incomplete"
         )
         if self.incomplete_path.exists():
             shutil.rmtree(self.incomplete_path)
+        if self.final_path.exists():
+            raise FileExistsError(f"Episode already exists: {self.final_path}")
         self.incomplete_path.mkdir()
+        self.metadata = json.loads(
+            (self.source_path / "episode.json").read_text(encoding="utf-8")
+        )
+        self.expected_steps = int(self.metadata["steps"])
+        self.steps = 0
         settings = dataset.settings
         self.video_writers = {
             camera_name: imageio.get_writer(
@@ -430,126 +643,51 @@ class EpisodeWriter:
                 fps=dataset.config["expert"]["control_hz"],
                 codec=settings["video_codec"],
                 pixelformat=settings["video_pixel_format"],
-                ffmpeg_params=["-crf", str(settings["video_crf"])],
+                ffmpeg_params=[
+                    "-crf",
+                    str(settings["video_crf"]),
+                    "-threads",
+                    str(settings["video_threads"]),
+                ],
                 macro_block_size=None,
             )
             for camera_name in dataset.config["scene"]["names"]["cameras"]
         }
 
-    def append(
-        self,
-        frames: dict[str, np.ndarray],
-        sample: dict[str, np.ndarray | float],
-    ) -> None:
-        """Append one synchronized observation/action sample.
+    def append(self, frames: dict[str, np.ndarray]) -> None:
+        """Append one synchronized frame from every configured camera."""
 
-        Args:
-            frames: RGB frame for every configured camera.
-            sample: State, action, pose, error, and wrench values.
-        """
-
+        if self.steps >= self.expected_steps:
+            raise RuntimeError("Replay produced more frames than the staged rollout")
         for camera_name, writer in self.video_writers.items():
             writer.append_data(frames[camera_name])
-        for key in self.arrays:
-            self.arrays[key].append(np.asarray(sample[key]).copy())
         self.steps += 1
 
-    def close_videos(self) -> None:
-        """Close every open camera video writer."""
+    def close(self) -> None:
+        """Close all active video encoders."""
 
         for writer in self.video_writers.values():
             writer.close()
         self.video_writers.clear()
 
-    def metadata(self, success: bool, reason: str) -> dict[str, Any]:
-        """Build portable metadata for the current episode.
+    def finish(self) -> None:
+        """Atomically publish videos and compact labels as a final episode."""
 
-        Args:
-            success: Whether the teacher reached its pose tolerance.
-            reason: Explicit termination reason.
-
-        Returns:
-            JSON-serializable episode metadata.
-        """
-
-        return {
-            "split": self.assignment.split,
-            "episode_index": self.assignment.episode_index,
-            "randomization_id": self.assignment.randomization_id,
-            "success": success,
-            "termination": reason,
-            "steps": self.steps,
-            "instruction": self.dataset.settings["instruction"],
-            "control_hz": self.dataset.config["expert"]["control_hz"],
-            "pose_frame": "MJCF world",
-            "reset": json_value(self.reset_state),
-            "final_position_error_m": float(self.arrays["position_error_m"][-1]),
-            "final_orientation_error_rad": float(
-                self.arrays["orientation_error_rad"][-1]
-            ),
-        }
-
-    def finish(self, success: bool, reason: str) -> None:
-        """Atomically finalize, register, or discard this trajectory.
-
-        Args:
-            success: Whether the trajectory reached its goal.
-            reason: Explicit termination reason.
-
-        Raises:
-            FileExistsError: If the final episode path already exists.
-            RuntimeError: If no samples were appended.
-        """
-
-        self.close_videos()
-        if self.steps == 0:
-            raise RuntimeError("Cannot finish an empty trajectory")
-        arrays = {
-            key: np.asarray(values, dtype=np.float32)
-            for key, values in self.arrays.items()
-        }
-        np.savez_compressed(self.incomplete_path / "trajectory.npz", **arrays)
-        metadata = self.metadata(success, reason)
-        SyntheticDataset.write_json_atomic(
-            self.incomplete_path / "episode.json", metadata
-        )
-
-        if success:
-            completed_path = (
-                self.dataset.root
-                / self.assignment.split
-                / f"episode_{self.assignment.episode_index:06d}"
+        self.close()
+        if self.steps != self.expected_steps:
+            raise RuntimeError(
+                f"Replay frame count {self.steps} differs from expected "
+                f"{self.expected_steps}"
             )
-            if completed_path.exists():
-                raise FileExistsError(f"Episode already exists: {completed_path}")
-            self.incomplete_path.rename(completed_path)
-            self.dataset.mark_completed(self.assignment, metadata)
-            return
-
-        failure_index = self.dataset.mark_failed(metadata)
-        if self.dataset.settings["keep_failed_trajectories"]:
-            failure_path = (
-                self.dataset.root / "failures" / f"failure_{failure_index:06d}"
-            )
-            self.incomplete_path.rename(failure_path)
-        else:
-            shutil.rmtree(self.incomplete_path)
-
-    def close_incomplete(self) -> None:
-        """Close resources while leaving the episode uncommitted."""
-
-        self.close_videos()
+        shutil.copy2(self.source_path / "trajectory.npz", self.incomplete_path)
+        shutil.copy2(self.source_path / "episode.json", self.incomplete_path)
+        self.incomplete_path.rename(self.final_path)
+        self.dataset.mark_completed(self.assignment, self.metadata)
+        shutil.rmtree(self.source_path)
 
 
 def json_value(value: Any) -> Any:
-    """Convert nested NumPy values into JSON-serializable Python values.
-
-    Args:
-        value: Arbitrarily nested supported value.
-
-    Returns:
-        Equivalent value containing only JSON-compatible containers/scalars.
-    """
+    """Convert nested NumPy values into JSON-serializable values."""
 
     if isinstance(value, np.ndarray):
         return value.tolist()

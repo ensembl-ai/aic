@@ -16,7 +16,7 @@ def main() -> None:
 
     config = load_config()
     scene_path = prepare_scene(config)
-    runtime = AICWarpRuntime(config)
+    runtime = AICWarpRuntime(config, render_cameras=True)
     observations = runtime.observations()
     print(f"Scene: {scene_path}")
     print(f"Worlds: {runtime.num_envs} on {runtime.device}")

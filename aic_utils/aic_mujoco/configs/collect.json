@@ -40,11 +40,11 @@
     "instruction": "Move the SFP module to the first port entrance",
     "image_width": 288,
     "image_height": 256,
+    "replay_batch_size": 6,
     "video_codec": "libx264",
     "video_pixel_format": "yuv420p",
     "video_crf": 18,
-    "keep_failed_trajectories": true,
-    "maximum_failed_trajectories": 100,
+    "video_threads": 1,
     "splits": {
       "train": 1000,
       "validation": 100,
