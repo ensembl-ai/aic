@@ -854,8 +854,9 @@ not download or encode camera images. It never calls regular MuJoCo physics or
 `visualization.env_ids` explicitly selects the displayed worlds. The committed
 value `"all"` expands to every environment ID from `0` through `N-1`; an
 explicit integer list remains supported for selected-world debugging. Multiple
-displayed worlds are arranged row-by-row using the configured `grid_columns`
-and `[x, y]` `grid_spacing`. This affects only the human view, not physics.
+displayed worlds are arranged in a compact near-square grid using the configured
+`[x, y]` `grid_spacing`; perfect-square counts produce square grids. This affects
+only the human view, not physics.
 Initial viewer position/look-at and real-time pacing are explicit in the
 configuration.
 

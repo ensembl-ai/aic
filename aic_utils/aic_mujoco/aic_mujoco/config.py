@@ -111,7 +111,6 @@ CONFIG_SCHEMA: dict[str, Any] = {
         "port": int,
         "env_ids": (list, str),
         "realtime": bool,
-        "grid_columns": int,
         "grid_spacing": list,
         "initial_camera_position": list,
         "initial_camera_look_at": list,
@@ -422,8 +421,6 @@ def validate_config(
             raise ValueError("visualization.host cannot be empty")
         if not 1 <= visualization["port"] <= 65535:
             raise ValueError("visualization.port must be in [1, 65535]")
-        if visualization["grid_columns"] <= 0:
-            raise ValueError("visualization.grid_columns must be positive")
         if any(value <= 0.0 for value in vectors["visualization.grid_spacing"]):
             raise ValueError("visualization.grid_spacing values must be positive")
         if vectors["visualization.initial_camera_position"] == vectors[

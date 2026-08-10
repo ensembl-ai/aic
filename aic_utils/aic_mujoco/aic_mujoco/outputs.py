@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 import numpy as np
@@ -174,7 +175,7 @@ class RuntimeOutputs:
         self.server.initial_camera.look_at = tuple(visual["initial_camera_look_at"])
 
         grid_spacing = np.asarray(visual["grid_spacing"], dtype=np.float64)
-        grid_columns = visual["grid_columns"]
+        grid_columns = math.ceil(math.sqrt(len(self.visual_envs)))
         for local_index, env_id in enumerate(self.visual_envs):
             env_root = f"/environments/{env_id}"
             column = local_index % grid_columns

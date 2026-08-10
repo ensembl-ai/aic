@@ -92,7 +92,6 @@
   "visualization": {
     "host": "127.0.0.1",
     "port": 8080,
-    "grid_columns": 4,
     "grid_spacing": [2.0, 2.0],
     "initial_camera_position": [3.0, -8.0, 9.0],
     "initial_camera_look_at": [3.0, 3.0, 1.0]
