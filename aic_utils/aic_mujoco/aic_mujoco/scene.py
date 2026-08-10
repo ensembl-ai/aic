@@ -11,14 +11,14 @@ from typing import Any
 import mujoco
 
 
-def _required(root: ET.Element, query: str, description: str) -> ET.Element:
+def required_element(root: ET.Element, query: str, description: str) -> ET.Element:
     element = root.find(query)
     if element is None:
         raise ValueError(f"Source MJCF is missing {description}: {query}")
     return element
 
 
-def _named(root: ET.Element, tag: str, name: str) -> ET.Element:
+def named_element(root: ET.Element, tag: str, name: str) -> ET.Element:
     matches = [element for element in root.iter(tag) if element.get("name") == name]
     if len(matches) != 1:
         raise ValueError(
@@ -27,7 +27,7 @@ def _named(root: ET.Element, tag: str, name: str) -> ET.Element:
     return matches[0]
 
 
-def _vector(text: str | None, length: int, description: str) -> list[float]:
+def parse_vector(text: str | None, length: int, description: str) -> list[float]:
     if text is None:
         raise ValueError(f"Missing {description}")
     values = [float(value) for value in text.split()]
@@ -38,7 +38,7 @@ def _vector(text: str | None, length: int, description: str) -> list[float]:
     return values
 
 
-def _quat_product(a: list[float], b: list[float]) -> list[float]:
+def quaternion_product(a: list[float], b: list[float]) -> list[float]:
     aw, ax, ay, az = a
     bw, bx, by, bz = b
     return [
@@ -49,50 +49,50 @@ def _quat_product(a: list[float], b: list[float]) -> list[float]:
     ]
 
 
-def _quat_multiply(a: list[float], b: list[float]) -> list[float]:
-    result = _quat_product(a, b)
+def quaternion_multiply(a: list[float], b: list[float]) -> list[float]:
+    result = quaternion_product(a, b)
     norm = math.sqrt(sum(value * value for value in result))
     if norm == 0.0:
         raise ValueError("Cannot normalize a zero quaternion")
     return [value / norm for value in result]
 
 
-def _quat_rotate(quat: list[float], vector: list[float]) -> list[float]:
-    _, x, y, z = _quat_product(
-        _quat_product(quat, [0.0, *vector]),
+def rotate_vector(quat: list[float], vector: list[float]) -> list[float]:
+    _, x, y, z = quaternion_product(
+        quaternion_product(quat, [0.0, *vector]),
         [quat[0], -quat[1], -quat[2], -quat[3]],
     )
     return [x, y, z]
 
 
-def _compose_pose(
+def compose_pose(
     parent_pos: list[float],
     parent_quat: list[float],
     child_pos: list[float],
     child_quat: list[float],
 ) -> tuple[list[float], list[float]]:
-    rotated = _quat_rotate(parent_quat, child_pos)
+    rotated = rotate_vector(parent_quat, child_pos)
     return (
         [a + b for a, b in zip(parent_pos, rotated, strict=True)],
-        _quat_multiply(parent_quat, child_quat),
+        quaternion_multiply(parent_quat, child_quat),
     )
 
 
-def _format(values: list[float]) -> str:
+def format_vector(values: list[float]) -> str:
     return " ".join(f"{value:.16g}" for value in values)
 
 
-def _remove_descendant(parent: ET.Element, target: ET.Element) -> bool:
+def remove_descendant(parent: ET.Element, target: ET.Element) -> bool:
     for child in parent:
         if child is target:
             parent.remove(child)
             return True
-        if _remove_descendant(child, target):
+        if remove_descendant(child, target):
             return True
     return False
 
 
-def _copy_defaults(robot: ET.Element, world: ET.Element) -> ET.Element:
+def copy_defaults(robot: ET.Element, world: ET.Element) -> ET.Element:
     output = ET.Element("default")
     permitted = {"robot_unused", "world_default", "nic_card_default"}
     for root in (robot, world):
@@ -108,7 +108,7 @@ def _copy_defaults(robot: ET.Element, world: ET.Element) -> ET.Element:
     return output
 
 
-def _copy_assets(
+def copy_assets(
     robot: ET.Element,
     world: ET.Element,
     selected: list[ET.Element],
@@ -163,7 +163,7 @@ def _copy_assets(
     return output
 
 
-def _validate_model(model: mujoco.MjModel, config: dict[str, Any]) -> None:
+def validate_model(model: mujoco.MjModel, config: dict[str, Any]) -> None:
     names = config["scene"]["names"]
     expected = {
         "nq": 6,
@@ -214,37 +214,37 @@ def prepare_scene(config: dict[str, Any]) -> Path:
     robot = ET.parse(robot_path).getroot()
     world = ET.parse(world_path).getroot()
 
-    robot_body = copy.deepcopy(_named(robot, "body", names["robot_root_body"]))
-    tool = _named(robot_body, "body", names["tool_body"])
+    robot_body = copy.deepcopy(named_element(robot, "body", names["robot_root_body"]))
+    tool = named_element(robot_body, "body", names["tool_body"])
     fixed_position = float(scene["gripper_fixed_position"])
     finger_names = (
         (names["left_finger_body"], names["left_finger_joint"]),
         (names["right_finger_body"], names["right_finger_joint"]),
     )
     for finger_name, joint_name in finger_names:
-        finger = _named(robot_body, "body", finger_name)
-        joint = _named(finger, "joint", joint_name)
+        finger = named_element(robot_body, "body", finger_name)
+        joint = named_element(finger, "joint", joint_name)
         if joint.get("type") != "slide":
             raise ValueError(f"Fixed gripper joint is not a slide joint: {joint_name}")
         if joint.get("limited") != "true":
             raise ValueError(f"Fixed gripper joint is not explicitly limited: {joint_name}")
-        joint_range = _vector(joint.get("range"), 2, f"{joint_name} range")
+        joint_range = parse_vector(joint.get("range"), 2, f"{joint_name} range")
         if fixed_position < joint_range[0] or fixed_position > joint_range[1]:
             raise ValueError(
                 f"scene.gripper_fixed_position is outside {joint_name} range"
             )
-        finger_position = _vector(finger.get("pos"), 3, f"{finger_name} position")
-        finger_quaternion = _quat_multiply(
-            _vector(finger.get("quat") or "1 0 0 0", 4, "finger quaternion"),
+        finger_position = parse_vector(finger.get("pos"), 3, f"{finger_name} position")
+        finger_quaternion = quaternion_multiply(
+            parse_vector(finger.get("quat") or "1 0 0 0", 4, "finger quaternion"),
             [1.0, 0.0, 0.0, 0.0],
         )
-        axis = _vector(joint.get("axis"), 3, f"{joint_name} axis")
-        displacement = _quat_rotate(
+        axis = parse_vector(joint.get("axis"), 3, f"{joint_name} axis")
+        displacement = rotate_vector(
             finger_quaternion, [fixed_position * value for value in axis]
         )
         finger.set(
             "pos",
-            _format(
+            format_vector(
                 [
                     position + offset
                     for position, offset in zip(
@@ -253,14 +253,14 @@ def prepare_scene(config: dict[str, Any]) -> Path:
                 ]
             ),
         )
-        finger.set("quat", _format(finger_quaternion))
+        finger.set("quat", format_vector(finger_quaternion))
         finger.remove(joint)
         for geom in finger.iter("geom"):
             geom.set("contype", "0")
             geom.set("conaffinity", "0")
 
-    sfp_source = _named(world, "body", names["sfp_source_body"])
-    lc_source = _named(world, "body", names["lc_source_body"])
+    sfp_source = named_element(world, "body", names["sfp_source_body"])
+    lc_source = named_element(world, "body", names["lc_source_body"])
     welds = [
         weld
         for weld in world.iter("weld")
@@ -269,51 +269,51 @@ def prepare_scene(config: dict[str, Any]) -> Path:
     ]
     if len(welds) != 1:
         raise ValueError("Expected one source weld from the tool body to the LC plug")
-    weld_pose = _vector(welds[0].get("relpose"), 7, "tool-to-LC weld relpose")
-    sfp_local_pos = _vector(sfp_source.get("pos"), 3, "SFP local position")
-    sfp_local_quat = _vector(sfp_source.get("quat"), 4, "SFP local quaternion")
-    sfp_pos, sfp_quat = _compose_pose(
+    weld_pose = parse_vector(welds[0].get("relpose"), 7, "tool-to-LC weld relpose")
+    sfp_local_pos = parse_vector(sfp_source.get("pos"), 3, "SFP local position")
+    sfp_local_quat = parse_vector(sfp_source.get("quat"), 4, "SFP local quaternion")
+    sfp_pos, sfp_quat = compose_pose(
         weld_pose[:3], weld_pose[3:], sfp_local_pos, sfp_local_quat
     )
     sfp = copy.deepcopy(sfp_source)
-    sfp.set("pos", _format(sfp_pos))
-    sfp.set("quat", _format(sfp_quat))
+    sfp.set("pos", format_vector(sfp_pos))
+    sfp.set("quat", format_vector(sfp_quat))
     tool.append(sfp)
 
-    board = copy.deepcopy(_named(world, "body", names["board_source_body"]))
-    nested_nic = _named(board, "body", names["nic_source_body"])
-    if not _remove_descendant(board, nested_nic):
+    board = copy.deepcopy(named_element(world, "body", names["board_source_body"]))
+    nested_nic = named_element(board, "body", names["nic_source_body"])
+    if not remove_descendant(board, nested_nic):
         raise ValueError("NIC source body is not a descendant of the task board")
     board.set("name", names["board_body"])
     board.set("mocap", "true")
 
-    nic_source = _named(world, "body", names["nic_source_body"])
+    nic_source = named_element(world, "body", names["nic_source_body"])
     nic = copy.deepcopy(nic_source)
     nic.set("name", names["nic_body"])
     nic.set("mocap", "true")
-    board_source = _named(world, "body", names["board_source_body"])
-    initial_nic_pos, initial_nic_quat = _compose_pose(
-        _vector(board_source.get("pos"), 3, "board position"),
-        _vector(board_source.get("quat"), 4, "board quaternion"),
-        _vector(nic_source.get("pos"), 3, "NIC position"),
-        _vector(nic_source.get("quat") or "1 0 0 0", 4, "NIC quaternion"),
+    board_source = named_element(world, "body", names["board_source_body"])
+    initial_nic_pos, initial_nic_quat = compose_pose(
+        parse_vector(board_source.get("pos"), 3, "board position"),
+        parse_vector(board_source.get("quat"), 4, "board quaternion"),
+        parse_vector(nic_source.get("pos"), 3, "NIC position"),
+        parse_vector(nic_source.get("quat") or "1 0 0 0", 4, "NIC quaternion"),
     )
-    nic.set("pos", _format(initial_nic_pos))
-    nic.set("quat", _format(initial_nic_quat))
+    nic.set("pos", format_vector(initial_nic_pos))
+    nic.set("quat", format_vector(initial_nic_quat))
 
-    light = copy.deepcopy(_named(world, "light", names["light"]))
+    light = copy.deepcopy(named_element(world, "light", names["light"]))
     for camera_name in names["cameras"].values():
-        camera = _named(robot_body, "camera", camera_name)
+        camera = named_element(robot_body, "camera", camera_name)
         camera.set("resolution", f'{config["cameras"]["width"]} {config["cameras"]["height"]}')
 
     output = ET.Element("mujoco", {"model": scene["model_name"]})
-    output.append(copy.deepcopy(_required(robot, "compiler", "compiler settings")))
+    output.append(copy.deepcopy(required_element(robot, "compiler", "compiler settings")))
     physics = config["physics"]
     output.append(
         ET.Element(
             "option",
             {
-                "gravity": _format([float(x) for x in physics["gravity"]]),
+                "gravity": format_vector([float(x) for x in physics["gravity"]]),
                 "timestep": f'{physics["timestep"]:.16g}',
                 "integrator": physics["integrator"],
                 "solver": physics["solver"],
@@ -322,19 +322,19 @@ def prepare_scene(config: dict[str, Any]) -> Path:
             },
         )
     )
-    visual = copy.deepcopy(_required(robot, "visual", "visual settings"))
-    global_visual = _required(visual, "global", "global visual settings")
+    visual = copy.deepcopy(required_element(robot, "visual", "visual settings"))
+    global_visual = required_element(visual, "global", "global visual settings")
     global_visual.set("offwidth", str(config["cameras"]["width"]))
     global_visual.set("offheight", str(config["cameras"]["height"]))
     output.append(visual)
-    output.append(_copy_defaults(robot, world))
+    output.append(copy_defaults(robot, world))
     selected = [robot_body, board, nic]
-    output.append(_copy_assets(robot, world, selected, output_path.parent))
+    output.append(copy_assets(robot, world, selected, output_path.parent))
 
     worldbody = ET.SubElement(output, "worldbody")
     worldbody.extend([light, robot_body, board, nic])
     contact = ET.SubElement(output, "contact")
-    source_contact = _required(robot, "contact", "robot contact exclusions")
+    source_contact = required_element(robot, "contact", "robot contact exclusions")
     for exclusion in source_contact:
         contact.append(copy.deepcopy(exclusion))
     ET.SubElement(
@@ -347,20 +347,20 @@ def prepare_scene(config: dict[str, Any]) -> Path:
         },
     )
 
-    source_actuator = _required(robot, "actuator", "actuator section")
+    source_actuator = required_element(robot, "actuator", "actuator section")
     actuator = ET.SubElement(output, "actuator")
     torque_limits = config["control"]["torque_limits"]
     for actuator_name, limit in zip(names["actuators"], torque_limits, strict=True):
-        source = _named(source_actuator, "general", actuator_name)
+        source = named_element(source_actuator, "general", actuator_name)
         item = copy.deepcopy(source)
         item.set("ctrllimited", "true")
         item.set("ctrlrange", f"{-float(limit):.16g} {float(limit):.16g}")
         actuator.append(item)
 
-    source_sensor = _required(robot, "sensor", "sensor section")
+    source_sensor = required_element(robot, "sensor", "sensor section")
     sensor = ET.SubElement(output, "sensor")
     for tag, sensor_name in names["sensors"].items():
-        sensor.append(copy.deepcopy(_named(source_sensor, tag, sensor_name)))
+        sensor.append(copy.deepcopy(named_element(source_sensor, tag, sensor_name)))
 
     ET.indent(output, space="  ")
     xml = (
@@ -372,7 +372,7 @@ def prepare_scene(config: dict[str, Any]) -> Path:
     try:
         temporary_path.write_text(xml, encoding="utf-8")
         model = mujoco.MjModel.from_xml_path(str(temporary_path))
-        _validate_model(model, config)
+        validate_model(model, config)
         temporary_path.replace(output_path)
     finally:
         temporary_path.unlink(missing_ok=True)

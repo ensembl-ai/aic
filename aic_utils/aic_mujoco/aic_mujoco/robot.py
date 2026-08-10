@@ -17,7 +17,7 @@ class AICRobot:
     def __init__(self, model: mujoco.MjModel, config: dict[str, Any]):
         names = config["scene"]["names"]
         self.joints = ArmJoints.resolve(model, names)
-        self._validate_control(model, config)
+        self.validate_control(model, config)
 
         force_id = required_model_id(
             model, mujoco.mjtObj.mjOBJ_SENSOR, names["sensors"]["force"]
@@ -43,10 +43,10 @@ class AICRobot:
             raise ValueError("The reduced scene must contain exactly the three configured cameras")
         self.camera_ids: Mapping[str, int] = MappingProxyType(camera_ids)
 
-        self.board_mocap_id = self._mocap_id(model, names["board_body"])
-        self.nic_mocap_id = self._mocap_id(model, names["nic_body"])
+        self.board_mocap_id = self.mocap_id(model, names["board_body"])
+        self.nic_mocap_id = self.mocap_id(model, names["nic_body"])
 
-    def _validate_control(self, model: mujoco.MjModel, config: dict[str, Any]) -> None:
+    def validate_control(self, model: mujoco.MjModel, config: dict[str, Any]) -> None:
         control = config["control"]
         torque_limits = np.asarray(control["torque_limits"])
         expected_ctrlrange = np.column_stack((-torque_limits, torque_limits))
@@ -68,7 +68,7 @@ class AICRobot:
             raise ValueError("Configured joint reset envelope exceeds an MJCF joint range")
 
     @staticmethod
-    def _mocap_id(model: mujoco.MjModel, body_name: str) -> int:
+    def mocap_id(model: mujoco.MjModel, body_name: str) -> int:
         body_id = required_model_id(model, mujoco.mjtObj.mjOBJ_BODY, body_name)
         mocap_id = int(model.body_mocapid[body_id])
         if mocap_id < 0:

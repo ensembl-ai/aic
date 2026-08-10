@@ -11,7 +11,7 @@ from aic_mujoco.joints import ArmJoints
 
 
 @wp.kernel
-def _hold_impedance(
+def hold_impedance(
     qpos: wp.array2d(dtype=float),
     qvel: wp.array2d(dtype=float),
     qfrc_bias: wp.array2d(dtype=float),
@@ -47,21 +47,21 @@ class JointHoldController:
         device: Any,
     ):
         control = config["control"]
-        self._num_envs = num_envs
-        self._joint_count = joints.count
-        self._device = device
+        self.num_envs = num_envs
+        self.joint_count = joints.count
+        self.device = device
         self.qpos_addresses = wp.array(
             joints.qpos_addresses, dtype=int, device=device
         )
-        self._dof_addresses = wp.array(
+        self.dof_addresses = wp.array(
             joints.dof_addresses, dtype=int, device=device
         )
-        self._actuator_addresses = wp.array(
+        self.actuator_addresses = wp.array(
             joints.actuator_addresses, dtype=int, device=device
         )
-        self._stiffness = wp.array(control["stiffness"], dtype=float, device=device)
-        self._damping = wp.array(control["damping"], dtype=float, device=device)
-        self._torque_limits = wp.array(
+        self.stiffness = wp.array(control["stiffness"], dtype=float, device=device)
+        self.damping = wp.array(control["damping"], dtype=float, device=device)
+        self.torque_limits = wp.array(
             control["torque_limits"], dtype=float, device=device
         )
 
@@ -69,20 +69,20 @@ class JointHoldController:
         """Evaluate the configured impedance law on all environments."""
 
         wp.launch(
-            _hold_impedance,
-            dim=(self._num_envs, self._joint_count),
+            hold_impedance,
+            dim=(self.num_envs, self.joint_count),
             inputs=[
                 data.qpos,
                 data.qvel,
                 data.qfrc_bias,
                 command.position,
                 self.qpos_addresses,
-                self._dof_addresses,
-                self._actuator_addresses,
-                self._stiffness,
-                self._damping,
-                self._torque_limits,
+                self.dof_addresses,
+                self.actuator_addresses,
+                self.stiffness,
+                self.damping,
+                self.torque_limits,
             ],
             outputs=[data.ctrl],
-            device=self._device,
+            device=self.device,
         )

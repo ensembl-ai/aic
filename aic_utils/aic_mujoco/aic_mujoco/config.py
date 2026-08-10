@@ -29,7 +29,7 @@ def deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
     return merged
 
 
-_SCHEMA: dict[str, Any] = {
+CONFIG_SCHEMA: dict[str, Any] = {
     "scene": {
         "model_name": str,
         "source_robot": str,
@@ -123,7 +123,7 @@ _SCHEMA: dict[str, Any] = {
 }
 
 
-def _read_object(path: Path) -> dict[str, Any]:
+def read_object(path: Path) -> dict[str, Any]:
     if not path.is_file():
         raise FileNotFoundError(f"Configuration file does not exist: {path}")
     try:
@@ -135,7 +135,7 @@ def _read_object(path: Path) -> dict[str, Any]:
     return value
 
 
-def _matches(value: Any, expected: type | tuple[type, ...]) -> bool:
+def matches(value: Any, expected: type | tuple[type, ...]) -> bool:
     if isinstance(expected, tuple):
         return isinstance(value, expected)
     if expected is float:
@@ -145,7 +145,7 @@ def _matches(value: Any, expected: type | tuple[type, ...]) -> bool:
     return isinstance(value, expected)
 
 
-def _validate_shape(value: dict[str, Any], schema: dict[str, Any], path: str) -> None:
+def validate_shape(value: dict[str, Any], schema: dict[str, Any], path: str) -> None:
     missing = schema.keys() - value.keys()
     extra = value.keys() - schema.keys()
     if missing:
@@ -158,8 +158,8 @@ def _validate_shape(value: dict[str, Any], schema: dict[str, Any], path: str) ->
         if isinstance(expected, dict):
             if not isinstance(item, dict):
                 raise TypeError(f"{item_path} must be an object")
-            _validate_shape(item, expected, item_path)
-        elif not _matches(item, expected):
+            validate_shape(item, expected, item_path)
+        elif not matches(item, expected):
             expected_name = (
                 " or ".join(item.__name__ for item in expected)
                 if isinstance(expected, tuple)
@@ -168,7 +168,7 @@ def _validate_shape(value: dict[str, Any], schema: dict[str, Any], path: str) ->
             raise TypeError(f"{item_path} must be {expected_name}")
 
 
-def _numbers(config: dict[str, Any], path: str, length: int) -> list[float]:
+def numbers(config: dict[str, Any], path: str, length: int) -> list[float]:
     value: Any = config
     for key in path.split("."):
         value = value[key]
@@ -181,8 +181,8 @@ def _numbers(config: dict[str, Any], path: str, length: int) -> list[float]:
     return [float(x) for x in value]
 
 
-def _validate(config: dict[str, Any]) -> None:
-    _validate_shape(config, _SCHEMA, "config")
+def validate_config(config: dict[str, Any]) -> None:
+    validate_shape(config, CONFIG_SCHEMA, "config")
 
     scene = config["scene"]
     if not scene["model_name"]:
@@ -226,7 +226,7 @@ def _validate(config: dict[str, Any]) -> None:
         "visualization.initial_camera_position": 3,
         "visualization.initial_camera_look_at": 3,
     }
-    vectors = {path: _numbers(config, path, size) for path, size in vector_paths.items()}
+    vectors = {path: numbers(config, path, size) for path, size in vector_paths.items()}
 
     for lower_path, upper_path in (
         ("control.reset_perturbation_lower", "control.reset_perturbation_upper"),
@@ -352,8 +352,8 @@ def load_config(
 
     base = Path(base_path).expanduser().resolve()
     run = Path(run_path).expanduser().resolve()
-    config = deep_merge(_read_object(base), _read_object(run))
-    _validate(config)
+    config = deep_merge(read_object(base), read_object(run))
+    validate_config(config)
     for key in ("source_robot", "source_world", "output"):
         config["scene"][key] = str((base.parent / config["scene"][key]).resolve())
     config["recording"]["output_directory"] = str(

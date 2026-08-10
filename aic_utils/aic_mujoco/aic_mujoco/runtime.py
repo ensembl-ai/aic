@@ -18,7 +18,7 @@ from aic_mujoco.robot import AICRobot
 
 
 @wp.kernel
-def _apply_reset_samples(
+def apply_reset_samples(
     reset: wp.array(dtype=bool),
     q_samples: wp.array2d(dtype=float),
     board_pos_samples: wp.array(dtype=wp.vec3),
@@ -80,7 +80,7 @@ def _apply_reset_samples(
 
 
 @wp.kernel
-def _advance_episode_steps(
+def advance_episode_steps(
     tare_ready: wp.array(dtype=bool),
     episode_steps: wp.array(dtype=int),
 ):
@@ -90,7 +90,7 @@ def _advance_episode_steps(
 
 
 @wp.kernel
-def _update_tare(
+def update_tare(
     sensordata: wp.array2d(dtype=float),
     force_adr: int,
     torque_adr: int,
@@ -132,7 +132,7 @@ def _update_tare(
 
 
 @wp.kernel
-def _sample_wrench(
+def sample_wrench(
     sensordata: wp.array2d(dtype=float),
     force_adr: int,
     torque_adr: int,
@@ -155,7 +155,7 @@ def _sample_wrench(
 
 
 @wp.kernel
-def _unpack_rgb(
+def unpack_rgb(
     packed: wp.array2d(dtype=wp.uint32),
     address: int,
     width: int,
@@ -189,7 +189,7 @@ class AICWarpRuntime:
 
         with wp.ScopedDevice(self.device):
             self.host_model = mujoco.MjModel.from_xml_path(config["scene"]["output"])
-            self._validate_compiled_physics()
+            self.validate_compiled_physics()
             self.robot = AICRobot(self.host_model, config)
             self.model = mjw.put_model(self.host_model)
             self.data = mjw.make_data(
@@ -198,18 +198,18 @@ class AICWarpRuntime:
                 nconmax=config["physics"]["nconmax"],
                 njmax=config["physics"]["njmax"],
             )
-            self._allocate_state()
-            self._create_renderer()
-            self._compile_physics_step()
-            self._reset_counts = np.zeros(self.num_envs, dtype=np.uint64)
+            self.allocate_state()
+            self.create_renderer()
+            self.compile_physics_step()
+            self.reset_counts = np.zeros(self.num_envs, dtype=np.uint64)
             self.episode_step = 0
             self.reset()
-            self._finish_initial_tare()
+            self.finish_initial_tare()
             self.render()
-            self._check_capacities()
-            self._check_internal_grasp_contacts()
+            self.check_capacities()
+            self.check_internal_grasp_contacts()
 
-    def _validate_compiled_physics(self) -> None:
+    def validate_compiled_physics(self) -> None:
         physics = self.config["physics"]
         expected_integrator = mujoco.mjtIntegrator.mjINT_IMPLICITFAST
         expected_solver = mujoco.mjtSolver.mjSOL_NEWTON
@@ -231,7 +231,7 @@ class AICWarpRuntime:
         ):
             raise ValueError("Generated MJCF physics.gravity does not match configuration")
 
-    def _allocate_state(self) -> None:
+    def allocate_state(self) -> None:
         joint_count = self.robot.joints.count
         self.hold_command = HoldPositionCommand(
             self.num_envs, joint_count, self.device
@@ -247,22 +247,22 @@ class AICWarpRuntime:
         self.nic_translation = wp.zeros(self.num_envs, dtype=float, device=self.device)
 
         wrench_shape = (self.num_envs, self.robot.wrench_dimension)
-        self._tare_sum = wp.zeros(wrench_shape, dtype=float, device=self.device)
+        self.tare_sum = wp.zeros(wrench_shape, dtype=float, device=self.device)
         self.tare_baseline = wp.zeros(wrench_shape, dtype=float, device=self.device)
-        self._tare_settle_remaining = wp.zeros(self.num_envs, dtype=int, device=self.device)
-        self._tare_interval_remaining = wp.zeros(self.num_envs, dtype=int, device=self.device)
-        self._tare_samples = wp.zeros(self.num_envs, dtype=int, device=self.device)
+        self.tare_settle_remaining = wp.zeros(self.num_envs, dtype=int, device=self.device)
+        self.tare_interval_remaining = wp.zeros(self.num_envs, dtype=int, device=self.device)
+        self.tare_samples = wp.zeros(self.num_envs, dtype=int, device=self.device)
         self.tare_ready = wp.zeros(self.num_envs, dtype=bool, device=self.device)
         self.episode_steps = wp.zeros(self.num_envs, dtype=int, device=self.device)
         self.raw_wrench = wp.zeros(wrench_shape, dtype=float, device=self.device)
         self.tared_wrench = wp.zeros(wrench_shape, dtype=float, device=self.device)
 
         step_hz = round(1.0 / self.config["physics"]["timestep"])
-        self._camera_interval = step_hz // self.config["cameras"]["fps"]
-        self._wrench_interval = step_hz // self.config["sensors"]["physics_sample_hz"]
-        self._publication_interval = step_hz // self.config["sensors"]["publication_hz"]
+        self.camera_interval = step_hz // self.config["cameras"]["fps"]
+        self.wrench_interval = step_hz // self.config["sensors"]["physics_sample_hz"]
+        self.publication_interval = step_hz // self.config["sensors"]["publication_hz"]
 
-    def _create_renderer(self) -> None:
+    def create_renderer(self) -> None:
         camera = self.config["cameras"]
         resolution = (camera["width"], camera["height"])
         self.render_context = mjw.create_render_context(
@@ -283,24 +283,24 @@ class AICWarpRuntime:
             )
             for key in self.robot.camera_ids
         }
-        self._rgb_addresses = {
+        self.rgb_addresses = {
             key: int(addresses[camera_id])
             for key, camera_id in self.robot.camera_ids.items()
         }
 
-    def _physics_step(self) -> None:
+    def physics_step(self) -> None:
         mjw.step1(self.model, self.data)
         self.controller.apply(self.data, self.hold_command)
         mjw.step2(self.model, self.data)
         wp.launch(
-            _advance_episode_steps,
+            advance_episode_steps,
             dim=self.num_envs,
             inputs=[self.tare_ready],
             outputs=[self.episode_steps],
             device=self.device,
         )
         wp.launch(
-            _update_tare,
+            update_tare,
             dim=self.num_envs,
             inputs=[
                 self.data.sensordata,
@@ -308,31 +308,31 @@ class AICWarpRuntime:
                 self.robot.torque_sensor_address,
                 self.robot.force_sensor_dimension,
                 self.robot.wrench_dimension,
-                self._wrench_interval,
+                self.wrench_interval,
                 self.config["sensors"]["tare_sample_count"],
             ],
             outputs=[
-                self._tare_sum,
+                self.tare_sum,
                 self.tare_baseline,
-                self._tare_settle_remaining,
-                self._tare_interval_remaining,
-                self._tare_samples,
+                self.tare_settle_remaining,
+                self.tare_interval_remaining,
+                self.tare_samples,
                 self.tare_ready,
                 self.data.time,
             ],
             device=self.device,
         )
 
-    def _compile_physics_step(self) -> None:
-        self._physics_step()
+    def compile_physics_step(self) -> None:
+        self.physics_step()
         wp.synchronize_device(self.device)
-        self._graph = None
+        self.graph = None
         if self.config["physics"]["graph_capture"]:
             with wp.ScopedCapture(device=self.device) as capture:
-                self._physics_step()
-            self._graph = capture.graph
+                self.physics_step()
+            self.graph = capture.graph
 
-    def _sample_reset_batch(self, reset_ids: list[int]) -> dict[str, np.ndarray]:
+    def sample_reset_batch(self, reset_ids: list[int]) -> dict[str, np.ndarray]:
         control = self.config["control"]
         randomization = self.config["domain_randomization"]
         batch = {
@@ -348,10 +348,10 @@ class AICWarpRuntime:
         }
         for world in reset_ids:
             seed = np.random.SeedSequence(
-                [self.config["runtime"]["seed"], world, int(self._reset_counts[world])]
+                [self.config["runtime"]["seed"], world, int(self.reset_counts[world])]
             )
             rng = np.random.default_rng(seed)
-            self._reset_counts[world] += 1
+            self.reset_counts[world] += 1
             batch["q"][world] = np.asarray(control["home"]) + rng.uniform(
                 control["reset_perturbation_lower"],
                 control["reset_perturbation_upper"],
@@ -412,14 +412,14 @@ class AICWarpRuntime:
             for index in reset_ids
         ):
             raise ValueError("reset contains an invalid environment ID")
-        batch = self._sample_reset_batch(reset_ids)
+        batch = self.sample_reset_batch(reset_ids)
         reset_mask = np.zeros(self.num_envs, dtype=bool)
         reset_mask[reset_ids] = True
         with wp.ScopedDevice(self.device):
             mask = wp.array(reset_mask, dtype=bool, device=self.device)
             mjw.reset_data(self.model, self.data, mask)
             wp.launch(
-                _apply_reset_samples,
+                apply_reset_samples,
                 dim=self.num_envs,
                 inputs=[
                     mask,
@@ -436,7 +436,7 @@ class AICWarpRuntime:
                     self.robot.board_mocap_id,
                     self.robot.nic_mocap_id,
                     self.config["sensors"]["tare_settle_steps"],
-                    self._wrench_interval,
+                    self.wrench_interval,
                 ],
                 outputs=[
                     self.data.qpos,
@@ -449,11 +449,11 @@ class AICWarpRuntime:
                     self.nic_quaternion,
                     self.nic_rail_index,
                     self.nic_translation,
-                    self._tare_sum,
+                    self.tare_sum,
                     self.tare_baseline,
-                    self._tare_settle_remaining,
-                    self._tare_interval_remaining,
-                    self._tare_samples,
+                    self.tare_settle_remaining,
+                    self.tare_interval_remaining,
+                    self.tare_samples,
                     self.tare_ready,
                     self.episode_steps,
                 ],
@@ -462,29 +462,29 @@ class AICWarpRuntime:
         if len(reset_ids) == self.num_envs:
             self.episode_step = 0
 
-    def _advance_physics(self) -> None:
-        if self._graph is None:
-            self._physics_step()
+    def advance_physics(self) -> None:
+        if self.graph is None:
+            self.physics_step()
         else:
-            wp.capture_launch(self._graph)
+            wp.capture_launch(self.graph)
         self.episode_step += 1
 
-    def _finish_initial_tare(self) -> None:
+    def finish_initial_tare(self) -> None:
         steps = self.config["sensors"]["tare_settle_steps"] + (
-            self.config["sensors"]["tare_sample_count"] * self._wrench_interval
+            self.config["sensors"]["tare_sample_count"] * self.wrench_interval
         )
         for _ in range(steps):
-            self._advance_physics()
+            self.advance_physics()
         wp.synchronize_device(self.device)
         if not np.all(self.tare_ready.numpy()):
             raise RuntimeError("Initial per-environment F/T taring did not complete")
-        self._sample_wrench_now()
+        self.sample_wrench_now()
         self.episode_steps.zero_()
         self.episode_step = 0
 
-    def _sample_wrench_now(self) -> None:
+    def sample_wrench_now(self) -> None:
         wp.launch(
-            _sample_wrench,
+            sample_wrench,
             dim=(self.num_envs, self.robot.wrench_dimension),
             inputs=[
                 self.data.sensordata,
@@ -506,11 +506,11 @@ class AICWarpRuntime:
         camera = self.config["cameras"]
         for key, output in self.rgb.items():
             wp.launch(
-                _unpack_rgb,
+                unpack_rgb,
                 dim=(self.num_envs, camera["height"], camera["width"]),
                 inputs=[
                     self.render_context.rgb_data,
-                    self._rgb_addresses[key],
+                    self.rgb_addresses[key],
                     camera["width"],
                 ],
                 outputs=[output],
@@ -521,12 +521,12 @@ class AICWarpRuntime:
         """Advance every independent world once and update due observations."""
 
         with wp.ScopedDevice(self.device):
-            self._advance_physics()
-            wrench_sample = self.episode_step % self._wrench_interval == 0
-            camera = self.episode_step % self._camera_interval == 0
-            publication = self.episode_step % self._publication_interval == 0
+            self.advance_physics()
+            wrench_sample = self.episode_step % self.wrench_interval == 0
+            camera = self.episode_step % self.camera_interval == 0
+            publication = self.episode_step % self.publication_interval == 0
             if wrench_sample:
-                self._sample_wrench_now()
+                self.sample_wrench_now()
             if camera:
                 self.render()
         return StepEvents(camera, wrench_sample, publication)
@@ -557,7 +557,7 @@ class AICWarpRuntime:
             "episode_steps": self.episode_steps,
         }
 
-    def _check_capacities(self) -> None:
+    def check_capacities(self) -> None:
         wp.synchronize_device(self.device)
         max_constraints = int(np.max(self.data.nefc.numpy()))
         actual_contacts = int(self.data.nacon.numpy()[0])
@@ -571,7 +571,7 @@ class AICWarpRuntime:
                 "MJWarp contact capacity overflow; increase physics.nconmax explicitly"
             )
 
-    def _check_internal_grasp_contacts(self) -> None:
+    def check_internal_grasp_contacts(self) -> None:
         count = min(int(self.data.nacon.numpy()[0]), self.data.naconmax)
         if count == 0:
             return
