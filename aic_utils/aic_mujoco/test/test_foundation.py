@@ -108,7 +108,6 @@ def test_independent_warp_worlds_and_observations(configured_scene: dict) -> Non
         {"width": 32, "height": 24, "use_textures": False, "use_shadows": False}
     )
     config["visualization"]["enabled"] = False
-    config["recording"]["enabled"] = False
 
     runtime = AICWarpRuntime(config)
     assert isinstance(runtime.robot, AICRobot)
@@ -163,9 +162,16 @@ def test_independent_warp_worlds_and_observations(configured_scene: dict) -> Non
     current_command = runtime.hold_command.position.numpy()
     np.testing.assert_array_equal(current_command[0], first_before)
     assert not np.array_equal(current_command[1], second_before)
-    for _ in range(15):
+    tare_steps = config["sensors"]["tare_settle_steps"] + (
+        config["sensors"]["tare_sample_count"] * runtime.wrench_interval
+    )
+    for _ in range(tare_steps):
         runtime.step()
     assert np.all(runtime.tare_ready.numpy())
-    np.testing.assert_array_equal(runtime.episode_steps.numpy(), [40, 0])
+    np.testing.assert_array_equal(
+        runtime.episode_steps.numpy(), [25 + tare_steps, 0]
+    )
     runtime.step()
-    np.testing.assert_array_equal(runtime.episode_steps.numpy(), [41, 1])
+    np.testing.assert_array_equal(
+        runtime.episode_steps.numpy(), [26 + tare_steps, 1]
+    )

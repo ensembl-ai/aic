@@ -15,5 +15,10 @@ aic_utils/aic_mujoco/mjcf/*.obj
 aic_utils/aic_mujoco/mjcf/*.stl
 aic_utils/aic_mujoco/mjcf/*.png
 
+# Local MuJoCo-Warp policy artifacts
+/aic_utils/aic_mujoco/data/
+/aic_utils/aic_mujoco/runs/
+/aic_utils/aic_mujoco/checkpoints/
+
 # Ignore aic_isaac usd assets
 aic_utils/aic_isaac/aic_isaaclab/source/aic_task/aic_task/tasks/manager_based/aic_task/Intrinsic_assets/

@@ -15,43 +15,81 @@ from aic_mujoco.commands import HoldPositionCommand
 from aic_mujoco.controllers import JointHoldController
 from aic_mujoco.joints import required_model_id
 from aic_mujoco.robot import AICRobot
+from aic_mujoco.utils.images import unpack_rgb
 
 
 @wp.kernel
 def apply_reset_samples(
-    reset: wp.array(dtype=bool),
-    q_samples: wp.array2d(dtype=float),
-    board_pos_samples: wp.array(dtype=wp.vec3),
-    board_quat_samples: wp.array(dtype=wp.quat),
-    nic_pos_samples: wp.array(dtype=wp.vec3),
-    nic_quat_samples: wp.array(dtype=wp.quat),
-    rail_samples: wp.array(dtype=int),
-    translation_samples: wp.array(dtype=float),
-    qpos_adr: wp.array(dtype=int),
+    reset: wp.array[bool],
+    q_samples: wp.array2d[float],
+    board_pos_samples: wp.array[wp.vec3],
+    board_quat_samples: wp.array[wp.quat],
+    nic_pos_samples: wp.array[wp.vec3],
+    nic_quat_samples: wp.array[wp.quat],
+    rail_samples: wp.array[int],
+    translation_samples: wp.array[float],
+    qpos_adr: wp.array[int],
     joint_count: int,
     wrench_dimension: int,
     board_mocap_id: int,
     nic_mocap_id: int,
     tare_settle_steps: int,
     tare_sample_interval: int,
-    qpos: wp.array2d(dtype=float),
-    q_hold: wp.array2d(dtype=float),
-    mocap_pos: wp.array2d(dtype=wp.vec3),
-    mocap_quat: wp.array2d(dtype=wp.quat),
-    board_position: wp.array(dtype=wp.vec3),
-    board_quaternion: wp.array(dtype=wp.quat),
-    nic_position: wp.array(dtype=wp.vec3),
-    nic_quaternion: wp.array(dtype=wp.quat),
-    nic_rail_index: wp.array(dtype=int),
-    nic_translation: wp.array(dtype=float),
-    tare_sum: wp.array2d(dtype=float),
-    tare_baseline: wp.array2d(dtype=float),
-    tare_settle_remaining: wp.array(dtype=int),
-    tare_interval_remaining: wp.array(dtype=int),
-    tare_samples: wp.array(dtype=int),
-    tare_ready: wp.array(dtype=bool),
-    episode_steps: wp.array(dtype=int),
+    qpos: wp.array2d[float],
+    q_hold: wp.array2d[float],
+    mocap_pos: wp.array2d[wp.vec3],
+    mocap_quat: wp.array2d[wp.quat],
+    board_position: wp.array[wp.vec3],
+    board_quaternion: wp.array[wp.quat],
+    nic_position: wp.array[wp.vec3],
+    nic_quaternion: wp.array[wp.quat],
+    nic_rail_index: wp.array[int],
+    nic_translation: wp.array[float],
+    tare_sum: wp.array2d[float],
+    tare_baseline: wp.array2d[float],
+    tare_settle_remaining: wp.array[int],
+    tare_interval_remaining: wp.array[int],
+    tare_samples: wp.array[int],
+    tare_ready: wp.array[bool],
+    episode_steps: wp.array[int],
 ):
+    """Apply selected host reset samples and clear per-episode state.
+
+    Args:
+        reset: Per-environment reset mask.
+        q_samples: Sampled arm joint positions.
+        board_pos_samples: Sampled board positions.
+        board_quat_samples: Board orientations required by MJWarp mocap.
+        nic_pos_samples: Sampled NIC positions.
+        nic_quat_samples: NIC orientations required by MJWarp mocap.
+        rail_samples: Sampled discrete NIC rail indices.
+        translation_samples: Sampled NIC rail translations.
+        qpos_adr: Ordered arm generalized-position addresses.
+        joint_count: Number of controlled arm joints.
+        wrench_dimension: Combined force/torque dimension.
+        board_mocap_id: Board mocap index.
+        nic_mocap_id: NIC mocap index.
+        tare_settle_steps: Physics steps before F/T tare sampling.
+        tare_sample_interval: Physics steps between tare samples.
+        qpos: Batched generalized positions.
+        q_hold: Batched HOLD targets.
+        mocap_pos: Batched MJWarp mocap positions.
+        mocap_quat: Batched MJWarp mocap orientations.
+        board_position: Stored board reset positions.
+        board_quaternion: Stored board reset orientations.
+        nic_position: Stored NIC reset positions.
+        nic_quaternion: Stored NIC reset orientations.
+        nic_rail_index: Stored NIC rail indices.
+        nic_translation: Stored NIC translations.
+        tare_sum: Per-environment wrench accumulation.
+        tare_baseline: Per-environment wrench baseline.
+        tare_settle_remaining: Remaining settling steps.
+        tare_interval_remaining: Remaining steps before the next tare sample.
+        tare_samples: Collected tare sample counts.
+        tare_ready: Per-environment tare readiness.
+        episode_steps: Per-environment post-tare episode step counts.
+    """
+
     world = wp.tid()
     if not reset[world]:
         return
@@ -81,9 +119,16 @@ def apply_reset_samples(
 
 @wp.kernel
 def advance_episode_steps(
-    tare_ready: wp.array(dtype=bool),
-    episode_steps: wp.array(dtype=int),
+    tare_ready: wp.array[bool],
+    episode_steps: wp.array[int],
 ):
+    """Advance episode clocks only for environments with a valid F/T tare.
+
+    Args:
+        tare_ready: Per-environment tare readiness.
+        episode_steps: Mutable per-environment episode step counts.
+    """
+
     world = wp.tid()
     if tare_ready[world]:
         episode_steps[world] = episode_steps[world] + 1
@@ -91,21 +136,40 @@ def advance_episode_steps(
 
 @wp.kernel
 def update_tare(
-    sensordata: wp.array2d(dtype=float),
+    sensordata: wp.array2d[float],
     force_adr: int,
     torque_adr: int,
     force_dimension: int,
     wrench_dimension: int,
     sample_interval: int,
     sample_target: int,
-    tare_sum: wp.array2d(dtype=float),
-    tare_baseline: wp.array2d(dtype=float),
-    settle_remaining: wp.array(dtype=int),
-    interval_remaining: wp.array(dtype=int),
-    sample_count: wp.array(dtype=int),
-    ready: wp.array(dtype=bool),
-    time: wp.array(dtype=float),
+    tare_sum: wp.array2d[float],
+    tare_baseline: wp.array2d[float],
+    settle_remaining: wp.array[int],
+    interval_remaining: wp.array[int],
+    sample_count: wp.array[int],
+    ready: wp.array[bool],
+    time: wp.array[float],
 ):
+    """Advance independent settle, sample, and average F/T tare state.
+
+    Args:
+        sensordata: Batched MJWarp sensor values.
+        force_adr: Force sensor start address.
+        torque_adr: Torque sensor start address.
+        force_dimension: Number of force components.
+        wrench_dimension: Combined force/torque dimension.
+        sample_interval: Physics steps between samples.
+        sample_target: Samples averaged into the baseline.
+        tare_sum: Per-environment running sums.
+        tare_baseline: Completed per-environment baselines.
+        settle_remaining: Remaining settling steps.
+        interval_remaining: Remaining steps before the next sample.
+        sample_count: Collected sample counts.
+        ready: Per-environment tare readiness.
+        time: MJWarp simulation time, reset when taring completes.
+    """
+
     world = wp.tid()
     if ready[world]:
         return
@@ -133,15 +197,28 @@ def update_tare(
 
 @wp.kernel
 def sample_wrench(
-    sensordata: wp.array2d(dtype=float),
+    sensordata: wp.array2d[float],
     force_adr: int,
     torque_adr: int,
     force_dimension: int,
-    tare_baseline: wp.array2d(dtype=float),
-    tare_ready: wp.array(dtype=bool),
-    raw: wp.array2d(dtype=float),
-    tared: wp.array2d(dtype=float),
+    tare_baseline: wp.array2d[float],
+    tare_ready: wp.array[bool],
+    raw: wp.array2d[float],
+    tared: wp.array2d[float],
 ):
+    """Read raw and independently tared six-axis wrench observations.
+
+    Args:
+        sensordata: Batched MJWarp sensor values.
+        force_adr: Force sensor start address.
+        torque_adr: Torque sensor start address.
+        force_dimension: Number of force components.
+        tare_baseline: Per-environment tare values.
+        tare_ready: Per-environment tare readiness.
+        raw: Batched raw wrench output.
+        tared: Batched baseline-subtracted wrench output.
+    """
+
     world, axis = wp.tid()
     sensor_index = force_adr + axis
     if axis >= force_dimension:
@@ -152,20 +229,6 @@ def sample_wrench(
         tared[world, axis] = value - tare_baseline[world, axis]
     else:
         tared[world, axis] = 0.0
-
-
-@wp.kernel
-def unpack_rgb(
-    packed: wp.array2d(dtype=wp.uint32),
-    address: int,
-    width: int,
-    output: wp.array4d(dtype=wp.uint8),
-):
-    world, row, column = wp.tid()
-    pixel = packed[world, address + row * width + column]
-    output[world, row, column, 0] = wp.uint8((pixel >> wp.uint32(16)) & wp.uint32(255))
-    output[world, row, column, 1] = wp.uint8((pixel >> wp.uint32(8)) & wp.uint32(255))
-    output[world, row, column, 2] = wp.uint8(pixel & wp.uint32(255))
 
 
 @dataclass(frozen=True)
@@ -181,6 +244,16 @@ class AICWarpRuntime:
     """One shared MJCF model with independently randomized MJWarp worlds."""
 
     def __init__(self, config: dict[str, Any]):
+        """Compile, upload, reset, tare, and render all configured worlds.
+
+        Args:
+            config: Strict merged runtime or collection configuration.
+
+        Raises:
+            ValueError: If graph capture is requested on a non-CUDA device or
+                the compiled model violates the runtime contract.
+        """
+
         self.config = config
         self.num_envs = config["runtime"]["num_envs"]
         self.device = wp.get_device(config["physics"]["device"])
@@ -210,6 +283,12 @@ class AICWarpRuntime:
             self.check_internal_grasp_contacts()
 
     def validate_compiled_physics(self) -> None:
+        """Validate compiled physics options against the configuration.
+
+        Raises:
+            ValueError: If any compiled physics option differs.
+        """
+
         physics = self.config["physics"]
         expected_integrator = mujoco.mjtIntegrator.mjINT_IMPLICITFAST
         expected_solver = mujoco.mjtSolver.mjSOL_NEWTON
@@ -232,6 +311,8 @@ class AICWarpRuntime:
             raise ValueError("Generated MJCF physics.gravity does not match configuration")
 
     def allocate_state(self) -> None:
+        """Allocate controller, randomization, clock, and wrench state."""
+
         joint_count = self.robot.joints.count
         self.hold_command = HoldPositionCommand(
             self.num_envs, joint_count, self.device
@@ -263,6 +344,8 @@ class AICWarpRuntime:
         self.publication_interval = step_hz // self.config["sensors"]["publication_hz"]
 
     def create_renderer(self) -> None:
+        """Create MJWarp's batched RGB-only renderer and named outputs."""
+
         camera = self.config["cameras"]
         resolution = (camera["width"], camera["height"])
         self.render_context = mjw.create_render_context(
@@ -289,6 +372,8 @@ class AICWarpRuntime:
         }
 
     def physics_step(self) -> None:
+        """Advance one split MJWarp step with impedance control and taring."""
+
         mjw.step1(self.model, self.data)
         self.controller.apply(self.data, self.hold_command)
         mjw.step2(self.model, self.data)
@@ -324,6 +409,8 @@ class AICWarpRuntime:
         )
 
     def compile_physics_step(self) -> None:
+        """Warm up the physics step and optionally capture a CUDA graph."""
+
         self.physics_step()
         wp.synchronize_device(self.device)
         self.graph = None
@@ -332,9 +419,28 @@ class AICWarpRuntime:
                 self.physics_step()
             self.graph = capture.graph
 
-    def sample_reset_batch(self, reset_ids: list[int]) -> dict[str, np.ndarray]:
+    def sample_reset_batch(
+        self,
+        reset_ids: list[int],
+        randomization_ids: list[int] | None = None,
+    ) -> dict[str, np.ndarray]:
+        """Sample deterministic reset values for selected environments.
+
+        Args:
+            reset_ids: Environment indices to sample.
+            randomization_ids: Optional explicit deterministic sample IDs.
+
+        Returns:
+            Full-size host arrays containing samples at selected indices.
+        """
+
         control = self.config["control"]
         randomization = self.config["domain_randomization"]
+        explicit_ids = (
+            dict(zip(reset_ids, randomization_ids, strict=True))
+            if randomization_ids is not None
+            else {}
+        )
         batch = {
             "q": np.zeros(
                 (self.num_envs, self.robot.joints.count), dtype=np.float32
@@ -347,9 +453,18 @@ class AICWarpRuntime:
             "translation": np.zeros(self.num_envs, dtype=np.float32),
         }
         for world in reset_ids:
-            seed = np.random.SeedSequence(
-                [self.config["runtime"]["seed"], world, int(self.reset_counts[world])]
-            )
+            if randomization_ids is None:
+                seed_values = [
+                    self.config["runtime"]["seed"],
+                    world,
+                    int(self.reset_counts[world]),
+                ]
+            else:
+                seed_values = [
+                    self.config["runtime"]["seed"],
+                    explicit_ids[world],
+                ]
+            seed = np.random.SeedSequence(seed_values)
             rng = np.random.default_rng(seed)
             self.reset_counts[world] += 1
             batch["q"][world] = np.asarray(control["home"]) + rng.uniform(
@@ -365,8 +480,11 @@ class AICWarpRuntime:
                 randomization["board_yaw_deviation_upper"],
             )
             yaw = (math.pi + deviation + math.pi) % (2.0 * math.pi) - math.pi
-            board_quat = np.asarray(
-                [math.cos(yaw / 2.0), 0.0, 0.0, math.sin(yaw / 2.0)]
+            board_quat = np.empty(4, dtype=np.float64)
+            mujoco.mju_axisAngle2Quat(
+                board_quat,
+                np.asarray([0.0, 0.0, 1.0], dtype=np.float64),
+                yaw,
             )
             rail = int(rng.choice(randomization["nic_rail_indices"]))
             translation = float(
@@ -399,8 +517,18 @@ class AICWarpRuntime:
             batch["translation"][world] = translation
         return batch
 
-    def reset(self, env_ids: list[int] | None = None) -> None:
-        """Reset selected worlds independently; taring then progresses asynchronously."""
+    def reset(
+        self,
+        env_ids: list[int] | None = None,
+        randomization_ids: list[int] | None = None,
+    ) -> None:
+        """Reset worlds independently and optionally select deterministic samples.
+
+        Normal rollouts derive randomness from environment ID and reset count.
+        Dataset collection supplies one nonnegative ``randomization_id`` per
+        reset environment. That makes a trajectory's scene sample independent
+        of which parallel environment happens to execute it.
+        """
 
         reset_ids = list(range(self.num_envs)) if env_ids is None else list(env_ids)
         if not reset_ids:
@@ -412,7 +540,16 @@ class AICWarpRuntime:
             for index in reset_ids
         ):
             raise ValueError("reset contains an invalid environment ID")
-        batch = self.sample_reset_batch(reset_ids)
+        if randomization_ids is not None:
+            if len(randomization_ids) != len(reset_ids):
+                raise ValueError(
+                    "reset randomization IDs must match the environment ID count"
+                )
+            if any(type(index) is not int or index < 0 for index in randomization_ids):
+                raise ValueError("reset randomization IDs must be nonnegative integers")
+            if len(set(randomization_ids)) != len(randomization_ids):
+                raise ValueError("reset randomization IDs contain duplicates")
+        batch = self.sample_reset_batch(reset_ids, randomization_ids)
         reset_mask = np.zeros(self.num_envs, dtype=bool)
         reset_mask[reset_ids] = True
         with wp.ScopedDevice(self.device):
@@ -463,6 +600,8 @@ class AICWarpRuntime:
             self.episode_step = 0
 
     def advance_physics(self) -> None:
+        """Execute one eager or CUDA-graph physics step."""
+
         if self.graph is None:
             self.physics_step()
         else:
@@ -470,6 +609,12 @@ class AICWarpRuntime:
         self.episode_step += 1
 
     def finish_initial_tare(self) -> None:
+        """Run initialization until every environment has a valid F/T tare.
+
+        Raises:
+            RuntimeError: If configured taring does not complete.
+        """
+
         steps = self.config["sensors"]["tare_settle_steps"] + (
             self.config["sensors"]["tare_sample_count"] * self.wrench_interval
         )
@@ -483,6 +628,8 @@ class AICWarpRuntime:
         self.episode_step = 0
 
     def sample_wrench_now(self) -> None:
+        """Update raw and tared wrench output tensors immediately."""
+
         wp.launch(
             sample_wrench,
             dim=(self.num_envs, self.robot.wrench_dimension),
@@ -558,6 +705,12 @@ class AICWarpRuntime:
         }
 
     def check_capacities(self) -> None:
+        """Fail if MJWarp contact or constraint buffers overflowed.
+
+        Raises:
+            RuntimeError: If configured device capacities are insufficient.
+        """
+
         wp.synchronize_device(self.device)
         max_constraints = int(np.max(self.data.nefc.numpy()))
         actual_contacts = int(self.data.nacon.numpy()[0])
@@ -572,6 +725,12 @@ class AICWarpRuntime:
             )
 
     def check_internal_grasp_contacts(self) -> None:
+        """Verify excluded gripper/SFP contacts cannot contaminate wrist F/T.
+
+        Raises:
+            RuntimeError: If a gripper-finger/SFP contact is present.
+        """
+
         count = min(int(self.data.nacon.numpy()[0]), self.data.naconmax)
         if count == 0:
             return

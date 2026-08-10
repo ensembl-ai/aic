@@ -8,9 +8,12 @@ import math
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 PACKAGE_DIR = Path(__file__).resolve().parents[1]
 DEFAULT_BASE_CONFIG = PACKAGE_DIR / "configs" / "base.json"
 DEFAULT_RUN_CONFIG = PACKAGE_DIR / "configs" / "run.json"
+DEFAULT_COLLECTION_CONFIG = PACKAGE_DIR / "configs" / "collect.json"
 
 
 def deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
@@ -107,23 +110,72 @@ CONFIG_SCHEMA: dict[str, Any] = {
         "host": str,
         "port": int,
         "env_ids": (list, str),
-        "jpeg_quality": int,
         "realtime": bool,
         "grid_columns": int,
         "grid_spacing": list,
         "initial_camera_position": list,
         "initial_camera_look_at": list,
     },
-    "recording": {
-        "enabled": bool,
-        "output_directory": str,
-        "env_ids": list,
-        "codec": str,
-    },
 }
 
 
+COLLECTION_SCHEMA = deep_merge(
+    CONFIG_SCHEMA,
+    {
+        "expert": {
+            "controlled_body": str,
+            "target_body": str,
+            "goal_offset_position": list,
+            "goal_offset_rotation_matrix": list,
+            "control_hz": int,
+            "translation_gain": float,
+            "rotation_gain": float,
+            "maximum_translation_step": float,
+            "maximum_rotation_step": float,
+            "maximum_joint_step": list,
+            "dls_damping": float,
+            "joint_limit_margin": float,
+            "position_tolerance": float,
+            "orientation_tolerance": float,
+            "success_consecutive_steps": int,
+            "maximum_episode_steps": int,
+        },
+        "dataset": {
+            "output_directory": str,
+            "resume": bool,
+            "instruction": str,
+            "image_width": int,
+            "image_height": int,
+            "video_codec": str,
+            "video_pixel_format": str,
+            "video_crf": int,
+            "keep_failed_trajectories": bool,
+            "maximum_failed_trajectories": int,
+            "splits": {
+                "train": int,
+                "validation": int,
+                "test": int,
+            },
+        },
+    },
+)
+
+
 def read_object(path: Path) -> dict[str, Any]:
+    """Read one JSON object without supplying defaults.
+
+    Args:
+        path: JSON file to read.
+
+    Returns:
+        Parsed top-level object.
+
+    Raises:
+        FileNotFoundError: If ``path`` is not a file.
+        TypeError: If the JSON root is not an object.
+        ValueError: If the file is not valid JSON.
+    """
+
     if not path.is_file():
         raise FileNotFoundError(f"Configuration file does not exist: {path}")
     try:
@@ -136,6 +188,16 @@ def read_object(path: Path) -> dict[str, Any]:
 
 
 def matches(value: Any, expected: type | tuple[type, ...]) -> bool:
+    """Check a configuration value against the strict schema type rules.
+
+    Args:
+        value: Parsed configuration value.
+        expected: Accepted type or types.
+
+    Returns:
+        Whether the value satisfies the schema rule.
+    """
+
     if isinstance(expected, tuple):
         return isinstance(value, expected)
     if expected is float:
@@ -146,6 +208,18 @@ def matches(value: Any, expected: type | tuple[type, ...]) -> bool:
 
 
 def validate_shape(value: dict[str, Any], schema: dict[str, Any], path: str) -> None:
+    """Validate exact recursive configuration keys and value types.
+
+    Args:
+        value: Configuration subtree to validate.
+        schema: Exact schema for that subtree.
+        path: Dotted path used in validation errors.
+
+    Raises:
+        KeyError: If a required key is missing or an unknown key is present.
+        TypeError: If a value does not have the required type.
+    """
+
     missing = schema.keys() - value.keys()
     extra = value.keys() - schema.keys()
     if missing:
@@ -169,6 +243,21 @@ def validate_shape(value: dict[str, Any], schema: dict[str, Any], path: str) -> 
 
 
 def numbers(config: dict[str, Any], path: str, length: int) -> list[float]:
+    """Read a finite fixed-length numeric vector from a configuration.
+
+    Args:
+        config: Complete merged configuration.
+        path: Dotted path to the vector.
+        length: Exact required vector length.
+
+    Returns:
+        Values converted to floats.
+
+    Raises:
+        TypeError: If any vector member is not numeric.
+        ValueError: If length or finiteness validation fails.
+    """
+
     value: Any = config
     for key in path.split("."):
         value = value[key]
@@ -181,8 +270,22 @@ def numbers(config: dict[str, Any], path: str, length: int) -> list[float]:
     return [float(x) for x in value]
 
 
-def validate_config(config: dict[str, Any]) -> None:
-    validate_shape(config, CONFIG_SCHEMA, "config")
+def validate_config(
+    config: dict[str, Any], schema: dict[str, Any] = CONFIG_SCHEMA
+) -> None:
+    """Validate the complete runtime configuration without fallbacks.
+
+    Args:
+        config: Deep-merged configuration to validate.
+        schema: Exact accepted schema, normally ``CONFIG_SCHEMA``.
+
+    Raises:
+        KeyError: If required or unknown keys are present.
+        TypeError: If a configured value has the wrong type.
+        ValueError: If a configured value violates a semantic constraint.
+    """
+
+    validate_shape(config, schema, "config")
 
     scene = config["scene"]
     if not scene["model_name"]:
@@ -222,10 +325,15 @@ def validate_config(config: dict[str, Any]) -> None:
         "domain_randomization.board_position_lower": 3,
         "domain_randomization.board_position_upper": 3,
         "domain_randomization.nic_rail_y_by_index": 5,
-        "visualization.grid_spacing": 2,
-        "visualization.initial_camera_position": 3,
-        "visualization.initial_camera_look_at": 3,
     }
+    if "visualization" in config:
+        vector_paths.update(
+            {
+                "visualization.grid_spacing": 2,
+                "visualization.initial_camera_position": 3,
+                "visualization.initial_camera_look_at": 3,
+            }
+        )
     vectors = {path: numbers(config, path, size) for path, size in vector_paths.items()}
 
     for lower_path, upper_path in (
@@ -308,40 +416,126 @@ def validate_config(config: dict[str, Any]) -> None:
     cameras = config["cameras"]
     if cameras["width"] <= 0 or cameras["height"] <= 0:
         raise ValueError("Camera dimensions must be positive")
-    visualization = config["visualization"]
-    if not visualization["host"]:
-        raise ValueError("visualization.host cannot be empty")
-    if not 1 <= visualization["port"] <= 65535:
-        raise ValueError("visualization.port must be in [1, 65535]")
-    if not 1 <= visualization["jpeg_quality"] <= 100:
-        raise ValueError("visualization.jpeg_quality must be in [1, 100]")
-    if visualization["grid_columns"] <= 0:
-        raise ValueError("visualization.grid_columns must be positive")
-    if any(value <= 0.0 for value in vectors["visualization.grid_spacing"]):
-        raise ValueError("visualization.grid_spacing values must be positive")
-    if vectors["visualization.initial_camera_position"] == vectors[
-        "visualization.initial_camera_look_at"
-    ]:
+    if "visualization" in config:
+        visualization = config["visualization"]
+        if not visualization["host"]:
+            raise ValueError("visualization.host cannot be empty")
+        if not 1 <= visualization["port"] <= 65535:
+            raise ValueError("visualization.port must be in [1, 65535]")
+        if visualization["grid_columns"] <= 0:
+            raise ValueError("visualization.grid_columns must be positive")
+        if any(value <= 0.0 for value in vectors["visualization.grid_spacing"]):
+            raise ValueError("visualization.grid_spacing values must be positive")
+        if vectors["visualization.initial_camera_position"] == vectors[
+            "visualization.initial_camera_look_at"
+        ]:
+            raise ValueError(
+                "visualization.initial_camera_position and initial_camera_look_at must differ"
+            )
+        visual_env_ids = visualization["env_ids"]
+        if isinstance(visual_env_ids, str) and visual_env_ids != "all":
+            raise ValueError("visualization.env_ids string value must be 'all'")
+        if isinstance(visual_env_ids, list):
+            env_ids = visual_env_ids
+            if any(
+                type(x) is not int or x < 0 or x >= runtime["num_envs"]
+                for x in env_ids
+            ):
+                raise ValueError(
+                    "visualization.env_ids contains an invalid environment index"
+                )
+            if len(set(env_ids)) != len(env_ids):
+                raise ValueError("visualization.env_ids contains duplicates")
+            if visualization["enabled"] and not env_ids:
+                raise ValueError(
+                    "visualization.env_ids cannot be empty when enabled"
+                )
+
+
+def validate_collection_config(config: dict[str, Any]) -> None:
+    """Validate every expert and dataset value without implicit defaults."""
+
+    validate_config(config, COLLECTION_SCHEMA)
+    expert = config["expert"]
+    dataset = config["dataset"]
+
+    if not expert["controlled_body"] or not expert["target_body"]:
+        raise ValueError("expert controlled and target body names cannot be empty")
+    expert_vectors = {
+        "expert.goal_offset_position": 3,
+        "expert.goal_offset_rotation_matrix": 9,
+        "expert.maximum_joint_step": 6,
+    }
+    vectors = {
+        path: numbers(config, path, length)
+        for path, length in expert_vectors.items()
+    }
+    rotation = np.asarray(
+        vectors["expert.goal_offset_rotation_matrix"], dtype=np.float64
+    ).reshape(3, 3)
+    if not np.allclose(
+        rotation.T @ rotation,
+        np.eye(3),
+        rtol=0.0,
+        atol=1.0e-6,
+    ) or not math.isclose(
+        float(np.linalg.det(rotation)), 1.0, rel_tol=0.0, abs_tol=1.0e-6
+    ):
         raise ValueError(
-            "visualization.initial_camera_position and initial_camera_look_at must differ"
+            "expert.goal_offset_rotation_matrix must be a valid SO(3) matrix"
         )
-    visual_env_ids = visualization["env_ids"]
-    if isinstance(visual_env_ids, str) and visual_env_ids != "all":
-        raise ValueError("visualization.env_ids string value must be 'all'")
-    list_selections = [("recording", config["recording"]["env_ids"])]
-    if isinstance(visual_env_ids, list):
-        list_selections.append(("visualization", visual_env_ids))
-    for section, env_ids in list_selections:
-        if any(type(x) is not int or x < 0 or x >= runtime["num_envs"] for x in env_ids):
-            raise ValueError(f"{section}.env_ids contains an invalid environment index")
-        if len(set(env_ids)) != len(env_ids):
-            raise ValueError(f"{section}.env_ids contains duplicates")
-        if config[section]["enabled"] and not env_ids:
-            raise ValueError(f"{section}.env_ids cannot be empty when enabled")
-    if not config["recording"]["output_directory"]:
-        raise ValueError("recording.output_directory cannot be empty")
-    if not config["recording"]["codec"]:
-        raise ValueError("recording.codec cannot be empty")
+    if any(value <= 0.0 for value in vectors["expert.maximum_joint_step"]):
+        raise ValueError("Every expert.maximum_joint_step value must be positive")
+
+    positive_expert_scalars = (
+        "translation_gain",
+        "rotation_gain",
+        "maximum_translation_step",
+        "maximum_rotation_step",
+        "dls_damping",
+        "position_tolerance",
+        "orientation_tolerance",
+    )
+    for key in positive_expert_scalars:
+        if not math.isfinite(expert[key]) or expert[key] <= 0.0:
+            raise ValueError(f"expert.{key} must be finite and positive")
+    if not math.isfinite(expert["joint_limit_margin"]) or expert[
+        "joint_limit_margin"
+    ] < 0.0:
+        raise ValueError("expert.joint_limit_margin must be finite and nonnegative")
+    if expert["control_hz"] != config["cameras"]["fps"]:
+        raise ValueError(
+            "expert.control_hz must equal cameras.fps so every labeled action has RGB"
+        )
+    if expert["success_consecutive_steps"] <= 0:
+        raise ValueError("expert.success_consecutive_steps must be positive")
+    if expert["maximum_episode_steps"] < expert["success_consecutive_steps"]:
+        raise ValueError(
+            "expert.maximum_episode_steps must cover success_consecutive_steps"
+        )
+
+    if not dataset["output_directory"]:
+        raise ValueError("dataset.output_directory cannot be empty")
+    if not dataset["instruction"]:
+        raise ValueError("dataset.instruction cannot be empty")
+    if not dataset["video_codec"] or not dataset["video_pixel_format"]:
+        raise ValueError("Dataset video codec and pixel format cannot be empty")
+    for key in ("image_width", "image_height"):
+        if dataset[key] <= 0 or dataset[key] % 2:
+            raise ValueError(f"dataset.{key} must be a positive even integer")
+    if dataset["image_width"] > config["cameras"]["width"] or dataset[
+        "image_height"
+    ] > config["cameras"]["height"]:
+        raise ValueError("Dataset images cannot exceed the native camera resolution")
+    if not 0 <= dataset["video_crf"] <= 51:
+        raise ValueError("dataset.video_crf must be in [0, 51]")
+    if dataset["maximum_failed_trajectories"] < 0:
+        raise ValueError("dataset.maximum_failed_trajectories cannot be negative")
+    split_counts = dataset["splits"]
+    if any(count < 0 for count in split_counts.values()):
+        raise ValueError("Dataset split trajectory counts cannot be negative")
+    if sum(split_counts.values()) <= 0:
+        raise ValueError("At least one dataset trajectory must be requested")
 
 
 def load_config(
@@ -356,7 +550,22 @@ def load_config(
     validate_config(config)
     for key in ("source_robot", "source_world", "output"):
         config["scene"][key] = str((base.parent / config["scene"][key]).resolve())
-    config["recording"]["output_directory"] = str(
-        (base.parent / config["recording"]["output_directory"]).resolve()
+    return config
+
+
+def load_collection_config(
+    base_path: str | Path = DEFAULT_BASE_CONFIG,
+    collection_path: str | Path = DEFAULT_COLLECTION_CONFIG,
+) -> dict[str, Any]:
+    """Load the strict base plus synthetic-collection execution overlay."""
+
+    base = Path(base_path).expanduser().resolve()
+    collection = Path(collection_path).expanduser().resolve()
+    config = deep_merge(read_object(base), read_object(collection))
+    validate_collection_config(config)
+    for key in ("source_robot", "source_world", "output"):
+        config["scene"][key] = str((base.parent / config["scene"][key]).resolve())
+    config["dataset"]["output_directory"] = str(
+        (collection.parent / config["dataset"]["output_directory"]).resolve()
     )
     return config

@@ -8,6 +8,7 @@ from aic_mujoco.config import load_config
 from aic_mujoco.outputs import RuntimeOutputs
 from aic_mujoco.runtime import AICWarpRuntime
 from aic_mujoco.scene import prepare_scene
+from aic_mujoco.utils.timing import wait_for_realtime
 
 
 def main() -> None:
@@ -37,10 +38,7 @@ def main() -> None:
                 outputs.update(runtime)
             step_index += 1
             if config["visualization"]["enabled"] and config["visualization"]["realtime"]:
-                deadline = started + step_index * timestep
-                delay = deadline - time.perf_counter()
-                if delay > 0.0:
-                    time.sleep(delay)
+                wait_for_realtime(started, step_index, timestep)
     except KeyboardInterrupt:
         print("\nStopping AIC MuJoCo-Warp cleanly.")
     finally:
