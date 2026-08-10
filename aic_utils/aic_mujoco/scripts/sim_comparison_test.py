@@ -118,6 +118,14 @@ class SimComparisonNode(Node):
     """ROS2 node for recording joint state trajectories during test commands."""
 
     def __init__(self, sim_name: str, output_file: str, duration_per_step: float = 3.0):
+        """Initialize ROS interfaces and trajectory storage.
+
+        Args:
+            sim_name: Human-readable simulator name.
+            output_file: Destination trajectory CSV path.
+            duration_per_step: Seconds to hold each scripted joint command.
+        """
+
         super().__init__("sim_comparison_test")
         self.sim_name = sim_name
         self.output_file = output_file
@@ -513,6 +521,8 @@ def _load_csv(filepath: str) -> dict:
 
 
 def main():
+    """Record or compare scripted Gazebo and MuJoCo trajectories."""
+
     parser = argparse.ArgumentParser(description="MuJoCo vs Gazebo comparison test")
     parser.add_argument(
         "--sim",

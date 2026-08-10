@@ -15,6 +15,13 @@ class AICRobot:
     """Resolve the arm, actuators, cameras, wrench sensors, and fixtures."""
 
     def __init__(self, model: mujoco.MjModel, config: dict[str, Any]):
+        """Resolve and validate the reduced scene's named robot interface.
+
+        Args:
+            model: Compiled reduced MuJoCo model.
+            config: Strict merged runtime configuration.
+        """
+
         names = config["scene"]["names"]
         self.joints = ArmJoints.resolve(model, names)
         self.validate_control(model, config)
@@ -47,6 +54,16 @@ class AICRobot:
         self.nic_mocap_id = self.mocap_id(model, names["nic_body"])
 
     def validate_control(self, model: mujoco.MjModel, config: dict[str, Any]) -> None:
+        """Validate actuator limits and the configured reset envelope.
+
+        Args:
+            model: Compiled reduced MuJoCo model.
+            config: Strict merged runtime configuration.
+
+        Raises:
+            ValueError: If actuator limits or joint reset ranges disagree.
+        """
+
         control = config["control"]
         torque_limits = np.asarray(control["torque_limits"])
         expected_ctrlrange = np.column_stack((-torque_limits, torque_limits))
@@ -69,6 +86,19 @@ class AICRobot:
 
     @staticmethod
     def mocap_id(model: mujoco.MjModel, body_name: str) -> int:
+        """Resolve a required mocap body identifier.
+
+        Args:
+            model: Compiled reduced MuJoCo model.
+            body_name: Required body name.
+
+        Returns:
+            Nonnegative mocap identifier.
+
+        Raises:
+            ValueError: If the body is missing or is not mocap-controlled.
+        """
+
         body_id = required_model_id(model, mujoco.mjtObj.mjOBJ_BODY, body_name)
         mocap_id = int(model.body_mocapid[body_id])
         if mocap_id < 0:

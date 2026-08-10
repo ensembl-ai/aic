@@ -1,59 +1,31 @@
-"""Selected-world Viser visualization and RGB recording."""
+"""Selected-world geometry visualization."""
 
 from __future__ import annotations
 
-from pathlib import Path
+import math
 from typing import Any
 
 import numpy as np
 import warp as wp
 
 from aic_mujoco.runtime import AICWarpRuntime
-
-
-@wp.kernel
-def gather_rgb(
-    source: wp.array4d(dtype=wp.uint8),
-    env_ids: wp.array(dtype=int),
-    output: wp.array4d(dtype=wp.uint8),
-):
-    selected, row, column = wp.tid()
-    source_env = env_ids[selected]
-    for channel in range(3):
-        output[selected, row, column, channel] = source[
-            source_env, row, column, channel
-        ]
-
-
-@wp.kernel
-def gather_vec3(
-    source: wp.array2d(dtype=wp.vec3),
-    env_ids: wp.array(dtype=int),
-    output: wp.array2d(dtype=wp.vec3),
-):
-    selected, item = wp.tid()
-    output[selected, item] = source[env_ids[selected], item]
-
-
-@wp.kernel
-def gather_mat33(
-    source: wp.array2d(dtype=wp.mat33),
-    env_ids: wp.array(dtype=int),
-    output: wp.array2d(dtype=wp.mat33),
-):
-    selected, item = wp.tid()
-    output[selected, item] = source[env_ids[selected], item]
+from aic_mujoco.utils.arrays import gather_mat33, gather_vec3
 
 
 class RuntimeOutputs:
-    """Bridge explicitly selected device worlds to human-facing outputs."""
+    """Bridge explicitly selected device worlds to Viser."""
 
     def __init__(self, config: dict[str, Any], runtime: AICWarpRuntime):
+        """Initialize selected-world geometry visualization.
+
+        Args:
+            config: Strict merged runtime configuration.
+            runtime: Initialized MJWarp runtime.
+        """
+
         self.config = config
         self.server = None
-        self.image_handles: dict[tuple[int, str], Any] = {}
         self.mesh_handles: dict[tuple[int, int], Any] = {}
-        self.writers: dict[tuple[int, str], Any] = {}
 
         visualization_enabled = config["visualization"]["enabled"]
         visualization_selection = config["visualization"]["env_ids"]
@@ -64,14 +36,6 @@ class RuntimeOutputs:
             if visualization_enabled
             else []
         )
-        selected: set[int] = set()
-        selected.update(self.visual_envs)
-        if config["recording"]["enabled"]:
-            selected.update(config["recording"]["env_ids"])
-        self.selected = sorted(selected)
-        self.selected_ids = self.device_ids(self.selected, runtime)
-        self.gathered_rgb = self.allocate_rgb(runtime)
-
         self.visual_ids = self.device_ids(self.visual_envs, runtime)
         self.visual_geom_ids = (
             np.flatnonzero(runtime.host_model.geom_matid >= 0).tolist()
@@ -83,37 +47,32 @@ class RuntimeOutputs:
         if visualization_enabled:
             self.allocate_visual_poses(runtime)
 
-        frames = self.download_selected(runtime)
         if visualization_enabled:
-            self.start_visualization(runtime, frames)
-        if config["recording"]["enabled"]:
-            self.start_recording(runtime, frames)
+            self.start_visualization(runtime)
 
     @staticmethod
     def device_ids(env_ids: list[int], runtime: AICWarpRuntime) -> Any:
+        """Upload selected environment IDs to the runtime device.
+
+        Args:
+            env_ids: Ordered environment indices.
+            runtime: Runtime whose device receives the array.
+
+        Returns:
+            Device index array, or ``None`` for an empty selection.
+        """
+
         if not env_ids:
             return None
         return wp.array(env_ids, dtype=int, device=runtime.device)
 
-    def allocate_rgb(self, runtime: AICWarpRuntime) -> dict[str, Any]:
-        if not self.selected:
-            return {}
-        cameras = self.config["cameras"]
-        return {
-            camera_name: wp.empty(
-                (
-                    len(self.selected),
-                    cameras["height"],
-                    cameras["width"],
-                    3,
-                ),
-                dtype=wp.uint8,
-                device=runtime.device,
-            )
-            for camera_name in runtime.rgb
-        }
-
     def allocate_visual_poses(self, runtime: AICWarpRuntime) -> None:
+        """Allocate geometry pose buffers for visualized worlds.
+
+        Args:
+            runtime: Runtime providing geometry count and device ownership.
+        """
+
         count = len(self.visual_envs)
         self.geom_positions = wp.empty(
             (count, runtime.host_model.ngeom), dtype=wp.vec3, device=runtime.device
@@ -122,32 +81,18 @@ class RuntimeOutputs:
             (count, runtime.host_model.ngeom), dtype=wp.mat33, device=runtime.device
         )
 
-    def download_selected(
-        self, runtime: AICWarpRuntime
-    ) -> dict[str, dict[int, np.ndarray]]:
-        if not self.selected:
-            return {}
-        frames: dict[str, dict[int, np.ndarray]] = {}
-        cameras = self.config["cameras"]
-        for camera_name, tensor in runtime.rgb.items():
-            gathered = self.gathered_rgb[camera_name]
-            wp.launch(
-                gather_rgb,
-                dim=(len(self.selected), cameras["height"], cameras["width"]),
-                inputs=[tensor, self.selected_ids],
-                outputs=[gathered],
-                device=runtime.device,
-            )
-            host_tensor = gathered.numpy()
-            frames[camera_name] = {
-                env_id: host_tensor[local_index]
-                for local_index, env_id in enumerate(self.selected)
-            }
-        return frames
-
     def download_visual_poses(
         self, runtime: AICWarpRuntime
     ) -> tuple[np.ndarray, np.ndarray]:
+        """Download geometry positions and rotations for visualized worlds.
+
+        Args:
+            runtime: Runtime containing current geometry transforms.
+
+        Returns:
+            Batched host geometry positions and rotation matrices.
+        """
+
         wp.launch(
             gather_vec3,
             dim=(len(self.visual_envs), runtime.host_model.ngeom),
@@ -171,6 +116,19 @@ class RuntimeOutputs:
     def mesh_color(
         model: Any, geom_id: int
     ) -> tuple[tuple[int, int, int], float | None]:
+        """Convert one MuJoCo material color for Viser.
+
+        Args:
+            model: Compiled host MuJoCo model.
+            geom_id: Geometry whose material is selected.
+
+        Returns:
+            Integer RGB color and optional opacity.
+
+        Raises:
+            ValueError: If the geometry has no material.
+        """
+
         material_id = int(model.geom_matid[geom_id])
         if material_id < 0:
             raise ValueError(f"Viser geometry {geom_id} has no material")
@@ -185,15 +143,26 @@ class RuntimeOutputs:
 
     @staticmethod
     def wxyz(rotation: np.ndarray) -> np.ndarray:
+        """Convert a rotation matrix to Viser's required WXYZ boundary format.
+
+        Args:
+            rotation: Three-by-three rotation matrix.
+
+        Returns:
+            Four-component Viser WXYZ orientation.
+        """
+
         from viser.transforms import SO3
 
         return SO3.from_matrix(rotation).wxyz
 
-    def start_visualization(
-        self,
-        runtime: AICWarpRuntime,
-        frames: dict[str, dict[int, np.ndarray]],
-    ) -> None:
+    def start_visualization(self, runtime: AICWarpRuntime) -> None:
+        """Create the Viser geometry grid.
+
+        Args:
+            runtime: Runtime providing scene meshes and geometry poses.
+        """
+
         import viser
 
         visual = self.config["visualization"]
@@ -206,7 +175,7 @@ class RuntimeOutputs:
         self.server.initial_camera.look_at = tuple(visual["initial_camera_look_at"])
 
         grid_spacing = np.asarray(visual["grid_spacing"], dtype=np.float64)
-        grid_columns = visual["grid_columns"]
+        grid_columns = math.ceil(math.sqrt(len(self.visual_envs)))
         for local_index, env_id in enumerate(self.visual_envs):
             env_root = f"/environments/{env_id}"
             column = local_index % grid_columns
@@ -246,37 +215,15 @@ class RuntimeOutputs:
                     wxyz=self.wxyz(geom_orientations[local_index, geom_id]),
                 )
 
-            for camera_name in runtime.robot.camera_ids:
-                image = frames[camera_name][env_id]
-                self.image_handles[(env_id, camera_name)] = self.server.gui.add_image(
-                    image,
-                    label=f"env {env_id}: {camera_name}",
-                    format="jpeg",
-                    jpeg_quality=visual["jpeg_quality"],
-                )
         print(f"Viewer: http://{visual['host']}:{visual['port']}")
 
-    def start_recording(
-        self,
-        runtime: AICWarpRuntime,
-        frames: dict[str, dict[int, np.ndarray]],
-    ) -> None:
-        import imageio.v2 as imageio
-
-        recording = self.config["recording"]
-        output_directory = Path(recording["output_directory"])
-        output_directory.mkdir(parents=True, exist_ok=True)
-        for env_id in recording["env_ids"]:
-            for camera_name in runtime.rgb:
-                path = output_directory / f"env_{env_id:04d}_{camera_name}.mp4"
-                self.writers[(env_id, camera_name)] = imageio.get_writer(
-                    path,
-                    fps=self.config["cameras"]["fps"],
-                    codec=recording["codec"],
-                )
-        self.update(runtime, frames)
-
     def update_visual_poses(self, runtime: AICWarpRuntime) -> None:
+        """Update every Viser mesh from current MJWarp transforms.
+
+        Args:
+            runtime: Runtime containing current geometry transforms.
+        """
+
         geom_positions, geom_orientations = self.download_visual_poses(runtime)
         for local_index, env_id in enumerate(self.visual_envs):
             for geom_id in self.visual_geom_ids:
@@ -284,23 +231,19 @@ class RuntimeOutputs:
                 handle.position = geom_positions[local_index, geom_id]
                 handle.wxyz = self.wxyz(geom_orientations[local_index, geom_id])
 
-    def update(
-        self,
-        runtime: AICWarpRuntime,
-        frames: dict[str, dict[int, np.ndarray]] | None = None,
-    ) -> None:
-        if not self.selected:
+    def update(self, runtime: AICWarpRuntime) -> None:
+        """Publish current geometry poses.
+
+        Args:
+            runtime: Runtime containing current device observations and poses.
+        """
+
+        if self.server is None:
             return
-        current = self.download_selected(runtime) if frames is None else frames
-        for (env_id, camera_name), handle in self.image_handles.items():
-            handle.image = current[camera_name][env_id]
-        if self.server is not None:
-            self.update_visual_poses(runtime)
-        for (env_id, camera_name), writer in self.writers.items():
-            writer.append_data(current[camera_name][env_id])
+        self.update_visual_poses(runtime)
 
     def close(self) -> None:
-        for writer in self.writers.values():
-            writer.close()
+        """Stop the Viser server."""
+
         if self.server is not None:
             self.server.stop()
