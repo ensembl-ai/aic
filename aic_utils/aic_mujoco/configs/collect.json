@@ -1,0 +1,54 @@
+{
+  "physics": {
+    "device": "cuda:0",
+    "graph_capture": true
+  },
+  "runtime": {
+    "num_envs": 1024,
+    "seed": 7
+  },
+  "visualization": {
+    "enabled": false,
+    "env_ids": "all",
+    "realtime": true
+  },
+  "expert": {
+    "controlled_body": "sfp_tip_link",
+    "target_body": "sfp_port_0_link_entrance",
+    "goal_offset_position": [0.0, 0.0, -0.005],
+    "goal_offset_rotation_matrix": [
+      1.0, 0.0, 0.0,
+      0.0, 1.0, 0.0,
+      0.0, 0.0, 1.0
+    ],
+    "control_hz": 20,
+    "translation_gain": 1.0,
+    "rotation_gain": 1.0,
+    "maximum_translation_step": 0.01,
+    "maximum_rotation_step": 0.1,
+    "maximum_joint_step": [0.1, 0.1, 0.1, 0.1, 0.1, 0.1],
+    "dls_damping": 0.05,
+    "joint_limit_margin": 0.02,
+    "position_tolerance": 0.002,
+    "orientation_tolerance": 0.03,
+    "success_consecutive_steps": 5,
+    "maximum_episode_steps": 200
+  },
+  "dataset": {
+    "output_directory": "../data/far_approach",
+    "resume": true,
+    "instruction": "Move the SFP module to the first port entrance",
+    "image_width": 288,
+    "image_height": 256,
+    "video_codec": "libx264",
+    "video_pixel_format": "yuv420p",
+    "video_crf": 18,
+    "keep_failed_trajectories": true,
+    "maximum_failed_trajectories": 100,
+    "splits": {
+      "train": 1000,
+      "validation": 100,
+      "test": 200
+    }
+  }
+}
