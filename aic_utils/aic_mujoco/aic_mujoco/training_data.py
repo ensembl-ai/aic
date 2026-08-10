@@ -9,10 +9,9 @@ from typing import Any, Iterator
 
 import numpy as np
 import torch
-from torch.utils.data import IterableDataset, get_worker_info
-
 from aic_mujoco.policy import camera_feature_name
 from aic_mujoco.utils.videos import decode_rgb_video
+from torch.utils.data import DataLoader, IterableDataset, get_worker_info
 
 
 @dataclass(frozen=True)
@@ -269,3 +268,46 @@ class TrajectoryDataset(IterableDataset[dict[str, torch.Tensor]]):
                 sample["action"] = action_chunk
                 sample["action_is_pad"] = action_is_pad
                 yield sample
+
+
+def create_dataloader(
+    config: dict[str, Any],
+    records: list[EpisodeRecord],
+    epoch: int,
+    shuffle: bool,
+    drop_last: bool,
+    batch_size: int,
+    num_workers: int,
+    prefetch_factor: int,
+) -> DataLoader:
+    """Create one finite episode-streaming data loader.
+
+    Args:
+        config: Strict merged policy configuration.
+        records: Immutable split snapshot.
+        epoch: Epoch number controlling deterministic shuffling.
+        shuffle: Whether to shuffle episodes and frame indices.
+        drop_last: Whether to omit the final incomplete batch.
+        batch_size: Samples collated into one policy batch.
+        num_workers: Episode-decoding worker process count.
+        prefetch_factor: Batches prefetched by each worker.
+
+    Returns:
+        Batched PyTorch loader.
+    """
+
+    dataset = TrajectoryDataset(config, records, epoch, shuffle)
+    common = {
+        "dataset": dataset,
+        "batch_size": batch_size,
+        "num_workers": num_workers,
+        "pin_memory": config["training"]["device"].startswith("cuda"),
+        "drop_last": drop_last,
+    }
+    if num_workers == 0:
+        return DataLoader(**common)
+    return DataLoader(
+        **common,
+        prefetch_factor=prefetch_factor,
+        persistent_workers=False,
+    )

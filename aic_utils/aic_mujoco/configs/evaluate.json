@@ -1,0 +1,21 @@
+{
+  "runtime": {
+    "num_envs": 1
+  },
+  "visualization": {
+    "enabled": true,
+    "env_ids": "all",
+    "realtime": true
+  },
+  "evaluation": {
+    "checkpoint_directory": "../runs/far_approach_act/checkpoints/step_00010000",
+    "dataset_split": "test",
+    "batch_size": 128,
+    "num_workers": 6,
+    "prefetch_factor": 2,
+    "metrics_output": "../runs/far_approach_act/metrics/evaluation/test_metrics.json",
+    "maximum_episode_steps": 500,
+    "rollout_episodes": 100,
+    "reset_pause_seconds": 1.0
+  }
+}

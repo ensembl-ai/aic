@@ -9,9 +9,7 @@ from typing import Any
 
 import numpy as np
 import warp as wp
-
 from aic_mujoco.utils.images import resize_rgb_bilinear
-
 
 SPLIT_NAMES = ("train", "validation", "test")
 DATASET_FORMAT_VERSION = 3
@@ -67,10 +65,16 @@ class DatasetImageBuffer:
             for camera_name in runtime.rgb
         }
 
-    def download(self, source_images: dict[str, Any]) -> dict[str, np.ndarray]:
-        """Resize and return one host RGB batch for every named camera."""
+    def resize(self, source_images: dict[str, Any]) -> dict[str, Any]:
+        """Resize named RGB batches on the runtime device.
 
-        downloaded: dict[str, np.ndarray] = {}
+        Args:
+            source_images: Native-resolution named MJWarp RGB arrays.
+
+        Returns:
+            Reusable policy-resolution device arrays.
+        """
+
         for camera_name, source in source_images.items():
             output = self.images[camera_name]
             wp.launch(
@@ -86,8 +90,13 @@ class DatasetImageBuffer:
                 outputs=[output],
                 device=self.device,
             )
-            downloaded[camera_name] = output.numpy()
-        return downloaded
+        return self.images
+
+    def download(self, source_images: dict[str, Any]) -> dict[str, np.ndarray]:
+        """Resize and return one host RGB batch for every named camera."""
+
+        resized = self.resize(source_images)
+        return {camera_name: image.numpy() for camera_name, image in resized.items()}
 
 
 class EpisodeAssignment:

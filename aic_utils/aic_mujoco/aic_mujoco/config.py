@@ -15,6 +15,7 @@ DEFAULT_BASE_CONFIG = PACKAGE_DIR / "configs" / "base.json"
 DEFAULT_RUN_CONFIG = PACKAGE_DIR / "configs" / "run.json"
 DEFAULT_COLLECTION_CONFIG = PACKAGE_DIR / "configs" / "collect.json"
 DEFAULT_TRAINING_CONFIG = PACKAGE_DIR / "configs" / "train.json"
+DEFAULT_EVALUATION_CONFIG = PACKAGE_DIR / "configs" / "evaluate.json"
 
 
 def deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
@@ -217,6 +218,24 @@ TRAINING_SCHEMA = deep_merge(
             "mode": str,
             "watch": str,
             "watch_log_frequency": int,
+        },
+    },
+)
+
+
+EVALUATION_SCHEMA = deep_merge(
+    TRAINING_SCHEMA,
+    {
+        "evaluation": {
+            "checkpoint_directory": str,
+            "dataset_split": str,
+            "batch_size": int,
+            "num_workers": int,
+            "prefetch_factor": int,
+            "metrics_output": str,
+            "maximum_episode_steps": int,
+            "rollout_episodes": int,
+            "reset_pause_seconds": float,
         },
     },
 )
@@ -735,6 +754,66 @@ def validate_training_config(config: dict[str, Any]) -> None:
         raise ValueError("wandb.watch_log_frequency must be positive")
 
 
+def validate_evaluation_config(config: dict[str, Any]) -> None:
+    """Validate offline validation and closed-loop inference settings.
+
+    Args:
+        config: Deep-merged simulation, dataset, training, and evaluation
+            configuration.
+
+    Raises:
+        KeyError: If required keys are missing or unknown keys are present.
+        TypeError: If a configured value has the wrong type.
+        ValueError: If an evaluation or inference value is invalid.
+    """
+
+    validate_shape(config, EVALUATION_SCHEMA, "config")
+    training_config = copy.deepcopy(config)
+    del training_config["evaluation"]
+    validate_training_config(training_config)
+    evaluation = config["evaluation"]
+    if not evaluation["checkpoint_directory"]:
+        raise ValueError("evaluation.checkpoint_directory cannot be empty")
+    if evaluation["dataset_split"] not in ("validation", "test"):
+        raise ValueError("evaluation.dataset_split must be validation or test")
+    if evaluation["batch_size"] <= 0:
+        raise ValueError("evaluation.batch_size must be positive")
+    if evaluation["num_workers"] < 0:
+        raise ValueError("evaluation.num_workers cannot be negative")
+    if evaluation["prefetch_factor"] <= 0:
+        raise ValueError("evaluation.prefetch_factor must be positive")
+    if not evaluation["metrics_output"]:
+        raise ValueError("evaluation.metrics_output cannot be empty")
+    if evaluation["maximum_episode_steps"] < config["expert"][
+        "success_consecutive_steps"
+    ]:
+        raise ValueError(
+            "evaluation.maximum_episode_steps must cover "
+            "expert.success_consecutive_steps"
+        )
+    if evaluation["rollout_episodes"] <= 0:
+        raise ValueError("evaluation.rollout_episodes must be positive")
+    if (
+        not math.isfinite(evaluation["reset_pause_seconds"])
+        or evaluation["reset_pause_seconds"] < 0.0
+    ):
+        raise ValueError(
+            "evaluation.reset_pause_seconds must be finite and nonnegative"
+        )
+    if config["runtime"]["num_envs"] != 1:
+        raise ValueError("Policy inference requires runtime.num_envs=1")
+    if not config["visualization"]["enabled"]:
+        raise ValueError("Policy inference requires visualization.enabled=true")
+    if config["visualization"]["env_ids"] != "all":
+        raise ValueError("Policy inference requires visualization.env_ids='all'")
+    if config["policy"]["n_action_steps"] != 1:
+        raise ValueError("Closed-loop inference requires policy.n_action_steps=1")
+    if config["physics"]["device"] != config["training"]["device"]:
+        raise ValueError(
+            "physics.device and training.device must match for device inference"
+        )
+
+
 def load_config(
     base_path: str | Path = DEFAULT_BASE_CONFIG,
     run_path: str | Path = DEFAULT_RUN_CONFIG,
@@ -798,4 +877,45 @@ def load_training_config(
     config["training"]["output_directory"] = str(
         (training.parent / config["training"]["output_directory"]).resolve()
     )
+    return config
+
+
+def load_evaluation_config(
+    base_path: str | Path = DEFAULT_BASE_CONFIG,
+    collection_path: str | Path = DEFAULT_COLLECTION_CONFIG,
+    training_path: str | Path = DEFAULT_TRAINING_CONFIG,
+    evaluation_path: str | Path = DEFAULT_EVALUATION_CONFIG,
+) -> dict[str, Any]:
+    """Load strict simulation, policy, and evaluation configuration layers.
+
+    Args:
+        base_path: Foundation simulation configuration.
+        collection_path: Synthetic dataset configuration overlay.
+        training_path: Policy architecture and device configuration overlay.
+        evaluation_path: Checkpoint, validation, and inference overlay.
+
+    Returns:
+        Validated configuration with all filesystem paths made absolute.
+    """
+
+    base = Path(base_path).expanduser().resolve()
+    collection = Path(collection_path).expanduser().resolve()
+    training = Path(training_path).expanduser().resolve()
+    evaluation = Path(evaluation_path).expanduser().resolve()
+    config = deep_merge(read_object(base), read_object(collection))
+    config = deep_merge(config, read_object(training))
+    config = deep_merge(config, read_object(evaluation))
+    validate_evaluation_config(config)
+    for key in ("source_robot", "source_world", "output"):
+        config["scene"][key] = str((base.parent / config["scene"][key]).resolve())
+    config["dataset"]["output_directory"] = str(
+        (collection.parent / config["dataset"]["output_directory"]).resolve()
+    )
+    config["training"]["output_directory"] = str(
+        (training.parent / config["training"]["output_directory"]).resolve()
+    )
+    for key in ("checkpoint_directory", "metrics_output"):
+        config["evaluation"][key] = str(
+            (evaluation.parent / config["evaluation"][key]).resolve()
+        )
     return config

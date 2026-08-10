@@ -21,6 +21,8 @@ install(PROGRAMS
   scripts/load_aic_world.py
   scripts/sim_comparison_test.py
   scripts/train_policy.py
+  scripts/validate_policy.py
+  scripts/run_policy.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

@@ -27,7 +27,7 @@
   "training": {
     "device": "cuda:0",
     "seed": 7,
-    "batch_size": 32,
+    "batch_size": 128,
     "num_workers": 6,
     "prefetch_factor": 2,
     "steps": 10000,
@@ -40,7 +40,7 @@
     "normalization_minimum_std": 0.000001,
     "minimum_train_episodes": 100,
     "minimum_validation_episodes": 20,
-    "log_every_steps": 10,
+    "log_every_steps": 100,
     "validate_every_steps": 500,
     "validation_batches": 50,
     "checkpoint_every_steps": 1000,

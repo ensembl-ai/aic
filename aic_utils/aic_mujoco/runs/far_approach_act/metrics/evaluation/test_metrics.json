@@ -1,0 +1,19 @@
+{
+  "action_mae_normalized": 0.038159213141344385,
+  "action_mae_rad": 0.0007258021988073259,
+  "action_mae_rad_by_joint": {
+    "elbow_joint": 0.0009558800029691052,
+    "shoulder_lift_joint": 0.0008910980620880942,
+    "shoulder_pan_joint": 0.0005871228945735959,
+    "wrist_1_joint": 0.0005409767313777252,
+    "wrist_2_joint": 0.0007114247815792232,
+    "wrist_3_joint": 0.0006683107202562116
+  },
+  "action_vectors": 440736,
+  "checkpoint": "step_00010000",
+  "dataset_split": "test",
+  "episodes": 200,
+  "frames": 29046,
+  "observations": 29046,
+  "run": "far_approach_act"
+}

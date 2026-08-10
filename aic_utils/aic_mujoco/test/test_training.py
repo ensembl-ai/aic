@@ -16,8 +16,14 @@ import torch
 PACKAGE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PACKAGE))
 
-from aic_mujoco.config import load_training_config
-from aic_mujoco.policy import camera_feature_name, create_policy
+from aic_mujoco.config import load_evaluation_config, load_training_config
+from aic_mujoco.evaluation import evaluate_action_prediction
+from aic_mujoco.policy import (
+    PolicyNormalizer,
+    camera_feature_name,
+    create_policy,
+    load_policy_checkpoint,
+)
 from aic_mujoco.training import train
 from aic_mujoco.training_data import (
     TrajectoryDataset,
@@ -25,11 +31,16 @@ from aic_mujoco.training_data import (
     discover_episodes,
     load_episode,
 )
-
+from aic_mujoco.utils.metrics import (
+    RolloutMetricsRecorder,
+    TrainingMetricsRecorder,
+    WorkspaceSample,
+)
 
 BASE = PACKAGE / "configs" / "base.json"
 COLLECT = PACKAGE / "configs" / "collect.json"
 TRAIN = PACKAGE / "configs" / "train.json"
+EVALUATE = PACKAGE / "configs" / "evaluate.json"
 
 
 def write_test_video(path: Path, frames: np.ndarray) -> None:
@@ -93,6 +104,19 @@ def test_training_config_is_strict(tmp_path: Path) -> None:
     invalid.write_text(json.dumps(training), encoding="utf-8")
     with pytest.raises(ValueError, match="must list center, left, and right"):
         load_training_config(BASE, COLLECT, invalid)
+
+
+def test_evaluation_config_requires_one_explicit_visual_world(
+    tmp_path: Path,
+) -> None:
+    """Reject an inference overlay that silently changes world cardinality."""
+
+    evaluation = json.loads(EVALUATE.read_text(encoding="utf-8"))
+    evaluation["runtime"]["num_envs"] = 2
+    invalid = tmp_path / "invalid_evaluation.json"
+    invalid.write_text(json.dumps(evaluation), encoding="utf-8")
+    with pytest.raises(ValueError, match="runtime.num_envs=1"):
+        load_evaluation_config(BASE, COLLECT, TRAIN, invalid)
 
 
 def test_training_dataset_decodes_aligned_action_chunks(tmp_path: Path) -> None:
@@ -177,6 +201,60 @@ def test_act_policy_computes_a_supervised_loss_on_cpu() -> None:
     assert any(parameter.grad is not None for parameter in policy.parameters())
 
 
+def test_local_training_and_workspace_metrics_are_incremental(
+    tmp_path: Path,
+) -> None:
+    """Persist scalar history and compute an exact SFP workspace path length."""
+
+    training = TrainingMetricsRecorder(tmp_path / "training_run")
+    training.record(10, "train", {"train/loss": 0.5})
+    training.record(10, "validation", {"validation/action_mae_rad": 0.01})
+    training.finish({"status": "completed", "final_step": 10})
+    history = (
+        tmp_path / "training_run" / "metrics" / "training" / "history.jsonl"
+    ).read_text(encoding="utf-8").splitlines()
+    assert len(history) == 2
+
+    config = copy.deepcopy(load_evaluation_config(BASE, COLLECT, TRAIN, EVALUATE))
+    checkpoint = tmp_path / "policy_run" / "checkpoints" / "step_00000010"
+    config["evaluation"]["checkpoint_directory"] = str(checkpoint)
+    rollout = RolloutMetricsRecorder(config)
+    rollout.start_episode(1)
+    first = WorkspaceSample(
+        sfp_position=np.asarray([0.0, 0.0, 0.0]),
+        goal_position=np.asarray([1.0, 0.0, 0.0]),
+        position_error=1.0,
+        orientation_error=0.2,
+    )
+    second = WorkspaceSample(
+        sfp_position=np.asarray([0.03, 0.04, 0.0]),
+        goal_position=np.asarray([1.0, 0.0, 0.0]),
+        position_error=0.9,
+        orientation_error=0.1,
+    )
+    rollout.record(1, first)
+    rollout.record(2, second)
+    episode = rollout.finish_episode("timeout", second)
+    rollout.close("completed")
+
+    assert episode["workspace_path_length_m"] == pytest.approx(0.05)
+    assert episode["position_progress_m"] == pytest.approx(0.1)
+    assert episode["minimum_position_error_m"] == pytest.approx(0.9)
+    assert episode["final_error_increase_from_closest_m"] == pytest.approx(0.0)
+    summary = json.loads(
+        (rollout.directory / "summary.json").read_text(encoding="utf-8")
+    )
+    assert summary["timeout_count"] == 1
+    assert summary["success_rate"] == 0.0
+    assert summary["positive_position_progress_rate"] == 1.0
+    assert summary["final_at_closest_rate"] == 1.0
+    assert len(
+        (rollout.directory / "workspace_path.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ) == 2
+
+
 def test_one_step_training_writes_an_atomic_checkpoint(tmp_path: Path) -> None:
     """Exercise the complete train, validate, log, and save lifecycle."""
 
@@ -232,3 +310,30 @@ def test_one_step_training_writes_an_atomic_checkpoint(tmp_path: Path) -> None:
     assert (checkpoint / "policy" / "model.safetensors").is_file()
     assert (checkpoint / "normalization.json").is_file()
     assert not checkpoint.with_name(checkpoint.name + ".incomplete").exists()
+
+    config["evaluation"] = {
+        "checkpoint_directory": str(checkpoint),
+        "dataset_split": "validation",
+        "batch_size": 1,
+        "num_workers": 0,
+        "prefetch_factor": 1,
+        "metrics_output": str(tmp_path / "metrics.json"),
+        "maximum_episode_steps": 500,
+        "reset_pause_seconds": 0.0,
+    }
+    config["expert"]["maximum_episode_steps"] = 500
+    loaded_policy, loaded_statistics = load_policy_checkpoint(config)
+    validation_records = discover_episodes(config, "validation", 1)
+    metrics = evaluate_action_prediction(
+        config,
+        loaded_policy,
+        PolicyNormalizer(config, loaded_statistics),
+        validation_records,
+        batch_size=1,
+        num_workers=0,
+        prefetch_factor=1,
+        maximum_batches=None,
+    )
+    assert metrics["observations"] == 5
+    assert metrics["action_vectors"] > 0
+    assert np.isfinite(metrics["action_mae_rad"])

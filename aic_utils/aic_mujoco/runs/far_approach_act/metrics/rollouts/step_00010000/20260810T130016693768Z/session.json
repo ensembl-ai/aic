@@ -1,0 +1,41 @@
+{
+  "checkpoint": "step_00010000",
+  "control_hz": 20,
+  "domain_randomization": {
+    "board_position_lower": [
+      0.1,
+      -0.3,
+      1.14
+    ],
+    "board_position_upper": [
+      0.3,
+      0.3,
+      1.14
+    ],
+    "board_yaw_deviation_lower": -0.2,
+    "board_yaw_deviation_upper": 0.2,
+    "nic_rail_indices": [
+      2,
+      4
+    ],
+    "nic_rail_x_base": -0.081418,
+    "nic_rail_y_by_index": [
+      -0.1745,
+      -0.1345,
+      -0.0945,
+      -0.0545,
+      -0.0145
+    ],
+    "nic_rail_z": 0.012,
+    "nic_translation_lower": -0.0215,
+    "nic_translation_upper": 0.0234
+  },
+  "format_version": 1,
+  "maximum_episode_steps": 500,
+  "orientation_tolerance_rad": 0.03,
+  "policy_type": "act",
+  "position_tolerance_m": 0.002,
+  "runtime_seed": 7,
+  "session_id": "20260810T130016693768Z",
+  "success_consecutive_steps": 5
+}

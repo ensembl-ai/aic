@@ -11,113 +11,20 @@ from typing import Any
 import numpy as np
 import torch
 import wandb
-from torch.utils.data import DataLoader
-
 from aic_mujoco.config import load_training_config
-from aic_mujoco.policy import ACTPolicy, camera_feature_name, create_policy
+from aic_mujoco.evaluation import evaluate_action_prediction
+from aic_mujoco.policy import (
+    ACTPolicy,
+    PolicyNormalizer,
+    create_policy,
+    validate_policy_device,
+)
 from aic_mujoco.training_data import (
-    EpisodeRecord,
-    TrajectoryDataset,
     compute_normalization_statistics,
+    create_dataloader,
     discover_episodes,
 )
-
-
-AMP_DTYPES = {"bfloat16": torch.bfloat16}
-
-
-def validate_training_device(device_name: str) -> None:
-    """Reject unavailable or unsupported training devices without fallback.
-
-    Args:
-        device_name: Explicit PyTorch device from the training configuration.
-
-    Raises:
-        RuntimeError: If the requested CUDA device cannot execute this build.
-    """
-
-    device = torch.device(device_name)
-    if device.type != "cuda":
-        return
-    if not torch.cuda.is_available():
-        raise RuntimeError(f"Configured CUDA device is unavailable: {device_name}")
-    device_index = torch.cuda.current_device() if device.index is None else device.index
-    if device_index >= torch.cuda.device_count():
-        raise RuntimeError(f"Configured CUDA device is unavailable: {device_name}")
-    major, minor = torch.cuda.get_device_capability(device_index)
-    architecture = f"sm_{major}{minor}"
-    supported_architectures = torch.cuda.get_arch_list()
-    if supported_architectures and architecture not in supported_architectures:
-        raise RuntimeError(
-            f"PyTorch {torch.__version__} does not support {architecture} on "
-            f"{torch.cuda.get_device_name(device_index)}; install the locked Pixi "
-            "environment before training"
-        )
-
-
-class PolicyBatchNormalizer:
-    """Move batches to the training device and apply explicit normalization."""
-
-    def __init__(
-        self,
-        config: dict[str, Any],
-        statistics: dict[str, dict[str, np.ndarray]],
-    ):
-        """Create reusable device normalization tensors.
-
-        Args:
-            config: Strict merged policy-training configuration.
-            statistics: Train-split state and action mean/std arrays.
-        """
-
-        self.device = torch.device(config["training"]["device"])
-        self.amp_dtype = AMP_DTYPES[config["training"]["amp_dtype"]]
-        self.camera_names = config["policy"]["camera_names"]
-        self.image_mean = torch.tensor(
-            config["policy"]["image_mean"], device=self.device
-        ).view(1, 3, 1, 1)
-        self.image_std = torch.tensor(
-            config["policy"]["image_std"], device=self.device
-        ).view(1, 3, 1, 1)
-        self.state_mean = torch.from_numpy(
-            statistics["observation.state"]["mean"]
-        ).to(self.device)
-        self.state_std = torch.from_numpy(
-            statistics["observation.state"]["std"]
-        ).to(self.device)
-        self.action_mean = torch.from_numpy(statistics["action"]["mean"]).to(
-            self.device
-        )
-        self.action_std = torch.from_numpy(statistics["action"]["std"]).to(
-            self.device
-        )
-
-    def prepare(self, host_batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
-        """Transfer and normalize one collated training or validation batch."""
-
-        batch: dict[str, torch.Tensor] = {}
-        for camera_name in self.camera_names:
-            key = camera_feature_name(camera_name)
-            image = host_batch[key].to(self.device, non_blocking=True).float()
-            image = image.div(255.0)
-            batch[key] = (image - self.image_mean) / self.image_std
-        state = host_batch["observation.state"].to(
-            self.device, non_blocking=True
-        )
-        action = host_batch["action"].to(self.device, non_blocking=True)
-        batch["observation.state"] = (state - self.state_mean) / self.state_std
-        batch["action"] = (action - self.action_mean) / self.action_std
-        batch["action_is_pad"] = host_batch["action_is_pad"].to(
-            self.device, non_blocking=True
-        )
-        return batch
-
-    def action_error_radians(
-        self, predicted: torch.Tensor, target: torch.Tensor
-    ) -> torch.Tensor:
-        """Convert normalized absolute action error back to joint radians."""
-
-        return torch.abs(predicted - target) * self.action_std
+from aic_mujoco.utils.metrics import TrainingMetricsRecorder
 
 
 def json_statistics(
@@ -128,93 +35,6 @@ def json_statistics(
     return {
         feature: {name: values.tolist() for name, values in feature_stats.items()}
         for feature, feature_stats in statistics.items()
-    }
-
-
-def create_dataloader(
-    config: dict[str, Any],
-    records: list[EpisodeRecord],
-    epoch: int,
-    shuffle: bool,
-    drop_last: bool,
-) -> DataLoader:
-    """Create one finite episode-streaming data loader.
-
-    Args:
-        config: Strict merged policy-training configuration.
-        records: Immutable split snapshot.
-        epoch: Epoch number controlling deterministic shuffling.
-        shuffle: Whether to shuffle episodes and frame indices.
-        drop_last: Whether to omit the final incomplete batch.
-
-    Returns:
-        Batched PyTorch loader.
-    """
-
-    training = config["training"]
-    dataset = TrajectoryDataset(config, records, epoch, shuffle)
-    common = {
-        "dataset": dataset,
-        "batch_size": training["batch_size"],
-        "num_workers": training["num_workers"],
-        "pin_memory": training["device"].startswith("cuda"),
-        "drop_last": drop_last,
-    }
-    if training["num_workers"] == 0:
-        return DataLoader(**common)
-    return DataLoader(
-        **common,
-        prefetch_factor=training["prefetch_factor"],
-        persistent_workers=False,
-    )
-
-
-@torch.no_grad()
-def validate_policy(
-    config: dict[str, Any],
-    policy: ACTPolicy,
-    normalizer: PolicyBatchNormalizer,
-    records: list[EpisodeRecord],
-) -> dict[str, float]:
-    """Measure deterministic action-chunk error on validation episodes.
-
-    Args:
-        config: Strict merged policy-training configuration.
-        policy: Policy being optimized.
-        normalizer: Train-statistics batch normalizer.
-        records: Fixed validation episode snapshot.
-
-    Returns:
-        Normalized and physical-unit mean absolute action errors.
-    """
-
-    loader = create_dataloader(config, records, 0, False, False)
-    normalized_error = 0.0
-    physical_error = 0.0
-    value_count = 0
-    policy.eval()
-    for batch_index, host_batch in enumerate(loader):
-        if batch_index >= config["training"]["validation_batches"]:
-            break
-        batch = normalizer.prepare(host_batch)
-        with torch.autocast(
-            device_type=normalizer.device.type,
-            dtype=normalizer.amp_dtype,
-            enabled=config["training"]["use_amp"],
-        ):
-            predicted = policy.predict_action_chunk(batch)
-        valid = (~batch["action_is_pad"]).unsqueeze(-1)
-        normalized = torch.abs(predicted - batch["action"])
-        physical = normalizer.action_error_radians(predicted, batch["action"])
-        normalized_error += float((normalized * valid).sum().item())
-        physical_error += float((physical * valid).sum().item())
-        value_count += int(valid.sum().item()) * predicted.shape[-1]
-    if value_count == 0:
-        raise RuntimeError("Validation loader produced no non-padding actions")
-    policy.train()
-    return {
-        "validation/action_mae_normalized": normalized_error / value_count,
-        "validation/action_mae_rad": physical_error / value_count,
     }
 
 
@@ -282,7 +102,7 @@ def train(config: dict[str, Any]) -> None:
 
     training = config["training"]
     dataset = config["dataset"]
-    validate_training_device(training["device"])
+    validate_policy_device(training["device"])
     train_records = discover_episodes(
         config, "train", training["minimum_train_episodes"]
     )
@@ -326,7 +146,7 @@ def train(config: dict[str, Any]) -> None:
     )
 
     policy = create_policy(config)
-    normalizer = PolicyBatchNormalizer(config, statistics)
+    normalizer = PolicyNormalizer(config, statistics)
     optimizer = torch.optim.AdamW(
         policy.get_optim_params(),
         lr=training["learning_rate"],
@@ -334,6 +154,7 @@ def train(config: dict[str, Any]) -> None:
     )
     parameter_count = sum(parameter.numel() for parameter in policy.parameters())
     run = initialize_wandb(config, output_directory, policy)
+    local_metrics = TrainingMetricsRecorder(output_directory)
     run.summary["dataset/train_episodes"] = len(train_records)
     run.summary["dataset/validation_episodes"] = len(validation_records)
     run.summary["dataset/train_frames"] = train_sample_count
@@ -347,11 +168,20 @@ def train(config: dict[str, Any]) -> None:
 
     step = 0
     epoch = 0
+    latest_checkpoint: Path | None = None
+    completed = False
     try:
         policy.train()
         while step < training["steps"]:
             loader = create_dataloader(
-                config, train_records, epoch, True, True
+                config,
+                train_records,
+                epoch=epoch,
+                shuffle=True,
+                drop_last=True,
+                batch_size=training["batch_size"],
+                num_workers=training["num_workers"],
+                prefetch_factor=training["prefetch_factor"],
             )
             iterator = iter(loader)
             while step < training["steps"]:
@@ -399,6 +229,7 @@ def train(config: dict[str, Any]) -> None:
                         metrics["train/kld_loss"] = float(
                             loss_components["kld_loss"]
                         )
+                    local_metrics.record(step, "train", metrics)
                     run.log(metrics, step=step)
                     print(
                         f"step {step}/{training['steps']} "
@@ -407,9 +238,25 @@ def train(config: dict[str, Any]) -> None:
                     )
 
                 if step % training["validate_every_steps"] == 0:
-                    validation = validate_policy(
-                        config, policy, normalizer, validation_records
+                    validation_result = evaluate_action_prediction(
+                        config,
+                        policy,
+                        normalizer,
+                        validation_records,
+                        batch_size=training["batch_size"],
+                        num_workers=training["num_workers"],
+                        prefetch_factor=training["prefetch_factor"],
+                        maximum_batches=training["validation_batches"],
                     )
+                    validation = {
+                        "validation/action_mae_normalized": validation_result[
+                            "action_mae_normalized"
+                        ],
+                        "validation/action_mae_rad": validation_result[
+                            "action_mae_rad"
+                        ],
+                    }
+                    local_metrics.record(step, "validation", validation)
                     run.log(validation, step=step)
                     print(
                         f"validation step {step}: "
@@ -420,12 +267,37 @@ def train(config: dict[str, Any]) -> None:
                     step % training["checkpoint_every_steps"] == 0
                     or step == training["steps"]
                 ):
-                    checkpoint = save_checkpoint(
+                    latest_checkpoint = save_checkpoint(
                         output_directory, step, policy, statistics
                     )
-                    run.summary["checkpoint/latest"] = str(checkpoint)
+                    run.summary["checkpoint/latest"] = str(latest_checkpoint)
             epoch += 1
+        completed = True
     finally:
+        local_metrics.finish(
+            {
+                "status": "completed" if completed else "interrupted_or_failed",
+                "final_step": step,
+                "final_epoch": epoch,
+                "configured_steps": training["steps"],
+                "train_episodes": len(train_records),
+                "validation_episodes": len(validation_records),
+                "train_frames": train_sample_count,
+                "validation_frames": sum(
+                    record.steps for record in validation_records
+                ),
+                "model_parameters": parameter_count,
+                "wandb": {
+                    "entity": run.entity,
+                    "project": run.project,
+                    "run_id": run.id,
+                    "run_name": run.name,
+                },
+                "latest_checkpoint": (
+                    latest_checkpoint.name if latest_checkpoint is not None else None
+                ),
+            }
+        )
         run.finish()
 
 
