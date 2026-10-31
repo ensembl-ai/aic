@@ -87,6 +87,8 @@ def apply_post_processing_fixes(output_dir):
 
 
 def main():
+    """Parse arguments and run SDF-to-MJCF conversion."""
+
     parser = argparse.ArgumentParser(
         description="Convert AIC Gazebo world to MuJoCo MJCF format",
         formatter_class=argparse.RawDescriptionHelpFormatter,

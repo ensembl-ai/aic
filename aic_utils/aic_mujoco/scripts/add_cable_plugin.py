@@ -248,6 +248,8 @@ def postprocess_world_xml(
 
 
 def main():
+    """Split and post-process converted AIC MJCF files."""
+
     if "BUILD_WORKSPACE_DIRECTORY" in os.environ:
         os.chdir(os.environ["BUILD_WORKSPACE_DIRECTORY"])
 
@@ -318,6 +320,8 @@ def main():
         ]
 
         def is_robot_asset(name):
+            """Return whether an asset name belongs in the robot model."""
+
             for ek in env_keywords:
                 if ek in name:
                     return False
@@ -328,6 +332,8 @@ def main():
 
         # --- String helpers for class renaming ---
         def rename_class(xml_str, old_name, new_name):
+            """Rename one MJCF default class and all of its references."""
+
             xml_str = re.sub(
                 rf'<default\s+class="{old_name}"',
                 f'<default class="{new_name}"',
@@ -346,6 +352,8 @@ def main():
             return xml_str
 
         def strip_tag(xml_str, tag):
+            """Remove every occurrence of an XML tag from serialized MJCF."""
+
             pattern = rf"<{tag}[^>]*/>\s*"
             xml_str = re.sub(pattern, "", xml_str)
             pattern = rf"<{tag}[^>]*>.*?</{tag}>\s*"
@@ -793,6 +801,8 @@ def main():
         print("Setting plugin on cable bodies...")
 
         def traverse_find_links(body, target_plugin):
+            """Attach the cable plugin recursively to cable-chain bodies."""
+
             count = 0
 
             # Skip plug links — they are rigid attachments, not part of the
@@ -833,6 +843,8 @@ def main():
         xml_str = rename_class(xml_str, "unused", "world_default")
 
         def strip_class_from_cable_children(xml):
+            """Remove incompatible world defaults from cable joints and geoms."""
+
             for i in range(1, 21):
                 for elem_type in ["joint", "geom"]:
                     patterns = [

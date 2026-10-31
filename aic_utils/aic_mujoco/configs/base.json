@@ -47,7 +47,7 @@
     }
   },
   "physics": {
-    "timestep": 0.002,
+    "timestep": 0.005,
     "integrator": "implicitfast",
     "solver": "Newton",
     "iterations": 200,
@@ -65,10 +65,10 @@
     "torque_limits": [120.0, 120.0, 120.0, 60.0, 60.0, 60.0]
   },
   "domain_randomization": {
-    "board_position_lower": [0.16, -0.21, 1.14],
-    "board_position_upper": [0.16, 0.05, 1.14],
-    "board_yaw_deviation_lower": -0.041592653589793,
-    "board_yaw_deviation_upper": 0.041592653589793,
+    "board_position_lower": [0.1, -0.3, 1.14],
+    "board_position_upper": [0.3, 0.3, 1.14],
+    "board_yaw_deviation_lower": -0.2,
+    "board_yaw_deviation_upper": 0.2,
     "nic_rail_indices": [2, 4],
     "nic_rail_x_base": -0.081418,
     "nic_rail_y_by_index": [-0.1745, -0.1345, -0.0945, -0.0545, -0.0145],
@@ -88,5 +88,12 @@
     "fps": 20,
     "use_textures": true,
     "use_shadows": false
+  },
+  "visualization": {
+    "host": "127.0.0.1",
+    "port": 8080,
+    "grid_spacing": [2.0, 2.0],
+    "initial_camera_position": [3.0, -8.0, 9.0],
+    "initial_camera_look_at": [3.0, 3.0, 1.0]
   }
 }

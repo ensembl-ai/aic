@@ -60,6 +60,8 @@ class ArmJoints:
 
     @property
     def count(self) -> int:
+        """Return the number of controlled arm joints."""
+
         return len(self.names)
 
 

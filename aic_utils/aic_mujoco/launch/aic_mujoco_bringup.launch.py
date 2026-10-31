@@ -14,6 +14,8 @@
 #  limitations under the License.
 #
 
+"""Launch the ROS 2 MuJoCo bridge for the full AIC robot description."""
+
 import os
 from ament_index_python.packages import get_package_share_directory
 
@@ -38,6 +40,17 @@ from launch_ros.substitutions import FindPackageShare
 
 
 def launch_setup(context, *args, **kwargs):
+    """Build context-dependent nodes and process event handlers.
+
+    Args:
+        context: ROS 2 launch evaluation context.
+        *args: Additional launch arguments supplied by ``OpaqueFunction``.
+        **kwargs: Additional launch keyword arguments.
+
+    Returns:
+        Launch actions configured for the selected arguments.
+    """
+
     # UR arguments
     ur_type = LaunchConfiguration("ur_type")
     safety_limits = LaunchConfiguration("safety_limits")
@@ -300,6 +313,12 @@ def launch_setup(context, *args, **kwargs):
 
 
 def generate_launch_description():
+    """Build the complete AIC MuJoCo ROS 2 launch description.
+
+    Returns:
+        Configured ROS 2 ``LaunchDescription``.
+    """
+
     declared_arguments = []
     # UR specific arguments
     declared_arguments.append(

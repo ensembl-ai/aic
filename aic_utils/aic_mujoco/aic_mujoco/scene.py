@@ -9,9 +9,30 @@ from pathlib import Path
 from typing import Any
 
 import mujoco
+import numpy as np
+
+from aic_mujoco.utils.mujoco_math import (
+    compose_pose,
+    normalized_quaternion,
+    rotate_vector,
+)
 
 
 def required_element(root: ET.Element, query: str, description: str) -> ET.Element:
+    """Return one required XML element.
+
+    Args:
+        root: XML subtree to search.
+        query: ElementTree query relative to ``root``.
+        description: Human-readable element description for errors.
+
+    Returns:
+        The matched XML element.
+
+    Raises:
+        ValueError: If the query does not match an element.
+    """
+
     element = root.find(query)
     if element is None:
         raise ValueError(f"Source MJCF is missing {description}: {query}")
@@ -19,6 +40,20 @@ def required_element(root: ET.Element, query: str, description: str) -> ET.Eleme
 
 
 def named_element(root: ET.Element, tag: str, name: str) -> ET.Element:
+    """Return the only XML element with a tag and name.
+
+    Args:
+        root: XML subtree to search recursively.
+        tag: XML element tag.
+        name: Required ``name`` attribute.
+
+    Returns:
+        The unique matching element.
+
+    Raises:
+        ValueError: If zero or multiple elements match.
+    """
+
     matches = [element for element in root.iter(tag) if element.get("name") == name]
     if len(matches) != 1:
         raise ValueError(
@@ -28,6 +63,20 @@ def named_element(root: ET.Element, tag: str, name: str) -> ET.Element:
 
 
 def parse_vector(text: str | None, length: int, description: str) -> list[float]:
+    """Parse and validate a fixed-length MJCF numeric attribute.
+
+    Args:
+        text: Space-separated MJCF attribute text.
+        length: Required number of values.
+        description: Human-readable attribute description for errors.
+
+    Returns:
+        Parsed finite floating-point values.
+
+    Raises:
+        ValueError: If the attribute is missing, malformed, or non-finite.
+    """
+
     if text is None:
         raise ValueError(f"Missing {description}")
     values = [float(value) for value in text.split()]
@@ -38,51 +87,30 @@ def parse_vector(text: str | None, length: int, description: str) -> list[float]
     return values
 
 
-def quaternion_product(a: list[float], b: list[float]) -> list[float]:
-    aw, ax, ay, az = a
-    bw, bx, by, bz = b
-    return [
-        aw * bw - ax * bx - ay * by - az * bz,
-        aw * bx + ax * bw + ay * bz - az * by,
-        aw * by - ax * bz + ay * bw + az * bx,
-        aw * bz + ax * by - ay * bx + az * bw,
-    ]
+def format_vector(values: list[float] | np.ndarray) -> str:
+    """Format a numeric vector as a stable MJCF attribute.
 
+    Args:
+        values: Numeric values to serialize.
 
-def quaternion_multiply(a: list[float], b: list[float]) -> list[float]:
-    result = quaternion_product(a, b)
-    norm = math.sqrt(sum(value * value for value in result))
-    if norm == 0.0:
-        raise ValueError("Cannot normalize a zero quaternion")
-    return [value / norm for value in result]
+    Returns:
+        Space-separated values with stable precision.
+    """
 
-
-def rotate_vector(quat: list[float], vector: list[float]) -> list[float]:
-    _, x, y, z = quaternion_product(
-        quaternion_product(quat, [0.0, *vector]),
-        [quat[0], -quat[1], -quat[2], -quat[3]],
-    )
-    return [x, y, z]
-
-
-def compose_pose(
-    parent_pos: list[float],
-    parent_quat: list[float],
-    child_pos: list[float],
-    child_quat: list[float],
-) -> tuple[list[float], list[float]]:
-    rotated = rotate_vector(parent_quat, child_pos)
-    return (
-        [a + b for a, b in zip(parent_pos, rotated, strict=True)],
-        quaternion_multiply(parent_quat, child_quat),
-    )
-
-
-def format_vector(values: list[float]) -> str:
     return " ".join(f"{value:.16g}" for value in values)
 
 
 def remove_descendant(parent: ET.Element, target: ET.Element) -> bool:
+    """Remove an XML descendant while preserving the remaining subtree.
+
+    Args:
+        parent: Subtree root to search recursively.
+        target: Exact element instance to remove.
+
+    Returns:
+        ``True`` when the element was found and removed.
+    """
+
     for child in parent:
         if child is target:
             parent.remove(child)
@@ -93,6 +121,19 @@ def remove_descendant(parent: ET.Element, target: ET.Element) -> bool:
 
 
 def copy_defaults(robot: ET.Element, world: ET.Element) -> ET.Element:
+    """Copy only default classes required by the reduced scene.
+
+    Args:
+        robot: Source robot MJCF root.
+        world: Source world MJCF root.
+
+    Returns:
+        Reduced ``default`` XML element.
+
+    Raises:
+        ValueError: If a required class is absent.
+    """
+
     output = ET.Element("default")
     permitted = {"robot_unused", "world_default", "nic_card_default"}
     for root in (robot, world):
@@ -114,6 +155,22 @@ def copy_assets(
     selected: list[ET.Element],
     output_directory: Path,
 ) -> ET.Element:
+    """Copy the transitive asset closure used by selected scene elements.
+
+    Args:
+        robot: Source robot MJCF root.
+        world: Source world MJCF root.
+        selected: Scene subtrees retained in the reduced model.
+        output_directory: Directory that must contain referenced asset files.
+
+    Returns:
+        Reduced ``asset`` XML element.
+
+    Raises:
+        FileNotFoundError: If a referenced asset file is absent.
+        ValueError: If asset names conflict or a reference is unresolved.
+    """
+
     assets_by_name: dict[str, ET.Element] = {}
     for root in (robot, world):
         asset = root.find("asset")
@@ -164,6 +221,16 @@ def copy_assets(
 
 
 def validate_model(model: mujoco.MjModel, config: dict[str, Any]) -> None:
+    """Validate the compiled reduced model against its strict contract.
+
+    Args:
+        model: Compiled reduced MuJoCo model.
+        config: Strict merged runtime configuration.
+
+    Raises:
+        ValueError: If dimensions or required named elements differ.
+    """
+
     names = config["scene"]["names"]
     expected = {
         "nq": 6,
@@ -234,9 +301,8 @@ def prepare_scene(config: dict[str, Any]) -> Path:
                 f"scene.gripper_fixed_position is outside {joint_name} range"
             )
         finger_position = parse_vector(finger.get("pos"), 3, f"{finger_name} position")
-        finger_quaternion = quaternion_multiply(
-            parse_vector(finger.get("quat") or "1 0 0 0", 4, "finger quaternion"),
-            [1.0, 0.0, 0.0, 0.0],
+        finger_quaternion = normalized_quaternion(
+            parse_vector(finger.get("quat") or "1 0 0 0", 4, "finger quaternion")
         )
         axis = parse_vector(joint.get("axis"), 3, f"{joint_name} axis")
         displacement = rotate_vector(

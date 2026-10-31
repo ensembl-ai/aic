@@ -327,12 +327,14 @@ Any of the policies in `aic_example_policies` can be used to control the robot i
 
 ## AIC MuJoCo-Warp foundation
 
-This package provides two deliberately separate capabilities:
+This package provides three deliberately separate capabilities:
 
 1. the existing one-time conversion utilities that turn an exported AIC Gazebo
    world into MJCF and its mesh/texture assets; and
 2. a small, ROS-free MuJoCo-Warp runtime for independently randomized SFP/NIC
-   HOLD environments.
+   HOLD environments; and
+3. a privileged Cartesian teacher that generates synthetic demonstration
+   trajectories for later visuomotor-policy training.
 
 The foundation runtime uses MuJoCo-Warp for every physics step, camera frame,
 and F/T observation. Regular MuJoCo is used only on the host to compile and
@@ -348,8 +350,22 @@ pixi run python aic_utils/aic_mujoco/run.py
 
 The committed run requires a CUDA device. A missing CUDA device is an error;
 there is no CPU fallback. It runs until `Ctrl+C`. Viser displays the reduced
-scene's actual meshes and the RGB tensors produced by the MJWarp batch renderer
-at `http://127.0.0.1:8080`.
+scene's actual meshes at `http://127.0.0.1:8080`.
+
+Synthetic demonstrations use the separate strict
+[`configs/collect.json`](configs/collect.json) overlay. Run the complete
+collector from the repository root with one command and no arguments:
+
+```bash
+pixi run python aic_utils/aic_mujoco/scripts/collect_data.py
+```
+
+The collector stops after the configured train, validation, and test counts are
+complete. It first generates compact controller trajectories across every
+configured rollout world without allocating RGB, then replays successful
+trajectories through a bounded camera batch for video export. `Ctrl+C` preserves
+completed rollouts and episodes so the same command can resume either stage.
+When enabled, Viser can inspect rollout geometry without downloading images.
 
 ### Algorithmic design
 
@@ -439,9 +455,11 @@ values in the AIC evaluation config. Sampling yaw uniformly from -3.1 to +3.1
 would be wrong: it would include almost every orientation instead of the small
 neighborhood around π represented by the two trials.
 
-Both fixtures are MJCF mocap bodies. Their positions and quaternions are stored
-per world in `data.mocap_pos` and `data.mocap_quat`; the shared model's static
-body arrays are never mutated.
+Both fixtures are MJCF mocap bodies. Their positions and orientations are
+stored per world in `data.mocap_pos` and `data.mocap_quat`; the latter is an
+unavoidable MuJoCo/MJWarp API-boundary representation. Controller commands,
+controller errors, and stored dataset poses use rotation matrices. The shared
+model's static body arrays are never mutated.
 
 #### HOLD control
 
@@ -502,10 +520,70 @@ per-world command object. `JointHoldController` owns the gains, limits, device
 address arrays, and the impedance kernel. `AICWarpRuntime` orchestrates those
 objects and owns the changing MJWarp state.
 
+#### Privileged Cartesian teacher
+
+The data generator adds one generic Cartesian motion layer above the existing
+HOLD controller. It does not teleport the robot and does not replace the
+low-level torque law:
+
+```text
+exact SFP-tip pose + configured goal pose
+                    ↓
+       CartesianMoveController at 20 Hz
+                    ↓
+        bounded action_delta_q (N, 6)
+                    ↓
+       HoldPositionCommand.position
+                    ↓
+       JointHoldController at 200 Hz
+                    ↓
+             MJWarp physics
+```
+
+For every active environment, the teacher performs one closed-loop update:
+
+1. read current and target world-frame `xmat` rotation matrices and calculate
+   the three-dimensional SO(3) logarithm (axis multiplied by angle in radians);
+2. clip each error along its original direction to the configured Cartesian
+   step;
+3. build the six-joint geometric Jacobian from MJWarp's current `xanchor` and
+   `xaxis` tensors; and
+4. solve the damped least-squares differential IK equation
+   `dq = Jᵀ (J Jᵀ + λ² I)⁻¹ dx` in a Warp kernel.
+
+Euler angles are not used because they have singularities and multiple
+representations for the same orientation. Quaternions are not used by the
+teacher or dataset because MuJoCo and Warp expose different component-order
+conventions at relevant API boundaries. A 3×3 SO(3) matrix is already available
+as MJWarp `xmat`, composes directly, and has no sign ambiguity. The controller
+reduces matrix error to the standard three-dimensional tangent-space vector
+needed by differential IK; it does not regress a nine-dimensional action.
+
+Each joint increment is clipped by `expert.maximum_joint_step`, and the
+resulting joint target is kept inside the compiled MJCF limit minus the explicit
+margin. The six-joint impedance controller tracks that target through normal
+physics. Recomputing this action from every new observation produces a full
+closed-loop correction trajectory; recording only one final joint target would
+not.
+
+The controlled and goal bodies are names, not hard-coded IDs. The committed
+task moves `sfp_tip_link` to a pre-insertion pose relative to
+`sfp_port_0_link_entrance`. In the converted AIC model the entrance frame's
+local +Z axis points inward toward the NIC body. Therefore the configured
+`[0, 0, -0.005]` m offset is 5 mm outside the entrance. Changing its sign moves
+the target inside the connector and is an insertion target, not a pre-insertion
+target.
+
+Success requires both configured position and orientation tolerances for five
+consecutive 20 Hz samples. A 200-sample limit bounds every attempt. Failed
+attempts are discarded and resampled until the requested successful trajectory
+counts are reached.
+
 #### RGB observations
 
 The AIC cameras are RGB-only at their native 1152 × 1024 resolution and 20 Hz.
-At the 500 Hz physics rate, one camera update occurs every 25 physics steps.
+At the committed 200 Hz physics rate, one camera update occurs every 10 physics
+steps.
 MJWarp internally stores packed pixels in flat per-camera regions. The runtime
 unpacks them in a Warp kernel and exposes named device tensors:
 
@@ -515,13 +593,18 @@ rgb.left    (N, 1024, 1152, 3) uint8
 rgb.right   (N, 1024, 1152, 3) uint8
 ```
 
-There is no depth allocation and no implicit training resize. A future resize
-must be added as an explicit configured operation.
+There is no depth allocation and the runtime performs no implicit resize. The
+rollout runtime allocates no camera buffers. During the second stage, a bounded
+replay runtime renders saved robot states and downsamples native device tensors
+to `dataset.image_width` and `dataset.image_height` before host transfer.
+The committed 288 × 256 size preserves the native 9:8 aspect ratio while
+reducing video encoding and storage cost. It is a dataset choice, not a change
+to the simulated AIC cameras.
 
 Native RGB is expensive: three cameras produce 3,538,944 rays per environment
-per frame. Choose `runtime.num_envs` against actual GPU memory and measured
-throughput rather than assuming the low-dimensional physics batch size will
-also be a sensible image batch size.
+per frame. `runtime.num_envs` therefore controls large-scale physics rollout
+parallelism, while `dataset.replay_batch_size` independently bounds simultaneous
+camera worlds and video writers.
 
 #### F/T observations and taring
 
@@ -557,55 +640,76 @@ For each reset environment independently, taring:
 4. subtracts that baseline from subsequent readings.
 
 This is asynchronous. A reset environment can settle and retare while all
-other environments continue stepping. Raw wrench is sampled every 5 physics
-steps (100 Hz); the 50 Hz publication clock fires every 10 steps for future
+other environments continue stepping. Raw wrench is sampled every 2 physics
+steps (100 Hz); the 50 Hz publication clock fires every 4 steps for future
 evaluation-interface integration. Each environment's simulation time is reset
 when its tare completes, and its independent `episode_steps` counter advances
 only while `tare_ready` is true.
 
 ### Software design
 
+#### Engineering principles
+
+The complete simulation foundation follows four project-level principles:
+
+- simulation behavior is explicit, configuration-driven, and validated before
+  execution;
+- scene construction, physics/control, observations, and data workflows have
+  separate responsibilities and small interfaces;
+- MuJoCo and MJWarp provide the canonical physics, kinematics, rendering, and
+  sensor primitives instead of parallel application-level implementations; and
+- shared infrastructure remains reusable so controllers, data generators, and
+  future learned policies can evolve without rewriting the runtime.
+
+These principles apply to the full active simulation code developed across the
+foundation and policy branches.
+
 #### Minimal file layout
 
 ```text
 aic_mujoco/
 ├── aic_mujoco/
-│   ├── commands.py     per-environment HOLD command tensor
+│   ├── collection.py   rollout and bounded RGB-replay orchestration
+│   ├── commands.py     HOLD, Cartesian-pose, and joint-delta objects
 │   ├── config.py       strict JSON merge and validation
-│   ├── controllers.py  Warp joint impedance controller
+│   ├── controllers.py  Warp impedance and Cartesian DLS controllers
+│   ├── dataset.py      compact rollout and final episode storage
 │   ├── joints.py       named joint/actuator address mapping
-│   ├── outputs.py      selected-world Viser and recording bridge
+│   ├── outputs.py      selected-world Viser geometry bridge
 │   ├── robot.py        validated AIC simulation robot interface
 │   ├── runtime.py      reset, MJWarp physics, RGB, and F/T tensors
-│   └── scene.py        deterministic reduced-MJCF generator
-├── run.py              configured continuous rollout entry point
+│   ├── scene.py        deterministic reduced-MJCF generator
+│   └── utils/          reusable array, image, and numerical operations
+├── run.py              configured continuous HOLD entry point
 ├── configs/
 │   ├── base.json    stable scene/task/control configuration
-│   └── run.json     execution/device/output configuration
+│   ├── run.json     HOLD execution/device/output overlay
+│   └── collect.json collection/expert/dataset overlay
 ├── mjcf/
 │   ├── aic_robot.xml
 │   ├── aic_world.xml
 │   └── scene_warp.xml
-├── scripts/         pre-existing conversion/ROS comparison utilities
-└── test/
-    └── test_foundation.py
+├── scripts/             executable data and conversion workflows
+└── test/                simulation and data-pipeline verification
 ```
 
-There is one command and one controller because the foundation has one required
-behavior: joint-position HOLD. There are no unused velocity/Cartesian commands,
-trajectory, IK, `EnsemblRobot`, MJLab, reward, or policy layers. Cartesian
-insertion can extend the command/controller boundary later when there is an
-actual consumer; it does not need to replace this backbone.
+There are exactly two control layers because both now have consumers:
+`JointHoldController` keeps the robot alive and tracks joint targets, while
+`CartesianMoveController` is the privileged demonstration teacher. There are no
+unused velocity commands, trajectory planner, Tesseract `EnsemblRobot`, MJLab,
+reward, or learned-policy layers. A future policy can replace the teacher by
+writing the same `JointDeltaAction` without changing physics or impedance
+control.
 
-#### Base configuration and run overlay
+#### Base and execution overlays
 
-The two files are complementary and contain no repeated keys. `base.json`
+Every executable still loads exactly two complementary files. `base.json`
 contains stable scene, physics, control, randomization, sensor, and camera
-values. `run.json` supplies the device/graph choices, number of worlds, seed,
-visualization, and recording values. The application always loads both files
-and validates the complete result after merging them. Runtime duration is not
-a configuration key: the foundation intentionally remains alive until
-`Ctrl+C`.
+values. The continuous HOLD executable deep-merges `base.json + run.json`; the
+collector deep-merges `base.json + collect.json`. `run.json` supplies HOLD
+device/output choices. `collect.json` supplies collection device choices, the
+Cartesian expert, and dataset behavior. No executable combines both execution
+overlays.
 
 The loader performs a recursive deep merge. For example:
 
@@ -645,6 +749,11 @@ defaults, or fallback values. After the merge, validation rejects:
 This fail-fast contract keeps downstream code direct: it indexes known config
 keys instead of carrying `.get(...)` defaults throughout the simulation.
 
+Collection validation additionally rejects invalid body names at controller
+construction, goal matrices outside SO(3), nonpositive motion bounds,
+mismatched camera/action rates, odd video dimensions, invalid split counts, and
+any existing dataset whose saved contract differs from `collect.json`.
+
 #### Runtime ownership
 
 `AICWarpRuntime` owns the shared device model, batched device data, observation
@@ -653,11 +762,12 @@ command, and controller objects rather than duplicating their responsibilities.
 Its public surface is small:
 
 ```python
-runtime = AICWarpRuntime(config)
+runtime = AICWarpRuntime(config, render_cameras=True)
 events = runtime.step()
 observations = runtime.observations()
 reset_parameters = runtime.reset_state()
 runtime.reset([3, 9])
+runtime.reset([3, 9], randomization_ids=[1042, 1043])
 ```
 
 `observations()` returns Warp arrays. A training framework can consume these on
@@ -665,10 +775,16 @@ device; it does not need to flatten cameras or split `sensordata` itself.
 `reset_state()` exposes the sampled joint target, board/NIC transforms, rail,
 and NIC translation for debugging and future episode logging.
 
+Normal interactive resets derive randomness from `(seed, environment ID, reset
+count)`. Dataset resets instead use `(seed, randomization ID)`. This makes an
+episode's randomized scene reproducible even if asynchronous scheduling assigns
+it to a different environment after a restart.
+
 On CUDA, the physics/HOLD/tare sequence is captured as a Warp graph when
-`physics.graph_capture` is true. Camera rendering remains on its independent
-20 Hz clock. Contact and constraint capacities are explicit config values and
-are checked after initial settling; they are not silently guessed.
+`physics.graph_capture` is true. Camera rendering is an explicit runtime
+capability and remains on its independent 20 Hz clock when enabled. Contact and
+constraint capacities are explicit config values and are checked after initial
+settling; they are not silently guessed.
 
 #### MJWarp boundary and known constraints
 
@@ -691,21 +807,65 @@ the pinned MuJoCo-Warp 3.5.0 stack:
 
 These are deliberate boundaries of this foundation, not silent fallbacks.
 
-#### Visualization and recording
+#### Dataset contract
 
-The Viser path downloads only selected-world visualization data. It sends the
-compiled visual meshes once, then updates selected MJWarp `geom_xpos` and
-`geom_xmat` poses at the camera cadence. It shows the native center/left/right
-MJWarp RGB tensors in named GUI panels. It never calls regular MuJoCo physics or
+The collector records state and the teacher action before that action is tracked
+over the next 50 ms. Compact successful rollouts are staged atomically, and the
+bounded replay stage reconstructs the corresponding camera observation from the
+saved joint state and deterministic scene sample before publishing the final
+episode atomically:
+
+```text
+data/far_approach/
+├── dataset.json              exact generation contract
+├── collection_state.json    next randomization ID
+├── manifest.jsonl            successful episode index
+├── rollouts/                  compact episodes awaiting RGB replay
+├── train/
+│   └── episode_000000/
+│       ├── center.mp4
+│       ├── left.mp4
+│       ├── right.mp4
+│       ├── trajectory.npz
+│       └── episode.json
+├── validation/
+└── test/
+```
+
+`trajectory.npz` contains aligned arrays for ordered `qpos`, `qvel`, bounded
+`action_delta_q`, SFP-tip pose, ground-truth goal pose, position/orientation
+error, and tared wrench. Pose orientations are explicit `(T, 3, 3)` SO(3)
+rotation matrices named `sfp_tip_rotation_matrix` and
+`goal_rotation_matrix`; no quaternion convention leaks into the dataset.
+Language and reset/randomization metadata live in `episode.json`. Videos are
+H.264 rather than loose PNG files.
+
+The committed split requests 1,000 training, 100 validation, and 200 test
+trajectories across 1,024 asynchronous rollout worlds. Finishing one environment
+resets and re-tares only that environment; all others continue. RGB replay is
+bounded separately by `dataset.replay_batch_size`. These are distinct held-out
+samples from the configured randomization distribution, not a claim of a
+held-out real-world or out-of-distribution test set.
+
+The local `data`, `runs`, and `checkpoints` directories are ignored by Git.
+Source, configs, dataset contracts, metrics, and intentionally selected report
+figures can still be tracked separately.
+
+#### Visualization
+
+The Viser path sends the compiled visual meshes once, then downloads only the
+selected MJWarp `geom_xpos` and `geom_xmat` poses at the camera cadence. It does
+not download or encode camera images. It never calls regular MuJoCo physics or
 `mujoco.Renderer`.
 
 `visualization.env_ids` explicitly selects the displayed worlds. The committed
 value `"all"` expands to every environment ID from `0` through `N-1`; an
 explicit integer list remains supported for selected-world debugging. Multiple
-displayed worlds are arranged row-by-row using the configured `grid_columns`
-and `[x, y]` `grid_spacing`. This affects only the human view, not physics.
-Initial viewer position/look-at, JPEG quality, and real-time pacing are all
-explicit in `run.json`.
+displayed worlds are arranged in a compact near-square grid using the configured
+`[x, y]` `grid_spacing`; perfect-square counts produce square grids. This affects
+only the human view, not physics.
+Initial viewer position/look-at and real-time pacing are explicit in the
+configuration.
 
 The full AIC cell, enclosure, walls, and floor are intentionally absent because
 they are absent from the reduced simulation scene. The 3D viewer shows the
@@ -713,14 +873,3 @@ actual foundation contents: tabletop/robot, fixed gripper and SFP, randomized
 board/NIC, and camera hardware geometry. It does not invent display-only cell
 geometry that the policy's physics world does not contain or project images
 into the 3D scene.
-
-Recording uses those same RGB frames. When enabled, it writes:
-
-```text
-recordings/env_0000_center.mp4
-recordings/env_0000_left.mp4
-recordings/env_0000_right.mp4
-```
-
-Only configured environment IDs cross from the device to the host. Policies
-still retain device access to images and wrench observations for every world.
