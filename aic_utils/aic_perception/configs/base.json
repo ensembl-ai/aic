@@ -1,0 +1,106 @@
+{
+  "schema": {
+    "name": "aic_v1",
+    "base_frame": "base_link",
+    "cameras": [
+      "left",
+      "center",
+      "right"
+    ],
+    "target_types": [
+      "board",
+      "sfp_port",
+      "sc_port"
+    ],
+    "targets": [
+      {
+        "id": "task_board",
+        "type": "board",
+        "frame": "task_board/task_board_base_link"
+      },
+      {
+        "id": "nic_card_mount_0/sfp_port_0",
+        "type": "sfp_port",
+        "frame": "task_board/nic_card_mount_0/sfp_port_0_link_entrance"
+      },
+      {
+        "id": "nic_card_mount_0/sfp_port_1",
+        "type": "sfp_port",
+        "frame": "task_board/nic_card_mount_0/sfp_port_1_link_entrance"
+      },
+      {
+        "id": "nic_card_mount_1/sfp_port_0",
+        "type": "sfp_port",
+        "frame": "task_board/nic_card_mount_1/sfp_port_0_link_entrance"
+      },
+      {
+        "id": "nic_card_mount_1/sfp_port_1",
+        "type": "sfp_port",
+        "frame": "task_board/nic_card_mount_1/sfp_port_1_link_entrance"
+      },
+      {
+        "id": "nic_card_mount_2/sfp_port_0",
+        "type": "sfp_port",
+        "frame": "task_board/nic_card_mount_2/sfp_port_0_link_entrance"
+      },
+      {
+        "id": "nic_card_mount_2/sfp_port_1",
+        "type": "sfp_port",
+        "frame": "task_board/nic_card_mount_2/sfp_port_1_link_entrance"
+      },
+      {
+        "id": "nic_card_mount_3/sfp_port_0",
+        "type": "sfp_port",
+        "frame": "task_board/nic_card_mount_3/sfp_port_0_link_entrance"
+      },
+      {
+        "id": "nic_card_mount_3/sfp_port_1",
+        "type": "sfp_port",
+        "frame": "task_board/nic_card_mount_3/sfp_port_1_link_entrance"
+      },
+      {
+        "id": "nic_card_mount_4/sfp_port_0",
+        "type": "sfp_port",
+        "frame": "task_board/nic_card_mount_4/sfp_port_0_link_entrance"
+      },
+      {
+        "id": "nic_card_mount_4/sfp_port_1",
+        "type": "sfp_port",
+        "frame": "task_board/nic_card_mount_4/sfp_port_1_link_entrance"
+      },
+      {
+        "id": "sc_port_0",
+        "type": "sc_port",
+        "frame": "task_board/sc_port_0/sc_port_base_link_entrance"
+      },
+      {
+        "id": "sc_port_1",
+        "type": "sc_port",
+        "frame": "task_board/sc_port_1/sc_port_base_link_entrance"
+      },
+      {
+        "id": "sc_port_2",
+        "type": "sc_port",
+        "frame": "task_board/sc_port_2/sc_port_base_link_entrance"
+      },
+      {
+        "id": "sc_port_3",
+        "type": "sc_port",
+        "frame": "task_board/sc_port_3/sc_port_base_link_entrance"
+      },
+      {
+        "id": "sc_port_4",
+        "type": "sc_port",
+        "frame": "task_board/sc_port_4/sc_port_base_link_entrance"
+      }
+    ]
+  },
+  "images": {
+    "width": 576,
+    "height": 512
+  },
+  "dataset": {
+    "directory": "../data/aic_v1",
+    "validation_fraction": 0.1
+  }
+}

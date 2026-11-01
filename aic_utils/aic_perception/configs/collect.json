@@ -1,0 +1,49 @@
+{
+  "collection": {
+    "scenes": 20000,
+    "seed": 0,
+    "workers": "auto",
+    "jpeg_quality": 95,
+    "minimum_image_change": 1.0,
+    "task_board_xacro": "../../../aic_description/urdf/task_board.urdf.xacro",
+    "progress_interval_s": 10.0
+  },
+  "docker": {
+    "image": "ghcr.io/intrinsic-dev/aic/aic_eval:latest",
+    "container_prefix": "aic_perception_worker",
+    "rendering": "wsl_gpu",
+    "cpus_per_worker": 2.0,
+    "memory_per_worker_gb": 1.5,
+    "max_gpu_workers": 6,
+    "launch_interval_s": 30.0,
+    "max_restarts": 20
+  },
+  "timing": {
+    "bringup_timeout_s": 300.0,
+    "service_timeout_s": 20.0,
+    "observation_timeout_s": 30.0,
+    "settle_time_s": 0.25
+  },
+  "randomization": {
+    "board_x": [0.10, 0.25],
+    "board_y": [-0.25, 0.10],
+    "board_z": 1.14,
+    "board_yaw": [-3.14159, 3.14159],
+    "nic_cards": {
+      "count": [1, 5],
+      "translation": [-0.0215, 0.0234],
+      "yaw_deg": [-10.0, 10.0]
+    },
+    "sc_ports": {
+      "count": [0, 5],
+      "translation": [-0.06, 0.055],
+      "yaw_deg": [-6.0, 6.0],
+      "minimum_spacing": 0.035
+    },
+    "mounts": {
+      "probability": 0.5,
+      "translation": [-0.09425, 0.09425],
+      "yaw_deg": [-60.0, 60.0]
+    }
+  }
+}

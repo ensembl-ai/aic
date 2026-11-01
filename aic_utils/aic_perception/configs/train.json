@@ -1,0 +1,49 @@
+{
+  "curation": {
+    "preview_count": 16
+  },
+  "run": {
+    "name": "scene_estimator_v1",
+    "directory": "../runs",
+    "seed": 0,
+    "device": "cuda"
+  },
+  "model": {
+    "pretrained_backbone": true,
+    "d_model": 256,
+    "heads": 8,
+    "encoder_layers": 3,
+    "decoder_layers": 4,
+    "feedforward": 1024,
+    "dropout": 0.1
+  },
+  "optimization": {
+    "epochs": 60,
+    "batch_size": 64,
+    "learning_rate": 0.0006,
+    "backbone_learning_rate": 0.0002,
+    "weight_decay": 0.05,
+    "warmup_steps": 250,
+    "gradient_clip": 1.0,
+    "bf16": true,
+    "num_workers": 12
+  },
+  "loss": {
+    "presence": 1.0,
+    "translation": 1.0,
+    "rotation": 1.0,
+    "confidence": 0.2,
+    "confidence_translation_m": 0.005,
+    "confidence_rotation_deg": 5.0
+  },
+  "augmentation": {
+    "brightness": 0.2,
+    "contrast": 0.2,
+    "saturation": 0.2
+  },
+  "logging": {
+    "wandb_project": "aic-perception",
+    "wandb_mode": "online",
+    "log_every_steps": 20
+  }
+}

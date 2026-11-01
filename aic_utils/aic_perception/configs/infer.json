@@ -1,0 +1,11 @@
+{
+  "inference": {
+    "checkpoint": "../runs/scene_estimator_v1/checkpoints/best.pt",
+    "device": "cuda",
+    "observation_topic": "/observations",
+    "estimate_topic": "/aic_perception/scene_estimate",
+    "rate_hz": 5.0,
+    "presence_threshold": 0.5,
+    "tf_prefix": "aic_perception"
+  }
+}
