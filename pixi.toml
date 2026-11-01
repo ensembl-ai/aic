@@ -10,6 +10,11 @@ preview = ["pixi-build"]
 [target.linux-64.dependencies]
 evdev = ">=1.9.2,<2"
 
+# CUDA 12.8 builds include Blackwell (sm_120) kernels.
+[target.linux-64.pypi-dependencies]
+torch = { version = "==2.7.1", index = "https://download.pytorch.org/whl/cu128" }
+torchvision = { version = "==0.22.1", index = "https://download.pytorch.org/whl/cu128" }
+
 [dependencies]
 pip = "*"
 isort = "==5.13.2"                                                                     # version bundled by the vscode extension
@@ -21,6 +26,7 @@ ros-kilted-aic-control-interfaces = { path = "aic_interfaces/aic_control_interfa
 ros-kilted-aic-example-policies = { path = "aic_example_policies" }
 ros-kilted-aic-model = { path = "aic_model" }
 ros-kilted-aic-model-interfaces = { path = "aic_interfaces/aic_model_interfaces" }
+ros-kilted-aic-perception-interfaces = { path = "aic_utils/aic_perception_interfaces" }
 ros-kilted-aic-task-interfaces = { path = "aic_interfaces/aic_task_interfaces" }
 ros-kilted-aic-teleoperation = { path = "aic_utils/aic_teleoperation" }
 ros-kilted-aic-training-interfaces = { path = "aic_utils/aic_training_interfaces" }
