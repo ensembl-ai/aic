@@ -116,6 +116,34 @@ pixi run --locked ros2 topic echo /aic_perception/scene_estimate
 
 `configs/infer.json` selects the checkpoint, topics, rate, and presence threshold.
 
+### 6. Far approach on AIC trials
+
+`aic_perception.policies.PerceptionFarApproach` is an `aic_model` policy. It reads the target SFP port from `SceneEstimate`, using the median of `far_approach.estimate_count` fresh estimates. It then moves the plug tip to `hover_height_m` above the perceived port entrance and stops, without inserting. Placing the plug uses its ground-truth pose in the gripper, so the simulation must run with `ground_truth:=true`. The policy logs the perception error and the final hover error against ground truth. SC tasks are rejected: the engine's SC port names cannot be mapped onto rail-order names from the task alone.
+
+Run each command in its own terminal from the repository root, in this order, and start the third within the engine's model discovery timeout:
+
+```bash
+# 1. AIC simulation and engine (sample_config: two SFP trials, one SC trial)
+docker run --rm --name aic_eval --network host \
+  -e DISPLAY=$DISPLAY -e WAYLAND_DISPLAY=$WAYLAND_DISPLAY -e XDG_RUNTIME_DIR=/mnt/wslg/runtime-dir \
+  -v /tmp/.X11-unix:/tmp/.X11-unix -v /mnt/wslg:/mnt/wslg \
+  --device /dev/dxg -v /usr/lib/wsl:/usr/lib/wsl:ro \
+  -e LD_LIBRARY_PATH=/usr/lib/wsl/lib -e GALLIUM_DRIVER=d3d12 -e MESA_D3D12_DEFAULT_ADAPTER_NAME=NVIDIA \
+  ghcr.io/intrinsic-dev/aic/aic_eval:latest \
+  ground_truth:=true start_aic_engine:=true gazebo_gui:=true launch_rviz:=true model_discovery_timeout_seconds:=300
+
+# 2. Scene estimator
+pixi run --locked python aic_utils/aic_perception/scripts/run_inference.py
+
+# 3. Policy
+PYTHONPATH=$PWD/aic_utils/aic_perception pixi run --locked ros2 run aic_model aic_model --ros-args \
+  -p use_sim_time:=true -p policy:=aic_perception.policies.PerceptionFarApproach
+```
+
+The `DISPLAY`, `WAYLAND_DISPLAY`, `XDG_RUNTIME_DIR`, and `/mnt/wslg` options give the container the WSLg display for RViz and the Gazebo GUI. Drop them and set `gazebo_gui:=false launch_rviz:=false` to run headless. In RViz, a TF display shows each perceived port as `aic_perception/<target id>` next to its ground truth frame.
+
+To run the evaluation trials instead, add `-v $PWD/aic_engine/config/eval_config.yaml:/eval_config.yaml:ro` to the `docker run` options and `aic_engine_config_file:=/eval_config.yaml` to its arguments; the image itself only ships `sample_config.yaml`.
+
 ### Tests
 
 ```bash

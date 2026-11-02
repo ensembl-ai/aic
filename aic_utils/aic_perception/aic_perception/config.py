@@ -113,6 +113,13 @@ OVERLAY_SCHEMAS: dict[str, dict[str, Any]] = {
             "presence_threshold": float,
             "tf_prefix": str,
         },
+        "far_approach": {
+            "estimate_count": int,
+            "estimate_timeout_s": float,
+            "hover_height_m": float,
+            "approach_duration_s": float,
+            "settle_time_s": float,
+        },
     },
 }
 
@@ -376,6 +383,14 @@ def validate_infer(config: dict[str, Any]) -> None:
         raise ValueError("inference.rate_hz must be positive")
     if not 0.0 < inference["presence_threshold"] < 1.0:
         raise ValueError("inference.presence_threshold must be in (0, 1)")
+    approach = config["far_approach"]
+    if approach["estimate_count"] <= 0:
+        raise ValueError("far_approach.estimate_count must be positive")
+    for key in ("estimate_timeout_s", "hover_height_m", "approach_duration_s"):
+        if approach[key] <= 0.0:
+            raise ValueError(f"far_approach.{key} must be positive")
+    if approach["settle_time_s"] < 0.0:
+        raise ValueError("far_approach.settle_time_s cannot be negative")
 
 
 VALIDATORS = {"collect": validate_collect, "train": validate_train, "infer": validate_infer}

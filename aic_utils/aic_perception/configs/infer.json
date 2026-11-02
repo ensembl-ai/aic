@@ -7,5 +7,12 @@
     "rate_hz": 5.0,
     "presence_threshold": 0.5,
     "tf_prefix": "aic_perception"
+  },
+  "far_approach": {
+    "estimate_count": 5,
+    "estimate_timeout_s": 30.0,
+    "hover_height_m": 0.01,
+    "approach_duration_s": 5.0,
+    "settle_time_s": 2.0
   }
 }
