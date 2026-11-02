@@ -28,7 +28,9 @@ def transform(rotation: np.ndarray, translation: np.ndarray) -> np.ndarray:
     return matrix
 
 
-def from_xyz_rpy(xyz: tuple[float, float, float], rpy: tuple[float, float, float]) -> np.ndarray:
+def from_xyz_rpy(
+    xyz: tuple[float, float, float], rpy: tuple[float, float, float]
+) -> np.ndarray:
     """Build a transform from a position and URDF-style fixed-axis roll/pitch/yaw.
 
     Args:
@@ -42,7 +44,9 @@ def from_xyz_rpy(xyz: tuple[float, float, float], rpy: tuple[float, float, float
     return transform(euler2mat(*rpy, axes="sxyz"), np.asarray(xyz, dtype=float))
 
 
-def from_xyz_quaternion_xyzw(xyz: tuple[float, ...], xyzw: tuple[float, ...]) -> np.ndarray:
+def from_xyz_quaternion_xyzw(
+    xyz: tuple[float, ...], xyzw: tuple[float, ...]
+) -> np.ndarray:
     """Build a transform from a ROS-ordered ``(x, y, z, w)`` quaternion.
 
     Args:
@@ -109,7 +113,9 @@ def project(
     return pixels, depth
 
 
-def scaled_intrinsics(intrinsics: np.ndarray, scale_x: float, scale_y: float) -> np.ndarray:
+def scaled_intrinsics(
+    intrinsics: np.ndarray, scale_x: float, scale_y: float
+) -> np.ndarray:
     """Rescale a camera matrix for a resized image.
 
     Uses the pixel-center convention, so a resize maps continuous pixel

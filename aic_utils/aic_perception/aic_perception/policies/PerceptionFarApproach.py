@@ -22,7 +22,11 @@ from typing import Any
 
 import numpy as np
 from aic_example_policies.ros.CheatCode import CheatCode
-from aic_model.policy import GetObservationCallback, MoveRobotCallback, SendFeedbackCallback
+from aic_model.policy import (
+    GetObservationCallback,
+    MoveRobotCallback,
+    SendFeedbackCallback,
+)
 from aic_perception_interfaces.msg import SceneEstimate
 from aic_task_interfaces.msg import Task
 from geometry_msgs.msg import Transform, Vector3
@@ -98,10 +102,14 @@ class PerceptionFarApproach(CheatCode):
                         )
             self.sleep_for(0.1)
             waited += 0.1
-        positions = np.array([[p.pose.position.x, p.pose.position.y, p.pose.position.z] for p in poses])
+        positions = np.array(
+            [[p.pose.position.x, p.pose.position.y, p.pose.position.z] for p in poses]
+        )
         median = np.median(positions, axis=0)
         return Transform(
-            translation=Vector3(x=float(median[0]), y=float(median[1]), z=float(median[2])),
+            translation=Vector3(
+                x=float(median[0]), y=float(median[1]), z=float(median[2])
+            ),
             rotation=poses[-1].pose.orientation,
         )
 
@@ -146,10 +154,16 @@ class PerceptionFarApproach(CheatCode):
         target_id = f"{task.target_module_name}/{task.port_name}"
         port = self.perceived_port(target_id)
         if port is None:
-            self.get_logger().error(f"No present estimate of {target_id}; is run_inference.py running?")
+            self.get_logger().error(
+                f"No present estimate of {target_id}; is run_inference.py running?"
+            )
             return False
-        perceived = np.array([port.translation.x, port.translation.y, port.translation.z])
-        entrance_frame = f"task_board/{task.target_module_name}/{task.port_name}_link_entrance"
+        perceived = np.array(
+            [port.translation.x, port.translation.y, port.translation.z]
+        )
+        entrance_frame = (
+            f"task_board/{task.target_module_name}/{task.port_name}_link_entrance"
+        )
         truth = self.true_position(entrance_frame)
         if truth is not None:
             error = (perceived - truth) * 1000.0
@@ -170,7 +184,9 @@ class PerceptionFarApproach(CheatCode):
             gripper = self.true_position("gripper/tcp")
             plug = self.true_position(plug_frame)
             if start is None or gripper is None or plug is None:
-                self.get_logger().warn("Gripper or plug pose unavailable during approach")
+                self.get_logger().warn(
+                    "Gripper or plug pose unavailable during approach"
+                )
                 self.sleep_for(CONTROL_PERIOD_S)
                 continue
             # Orientation alignment comes from CheatCode; the position puts the

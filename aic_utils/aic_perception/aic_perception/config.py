@@ -308,7 +308,9 @@ def validate_collect(config: dict[str, Any]) -> None:
     if docker["max_gpu_workers"] <= 0:
         raise ValueError("docker.max_gpu_workers must be positive")
     if docker["launch_interval_s"] < 0.0 or docker["max_restarts"] < 0:
-        raise ValueError("docker.launch_interval_s and docker.max_restarts cannot be negative")
+        raise ValueError(
+            "docker.launch_interval_s and docker.max_restarts cannot be negative"
+        )
     if any(value <= 0.0 for value in config["timing"].values()):
         raise ValueError("Every timing value must be positive")
 
@@ -317,8 +319,14 @@ def validate_collect(config: dict[str, Any]) -> None:
         interval(randomization[key], f"randomization.{key}")
     for group, rail_count in (("nic_cards", 5), ("sc_ports", 5)):
         lower, upper = interval(randomization[group]["count"], f"{group}.count")
-        if not (lower.is_integer() and upper.is_integer()) or lower < 0 or upper > rail_count:
-            raise ValueError(f"randomization.{group}.count must be integers in [0, {rail_count}]")
+        if (
+            not (lower.is_integer() and upper.is_integer())
+            or lower < 0
+            or upper > rail_count
+        ):
+            raise ValueError(
+                f"randomization.{group}.count must be integers in [0, {rail_count}]"
+            )
         interval(randomization[group]["translation"], f"{group}.translation")
         interval(randomization[group]["yaw_deg"], f"{group}.yaw_deg")
     spacing = randomization["sc_ports"]["minimum_spacing"]
@@ -355,7 +363,13 @@ def validate_train(config: dict[str, Any]) -> None:
     if model["encoder_layers"] < 0 or not 0.0 <= model["dropout"] < 1.0:
         raise ValueError("model.encoder_layers must be >= 0 and dropout in [0, 1)")
     optimization = config["optimization"]
-    for key in ("epochs", "batch_size", "learning_rate", "backbone_learning_rate", "gradient_clip"):
+    for key in (
+        "epochs",
+        "batch_size",
+        "learning_rate",
+        "backbone_learning_rate",
+        "gradient_clip",
+    ):
         if optimization[key] <= 0:
             raise ValueError(f"optimization.{key} must be positive")
     if optimization["num_workers"] < 0 or optimization["warmup_steps"] < 0:
@@ -393,7 +407,11 @@ def validate_infer(config: dict[str, Any]) -> None:
         raise ValueError("far_approach.settle_time_s cannot be negative")
 
 
-VALIDATORS = {"collect": validate_collect, "train": validate_train, "infer": validate_infer}
+VALIDATORS = {
+    "collect": validate_collect,
+    "train": validate_train,
+    "infer": validate_infer,
+}
 
 
 def load_config(kind: str, config_dir: str | Path = CONFIG_DIR) -> dict[str, Any]:

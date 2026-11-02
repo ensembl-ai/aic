@@ -45,9 +45,13 @@ class ArmJoints:
         )
         for actuator_id, joint_id in zip(actuator_ids, joint_ids, strict=True):
             if model.actuator_trntype[actuator_id] != mujoco.mjtTrn.mjTRN_JOINT:
-                raise ValueError("Every configured actuator must use joint transmission")
+                raise ValueError(
+                    "Every configured actuator must use joint transmission"
+                )
             if int(model.actuator_trnid[actuator_id, 0]) != int(joint_id):
-                raise ValueError("Each configured actuator must drive its corresponding joint")
+                raise ValueError(
+                    "Each configured actuator must drive its corresponding joint"
+                )
 
         return cls(
             names=joint_names,

@@ -188,9 +188,7 @@ def create_teacher(
     )
 
 
-def run_rollout_collection(
-    config: dict[str, Any], dataset: SyntheticDataset
-) -> bool:
+def run_rollout_collection(config: dict[str, Any], dataset: SyntheticDataset) -> bool:
     """Collect compact trajectories across all configured MJWarp worlds.
 
     Returns:
@@ -220,9 +218,9 @@ def run_rollout_collection(
 
     start_time = time.perf_counter()
     step_index = 0
-    realtime = config["visualization"]["enabled"] and config["visualization"][
-        "realtime"
-    ]
+    realtime = (
+        config["visualization"]["enabled"] and config["visualization"]["realtime"]
+    )
     timestep = config["physics"]["timestep"]
     try:
         while not dataset.rollouts_complete():
@@ -235,9 +233,7 @@ def run_rollout_collection(
 
             outputs.update(runtime)
             start_pending_rollouts(runtime, dataset, pending, active)
-            teacher.set_active(
-                [env_id in active for env_id in range(runtime.num_envs)]
-            )
+            teacher.set_active([env_id in active for env_id in range(runtime.num_envs)])
             if not active:
                 continue
 
@@ -264,9 +260,11 @@ def run_rollout_collection(
                     f"Staged {dataset.rollout_counts()}; "
                     f"discarded and resampling {len(failed_envs)} attempts"
                 )
-            next_assignments = dataset.next_assignments(len(successful_envs)) if (
-                successful_envs
-            ) else []
+            next_assignments = (
+                dataset.next_assignments(len(successful_envs))
+                if (successful_envs)
+                else []
+            )
             replacements.extend(zip(successful_envs, next_assignments, strict=False))
             retry_assignments = dataset.retry_assignments(failed_assignments)
             replacements.extend(zip(failed_envs, retry_assignments, strict=True))

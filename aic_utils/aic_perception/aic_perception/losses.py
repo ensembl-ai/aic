@@ -56,10 +56,12 @@ def compute_losses(
     mask = present > 0.5
     presence = F.binary_cross_entropy_with_logits(outputs["presence_logit"], present)
     target = batch["base_from_target"]
-    translation = (
-        (outputs["translation"] - target[..., :3, 3]).abs().mean(-1)[mask].mean() * METERS_TO_CM
+    translation = (outputs["translation"] - target[..., :3, 3]).abs().mean(-1)[
+        mask
+    ].mean() * METERS_TO_CM
+    rotation = (
+        (outputs["rotation"] - target[..., :3, :3]).square().sum((-1, -2))[mask].mean()
     )
-    rotation = (outputs["rotation"] - target[..., :3, :3]).square().sum((-1, -2))[mask].mean()
     with torch.no_grad():
         translation_error, rotation_error = pose_errors(outputs, batch)
         accurate = (translation_error < settings["confidence_translation_m"]) & (
@@ -101,7 +103,9 @@ class ErrorAccumulator:
         self.presence_correct = [0 for _ in target_ids]
         self.count = 0
 
-    def add(self, outputs: dict[str, torch.Tensor], batch: dict[str, torch.Tensor]) -> None:
+    def add(
+        self, outputs: dict[str, torch.Tensor], batch: dict[str, torch.Tensor]
+    ) -> None:
         """Add one evaluated batch.
 
         Args:
@@ -123,7 +127,9 @@ class ErrorAccumulator:
     def summary(self) -> dict[str, Any]:
         """Return mean/median errors per target and per type, in mm and degrees."""
 
-        def describe(translation: list[float], rotation: list[float]) -> dict[str, float]:
+        def describe(
+            translation: list[float], rotation: list[float]
+        ) -> dict[str, float]:
             """Summarize one group of errors."""
 
             if not translation:

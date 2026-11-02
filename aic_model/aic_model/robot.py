@@ -322,9 +322,7 @@ class EnsemblRobot:
         self._collision_object_names = list(
             self._collision_manager.getCollisionObjects()
         )
-        self._collision_manager.setActiveCollisionObjects(
-            self._collision_object_names
-        )
+        self._collision_manager.setActiveCollisionObjects(self._collision_object_names)
         self._collision_config.acm = self.env.getAllowedCollisionMatrix()
         self._collision_config.margin_data = self.env.getCollisionMarginData()
         self._collision_manager.applyContactManagerConfig(self._collision_config)

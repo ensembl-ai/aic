@@ -18,7 +18,9 @@ TARGETS = len(CONFIG["schema"]["targets"])
 def small_model() -> SceneEstimator:
     """A tiny untrained estimator for shape and gradient checks."""
 
-    settings = dict(CONFIG["model"], pretrained_backbone=False, d_model=32, heads=4, feedforward=64)
+    settings = dict(
+        CONFIG["model"], pretrained_backbone=False, d_model=32, heads=4, feedforward=64
+    )
     return SceneEstimator(settings, TARGETS, [-0.4, 0.3, 0.1], [0.1, 0.1, 0.05])
 
 
@@ -46,7 +48,9 @@ def test_rotation_6d_produces_proper_rotations() -> None:
     identity = torch.eye(3).expand(100, 3, 3)
     assert torch.allclose(rotation.transpose(1, 2) @ rotation, identity, atol=1e-5)
     assert torch.allclose(torch.linalg.det(rotation), torch.ones(100), atol=1e-5)
-    assert torch.allclose(angle_between(rotation, rotation), torch.zeros(100), atol=1e-3)
+    assert torch.allclose(
+        angle_between(rotation, rotation), torch.zeros(100), atol=1e-3
+    )
 
 
 def test_rotation_angle_is_geodesic() -> None:
@@ -54,9 +58,15 @@ def test_rotation_angle_is_geodesic() -> None:
 
     theta = 0.7
     rotation = torch.tensor(
-        [[math.cos(theta), -math.sin(theta), 0.0], [math.sin(theta), math.cos(theta), 0.0], [0.0, 0.0, 1.0]]
+        [
+            [math.cos(theta), -math.sin(theta), 0.0],
+            [math.sin(theta), math.cos(theta), 0.0],
+            [0.0, 0.0, 1.0],
+        ]
     )
-    assert math.isclose(angle_between(rotation, torch.eye(3)).item(), theta, rel_tol=1e-4)
+    assert math.isclose(
+        angle_between(rotation, torch.eye(3)).item(), theta, rel_tol=1e-4
+    )
 
 
 def test_center_ray_follows_optical_axis() -> None:
@@ -83,7 +93,10 @@ def test_forward_shapes_and_backward() -> None:
     assert torch.isfinite(loss) and all(math.isfinite(v) for v in values.values())
     loss.backward()
     assert all(p.grad is not None for p in model.head_parameters())
-    assert any(p.grad is not None and p.grad.abs().sum() > 0 for p in model.backbone_parameters())
+    assert any(
+        p.grad is not None and p.grad.abs().sum() > 0
+        for p in model.backbone_parameters()
+    )
 
 
 def test_error_accumulator_reports_every_target() -> None:

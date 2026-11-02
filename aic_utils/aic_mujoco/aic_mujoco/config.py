@@ -305,7 +305,9 @@ def validate_config(
     for section in ("cameras", "sensors"):
         values = list(names[section].values())
         if any(not value for value in values) or len(set(values)) != len(values):
-            raise ValueError(f"scene.names.{section} must contain unique non-empty names")
+            raise ValueError(
+                f"scene.names.{section} must contain unique non-empty names"
+            )
     for key in ("joints", "actuators"):
         values = names[key]
         if len(values) != 6 or any(not isinstance(x, str) or not x for x in values):
@@ -342,7 +344,9 @@ def validate_config(
             "domain_randomization.board_position_upper",
         ),
     ):
-        if any(a > b for a, b in zip(vectors[lower_path], vectors[upper_path], strict=True)):
+        if any(
+            a > b for a, b in zip(vectors[lower_path], vectors[upper_path], strict=True)
+        ):
             raise ValueError(f"{lower_path} must not exceed {upper_path}")
 
     if any(x < 0.0 for x in vectors["control.stiffness"]):
@@ -354,9 +358,13 @@ def validate_config(
 
     physics = config["physics"]
     if physics["device"] != "cpu" and not physics["device"].startswith("cuda"):
-        raise ValueError("physics.device must be 'cpu' or a CUDA device such as 'cuda:0'")
+        raise ValueError(
+            "physics.device must be 'cpu' or a CUDA device such as 'cuda:0'"
+        )
     if physics["integrator"] != "implicitfast":
-        raise ValueError("physics.integrator must be 'implicitfast' for this foundation")
+        raise ValueError(
+            "physics.integrator must be 'implicitfast' for this foundation"
+        )
     if physics["solver"] != "Newton":
         raise ValueError("physics.solver must be 'Newton' for this foundation")
     for key in ("timestep", "tolerance"):
@@ -383,7 +391,10 @@ def validate_config(
     )
     if any(not math.isfinite(randomization[key]) for key in scalar_randomization):
         raise ValueError("Domain-randomization scalar values must be finite")
-    if randomization["board_yaw_deviation_lower"] > randomization["board_yaw_deviation_upper"]:
+    if (
+        randomization["board_yaw_deviation_lower"]
+        > randomization["board_yaw_deviation_upper"]
+    ):
         raise ValueError("board yaw deviation lower bound exceeds its upper bound")
     if randomization["nic_translation_lower"] > randomization["nic_translation_upper"]:
         raise ValueError("NIC translation lower bound exceeds its upper bound")
@@ -406,7 +417,9 @@ def validate_config(
     }
     for path, rate in rates.items():
         if rate <= 0 or step_hz % rate:
-            raise ValueError(f"{path} must be positive and divide the physics rate {step_hz}")
+            raise ValueError(
+                f"{path} must be positive and divide the physics rate {step_hz}"
+            )
     if config["sensors"]["tare_settle_steps"] < 0:
         raise ValueError("sensors.tare_settle_steps cannot be negative")
     if config["sensors"]["tare_sample_count"] <= 0:
@@ -423,9 +436,10 @@ def validate_config(
             raise ValueError("visualization.port must be in [1, 65535]")
         if any(value <= 0.0 for value in vectors["visualization.grid_spacing"]):
             raise ValueError("visualization.grid_spacing values must be positive")
-        if vectors["visualization.initial_camera_position"] == vectors[
-            "visualization.initial_camera_look_at"
-        ]:
+        if (
+            vectors["visualization.initial_camera_position"]
+            == vectors["visualization.initial_camera_look_at"]
+        ):
             raise ValueError(
                 "visualization.initial_camera_position and initial_camera_look_at must differ"
             )
@@ -435,8 +449,7 @@ def validate_config(
         if isinstance(visual_env_ids, list):
             env_ids = visual_env_ids
             if any(
-                type(x) is not int or x < 0 or x >= runtime["num_envs"]
-                for x in env_ids
+                type(x) is not int or x < 0 or x >= runtime["num_envs"] for x in env_ids
             ):
                 raise ValueError(
                     "visualization.env_ids contains an invalid environment index"
@@ -444,9 +457,7 @@ def validate_config(
             if len(set(env_ids)) != len(env_ids):
                 raise ValueError("visualization.env_ids contains duplicates")
             if visualization["enabled"] and not env_ids:
-                raise ValueError(
-                    "visualization.env_ids cannot be empty when enabled"
-                )
+                raise ValueError("visualization.env_ids cannot be empty when enabled")
 
 
 def validate_collection_config(config: dict[str, Any]) -> None:
@@ -464,8 +475,7 @@ def validate_collection_config(config: dict[str, Any]) -> None:
         "expert.maximum_joint_step": 6,
     }
     vectors = {
-        path: numbers(config, path, length)
-        for path, length in expert_vectors.items()
+        path: numbers(config, path, length) for path, length in expert_vectors.items()
     }
     rotation = np.asarray(
         vectors["expert.goal_offset_rotation_matrix"], dtype=np.float64
@@ -496,9 +506,10 @@ def validate_collection_config(config: dict[str, Any]) -> None:
     for key in positive_expert_scalars:
         if not math.isfinite(expert[key]) or expert[key] <= 0.0:
             raise ValueError(f"expert.{key} must be finite and positive")
-    if not math.isfinite(expert["joint_limit_margin"]) or expert[
-        "joint_limit_margin"
-    ] < 0.0:
+    if (
+        not math.isfinite(expert["joint_limit_margin"])
+        or expert["joint_limit_margin"] < 0.0
+    ):
         raise ValueError("expert.joint_limit_margin must be finite and nonnegative")
     if expert["control_hz"] != config["cameras"]["fps"]:
         raise ValueError(
@@ -520,9 +531,10 @@ def validate_collection_config(config: dict[str, Any]) -> None:
     for key in ("image_width", "image_height"):
         if dataset[key] <= 0 or dataset[key] % 2:
             raise ValueError(f"dataset.{key} must be a positive even integer")
-    if dataset["image_width"] > config["cameras"]["width"] or dataset[
-        "image_height"
-    ] > config["cameras"]["height"]:
+    if (
+        dataset["image_width"] > config["cameras"]["width"]
+        or dataset["image_height"] > config["cameras"]["height"]
+    ):
         raise ValueError("Dataset images cannot exceed the native camera resolution")
     if not 0 <= dataset["video_crf"] <= 51:
         raise ValueError("dataset.video_crf must be in [0, 51]")

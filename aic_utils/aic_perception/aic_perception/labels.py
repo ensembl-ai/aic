@@ -16,7 +16,9 @@ WORLD_FRAMES = ("world", "aic_world")
 MINIMUM_DEPTH_M = 0.05
 
 
-def world_pose(frame: str, edges: dict[str, tuple[str, np.ndarray]]) -> np.ndarray | None:
+def world_pose(
+    frame: str, edges: dict[str, tuple[str, np.ndarray]]
+) -> np.ndarray | None:
     """Compose a frame's world pose from parent-relative ground-truth edges.
 
     Args:

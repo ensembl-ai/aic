@@ -28,11 +28,16 @@ BRINGUP_ARGUMENTS = (
 )
 RENDERING_FLAGS = {
     "wsl_gpu": [
-        "--device", "/dev/dxg",
-        "-v", "/usr/lib/wsl:/usr/lib/wsl:ro",
-        "-e", "LD_LIBRARY_PATH=/usr/lib/wsl/lib",
-        "-e", "GALLIUM_DRIVER=d3d12",
-        "-e", "MESA_D3D12_DEFAULT_ADAPTER_NAME=NVIDIA",
+        "--device",
+        "/dev/dxg",
+        "-v",
+        "/usr/lib/wsl:/usr/lib/wsl:ro",
+        "-e",
+        "LD_LIBRARY_PATH=/usr/lib/wsl/lib",
+        "-e",
+        "GALLIUM_DRIVER=d3d12",
+        "-e",
+        "MESA_D3D12_DEFAULT_ADAPTER_NAME=NVIDIA",
     ],
     "nvidia_gpu": ["--gpus", "all", "-e", "NVIDIA_DRIVER_CAPABILITIES=all"],
     "cpu": [],
@@ -130,19 +135,31 @@ def container_command(config: dict[str, Any], index: int, count: int) -> list[st
         f"exec python3 {WORKER_SCRIPT}"
     )
     return [
-        "docker", "run", "-d",
-        "--name", f"{docker['container_prefix']}_{index}",
-        "--cpus", str(docker["cpus_per_worker"]),
-        "--user", f"{os.getuid()}:{os.getgid()}",
-        "-e", "HOME=/tmp",
-        "-e", f"AIC_PERCEPTION_WORKER_INDEX={index}",
-        "-e", f"AIC_PERCEPTION_WORKER_COUNT={count}",
-        "-v", f"{REPOSITORY_DIR}:{REPOSITORY_DIR}:ro",
-        "-v", f"{dataset}:{dataset}",
+        "docker",
+        "run",
+        "-d",
+        "--name",
+        f"{docker['container_prefix']}_{index}",
+        "--cpus",
+        str(docker["cpus_per_worker"]),
+        "--user",
+        f"{os.getuid()}:{os.getgid()}",
+        "-e",
+        "HOME=/tmp",
+        "-e",
+        f"AIC_PERCEPTION_WORKER_INDEX={index}",
+        "-e",
+        f"AIC_PERCEPTION_WORKER_COUNT={count}",
+        "-v",
+        f"{REPOSITORY_DIR}:{REPOSITORY_DIR}:ro",
+        "-v",
+        f"{dataset}:{dataset}",
         *RENDERING_FLAGS[docker["rendering"]],
-        "--entrypoint", "bash",
+        "--entrypoint",
+        "bash",
         docker["image"],
-        "-c", script,
+        "-c",
+        script,
     ]
 
 
@@ -157,7 +174,13 @@ def container_states(names: list[str]) -> dict[str, tuple[str, int]]:
     """
 
     output = subprocess.run(
-        ["docker", "inspect", "-f", "{{.Name}} {{.State.Status}} {{.State.ExitCode}}", *names],
+        [
+            "docker",
+            "inspect",
+            "-f",
+            "{{.Name}} {{.State.Status}} {{.State.ExitCode}}",
+            *names,
+        ],
         capture_output=True,
         text=True,
     ).stdout
@@ -195,30 +218,47 @@ def run_collection(config: dict[str, Any]) -> int:
     make_directories(dataset)
     check_provenance(config)
     count = worker_count(config)
-    names = [f"{config['docker']['container_prefix']}_{index}" for index in range(count)]
+    names = [
+        f"{config['docker']['container_prefix']}_{index}" for index in range(count)
+    ]
     remove_containers(names)
     total = config["collection"]["scenes"]
     initial = completed_scenes(config)
     print(f"Dataset: {dataset}")
     print(f"Config: {CONFIG_DIR}")
-    print(f"Workers: {count} ({config['docker']['rendering']} rendering), scenes: {initial}/{total} done")
+    print(
+        f"Workers: {count} ({config['docker']['rendering']} rendering), scenes: {initial}/{total} done"
+    )
     restarts = {name: 0 for name in names}
     started = time.monotonic()
     try:
         for index in range(count):
             if index:
                 time.sleep(config["docker"]["launch_interval_s"])
-            subprocess.run(container_command(config, index, count), check=True, capture_output=True)
+            subprocess.run(
+                container_command(config, index, count), check=True, capture_output=True
+            )
         while True:
             time.sleep(config["collection"]["progress_interval_s"])
             states = container_states(names)
             for index, name in enumerate(names):
                 status, code = states[name]
-                if status == "exited" and code != 0 and restarts[name] < config["docker"]["max_restarts"]:
+                if (
+                    status == "exited"
+                    and code != 0
+                    and restarts[name] < config["docker"]["max_restarts"]
+                ):
                     restarts[name] += 1
-                    print(f"Worker {name} exited with code {code}; restart {restarts[name]}", flush=True)
+                    print(
+                        f"Worker {name} exited with code {code}; restart {restarts[name]}",
+                        flush=True,
+                    )
                     remove_containers([name])
-                    subprocess.run(container_command(config, index, count), check=True, capture_output=True)
+                    subprocess.run(
+                        container_command(config, index, count),
+                        check=True,
+                        capture_output=True,
+                    )
                     states[name] = ("running", 0)
             done = completed_scenes(config)
             elapsed = time.monotonic() - started

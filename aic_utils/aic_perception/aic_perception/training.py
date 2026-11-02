@@ -22,7 +22,9 @@ from aic_perception.schema import BoardSchema
 PORT_TYPES = ("sfp_port", "sc_port")
 
 
-def build_model(config: dict[str, Any], normalization: dict[str, list[float]]) -> SceneEstimator:
+def build_model(
+    config: dict[str, Any], normalization: dict[str, list[float]]
+) -> SceneEstimator:
     """Construct the estimator for a configuration.
 
     Args:
@@ -41,7 +43,9 @@ def build_model(config: dict[str, Any], normalization: dict[str, list[float]]) -
     )
 
 
-def load_checkpoint(path: str | Path, device: str) -> tuple[SceneEstimator, dict[str, Any]]:
+def load_checkpoint(
+    path: str | Path, device: str
+) -> tuple[SceneEstimator, dict[str, Any]]:
     """Load a trained estimator and the configuration it was trained with.
 
     Args:
@@ -60,13 +64,17 @@ def load_checkpoint(path: str | Path, device: str) -> tuple[SceneEstimator, dict
     return model.to(device).eval(), config
 
 
-def to_device(batch: dict[str, torch.Tensor], device: torch.device) -> dict[str, torch.Tensor]:
+def to_device(
+    batch: dict[str, torch.Tensor], device: torch.device
+) -> dict[str, torch.Tensor]:
     """Move a batch to the training device without blocking."""
 
     return {key: value.to(device, non_blocking=True) for key, value in batch.items()}
 
 
-def make_loader(config: dict[str, Any], manifest: dict[str, Any], split: str) -> DataLoader:
+def make_loader(
+    config: dict[str, Any], manifest: dict[str, Any], split: str
+) -> DataLoader:
     """Create the data loader of one split.
 
     Args:
@@ -95,7 +103,11 @@ def make_loader(config: dict[str, Any], manifest: dict[str, Any], split: str) ->
 
 @torch.no_grad()
 def evaluate(
-    model: SceneEstimator, loader: DataLoader, schema: BoardSchema, device: torch.device, bf16: bool
+    model: SceneEstimator,
+    loader: DataLoader,
+    schema: BoardSchema,
+    device: torch.device,
+    bf16: bool,
 ) -> dict[str, Any]:
     """Compute per-target and per-type errors over a split.
 
@@ -115,7 +127,9 @@ def evaluate(
     for batch in loader:
         batch = to_device(batch, device)
         with torch.autocast(device.type, dtype=torch.bfloat16, enabled=bf16):
-            outputs = model(batch["images"], batch["intrinsics"], batch["base_from_camera"])
+            outputs = model(
+                batch["images"], batch["intrinsics"], batch["base_from_camera"]
+            )
         errors.add(outputs, batch)
     return errors.summary()
 
@@ -127,7 +141,14 @@ def port_error_mm(summary: dict[str, Any]) -> float:
     total = sum(item["samples"] for item in values)
     if total == 0:
         return math.inf
-    return sum(item["translation_mean_mm"] * item["samples"] for item in values if item["samples"]) / total
+    return (
+        sum(
+            item["translation_mean_mm"] * item["samples"]
+            for item in values
+            if item["samples"]
+        )
+        / total
+    )
 
 
 def flatten_summary(summary: dict[str, Any], prefix: str) -> dict[str, float]:
@@ -168,7 +189,10 @@ def train(config: dict[str, Any]) -> Path:
     model = build_model(config, manifest["normalization"]).to(device)
     optimizer = torch.optim.AdamW(
         [
-            {"params": model.backbone_parameters(), "lr": optimization["backbone_learning_rate"]},
+            {
+                "params": model.backbone_parameters(),
+                "lr": optimization["backbone_learning_rate"],
+            },
             {"params": model.head_parameters(), "lr": optimization["learning_rate"]},
         ],
         weight_decay=optimization["weight_decay"],
@@ -189,7 +213,9 @@ def train(config: dict[str, Any]) -> Path:
     run_directory = Path(run["directory"]) / run["name"]
     checkpoints = run_directory / "checkpoints"
     checkpoints.mkdir(parents=True, exist_ok=True)
-    (run_directory / "config.json").write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
+    (run_directory / "config.json").write_text(
+        json.dumps(config, indent=2) + "\n", encoding="utf-8"
+    )
     logging = config["logging"]
     wandb.init(
         project=logging["wandb_project"],
@@ -211,7 +237,9 @@ def train(config: dict[str, Any]) -> Path:
         for batch in train_loader:
             batch = to_device(batch, device)
             with torch.autocast(device.type, dtype=torch.bfloat16, enabled=bf16):
-                outputs = model(batch["images"], batch["intrinsics"], batch["base_from_camera"])
+                outputs = model(
+                    batch["images"], batch["intrinsics"], batch["base_from_camera"]
+                )
             loss, values = compute_losses(outputs, batch, config["loss"])
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
@@ -240,7 +268,13 @@ def train(config: dict[str, Any]) -> Path:
 
         summary = evaluate(model, validation_loader, schema, device, bf16)
         error = port_error_mm(summary)
-        wandb.log({**flatten_summary(summary, "validation"), "validation/port_error_mm": error}, step=step)
+        wandb.log(
+            {
+                **flatten_summary(summary, "validation"),
+                "validation/port_error_mm": error,
+            },
+            step=step,
+        )
         print(f"epoch {epoch} validation port error {error:.2f} mm", flush=True)
         state = {
             "model": model.state_dict(),
@@ -254,7 +288,8 @@ def train(config: dict[str, Any]) -> Path:
             best = error
             torch.save(state, checkpoints / "best.pt")
             (run_directory / "best_validation.json").write_text(
-                json.dumps({"epoch": epoch, **summary}, indent=2) + "\n", encoding="utf-8"
+                json.dumps({"epoch": epoch, **summary}, indent=2) + "\n",
+                encoding="utf-8",
             )
     wandb.finish()
     return checkpoints / "best.pt"

@@ -300,7 +300,9 @@ class AICWarpRuntime:
         expected_integrator = mujoco.mjtIntegrator.mjINT_IMPLICITFAST
         expected_solver = mujoco.mjtSolver.mjSOL_NEWTON
         if self.host_model.opt.integrator != expected_integrator:
-            raise ValueError("Generated MJCF does not use configured implicitfast integration")
+            raise ValueError(
+                "Generated MJCF does not use configured implicitfast integration"
+            )
         if self.host_model.opt.solver != expected_solver:
             raise ValueError("Generated MJCF does not use configured Newton solving")
         scalar_values = (
@@ -309,26 +311,32 @@ class AICWarpRuntime:
         )
         for key, actual in scalar_values:
             if not math.isclose(actual, physics[key], rel_tol=0.0, abs_tol=1e-12):
-                raise ValueError(f"Generated MJCF physics.{key} does not match configuration")
+                raise ValueError(
+                    f"Generated MJCF physics.{key} does not match configuration"
+                )
         if self.host_model.opt.iterations != physics["iterations"]:
-            raise ValueError("Generated MJCF physics.iterations does not match configuration")
+            raise ValueError(
+                "Generated MJCF physics.iterations does not match configuration"
+            )
         if not np.allclose(
             self.host_model.opt.gravity, physics["gravity"], rtol=0.0, atol=1e-12
         ):
-            raise ValueError("Generated MJCF physics.gravity does not match configuration")
+            raise ValueError(
+                "Generated MJCF physics.gravity does not match configuration"
+            )
 
     def allocate_state(self) -> None:
         """Allocate controller, randomization, clock, and wrench state."""
 
         joint_count = self.robot.joints.count
-        self.hold_command = HoldPositionCommand(
-            self.num_envs, joint_count, self.device
-        )
+        self.hold_command = HoldPositionCommand(self.num_envs, joint_count, self.device)
         self.controller = JointHoldController(
             self.config, self.robot.joints, self.num_envs, self.device
         )
         self.board_position = wp.zeros(self.num_envs, dtype=wp.vec3, device=self.device)
-        self.board_quaternion = wp.zeros(self.num_envs, dtype=wp.quat, device=self.device)
+        self.board_quaternion = wp.zeros(
+            self.num_envs, dtype=wp.quat, device=self.device
+        )
         self.nic_position = wp.zeros(self.num_envs, dtype=wp.vec3, device=self.device)
         self.nic_quaternion = wp.zeros(self.num_envs, dtype=wp.quat, device=self.device)
         self.nic_rail_index = wp.zeros(self.num_envs, dtype=int, device=self.device)
@@ -337,8 +345,12 @@ class AICWarpRuntime:
         wrench_shape = (self.num_envs, self.robot.wrench_dimension)
         self.tare_sum = wp.zeros(wrench_shape, dtype=float, device=self.device)
         self.tare_baseline = wp.zeros(wrench_shape, dtype=float, device=self.device)
-        self.tare_settle_remaining = wp.zeros(self.num_envs, dtype=int, device=self.device)
-        self.tare_interval_remaining = wp.zeros(self.num_envs, dtype=int, device=self.device)
+        self.tare_settle_remaining = wp.zeros(
+            self.num_envs, dtype=int, device=self.device
+        )
+        self.tare_interval_remaining = wp.zeros(
+            self.num_envs, dtype=int, device=self.device
+        )
         self.tare_samples = wp.zeros(self.num_envs, dtype=int, device=self.device)
         self.tare_ready = wp.zeros(self.num_envs, dtype=bool, device=self.device)
         self.episode_steps = wp.zeros(self.num_envs, dtype=int, device=self.device)
@@ -449,9 +461,7 @@ class AICWarpRuntime:
             else {}
         )
         batch = {
-            "q": np.zeros(
-                (self.num_envs, self.robot.joints.count), dtype=np.float32
-            ),
+            "q": np.zeros((self.num_envs, self.robot.joints.count), dtype=np.float32),
             "board_pos": np.zeros((self.num_envs, 3), dtype=np.float32),
             "board_quat": np.zeros((self.num_envs, 4), dtype=np.float32),
             "nic_pos": np.zeros((self.num_envs, 3), dtype=np.float32),
@@ -831,7 +841,10 @@ class AICWarpRuntime:
             raise RuntimeError(
                 f"MJWarp constraint capacity overflow: {max_constraints} > {self.data.njmax}"
             )
-        if actual_contacts > self.data.naconmax or broadphase_contacts > self.data.naconmax:
+        if (
+            actual_contacts > self.data.naconmax
+            or broadphase_contacts > self.data.naconmax
+        ):
             raise RuntimeError(
                 "MJWarp contact capacity overflow; increase physics.nconmax explicitly"
             )
@@ -877,4 +890,6 @@ class AICWarpRuntime:
                 int(self.host_model.geom_bodyid[int(second)]),
             }
             if bodies & finger_ids and bodies & sfp_ids:
-                raise RuntimeError("Internal gripper/SFP contact reached the F/T sensor")
+                raise RuntimeError(
+                    "Internal gripper/SFP contact reached the F/T sensor"
+                )

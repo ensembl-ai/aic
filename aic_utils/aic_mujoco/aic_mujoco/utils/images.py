@@ -49,14 +49,12 @@ def resize_rgb_bilinear(
     """
 
     world, output_row, output_column = wp.tid()
-    source_x = (
-        (float(output_column) + 0.5) * float(source_width) / float(output_width)
-        - 0.5
-    )
-    source_y = (
-        (float(output_row) + 0.5) * float(source_height) / float(output_height)
-        - 0.5
-    )
+    source_x = (float(output_column) + 0.5) * float(source_width) / float(
+        output_width
+    ) - 0.5
+    source_y = (float(output_row) + 0.5) * float(source_height) / float(
+        output_height
+    ) - 0.5
     x0 = int(wp.floor(source_x))
     y0 = int(wp.floor(source_y))
     x0 = wp.clamp(x0, 0, source_width - 1)

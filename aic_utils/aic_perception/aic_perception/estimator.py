@@ -80,12 +80,18 @@ class SceneEstimatorRuntime:
             resized = F.interpolate(pixels, size=(self.height, self.width), mode="area")
             tensors.append(resized.round().clamp(0, 255).to(torch.uint8)[0])
             matrices.append(
-                scaled_intrinsics(camera, self.width / image.shape[1], self.height / image.shape[0])
+                scaled_intrinsics(
+                    camera, self.width / image.shape[1], self.height / image.shape[0]
+                )
             )
         outputs = self.model(
             torch.stack(tensors)[None],
-            torch.tensor(np.stack(matrices), dtype=torch.float32, device=self.device)[None],
-            torch.tensor(np.stack(base_from_camera), dtype=torch.float32, device=self.device)[None],
+            torch.tensor(np.stack(matrices), dtype=torch.float32, device=self.device)[
+                None
+            ],
+            torch.tensor(
+                np.stack(base_from_camera), dtype=torch.float32, device=self.device
+            )[None],
         )
         presence = torch.sigmoid(outputs["presence_logit"][0]).cpu().numpy()
         confidence = torch.sigmoid(outputs["confidence_logit"][0]).cpu().numpy()
@@ -105,4 +111,8 @@ class SceneEstimatorRuntime:
     def describe(self) -> dict[str, Any]:
         """Summary of the loaded model for logging."""
 
-        return {"schema": self.schema.name, "targets": len(self.schema.targets), "image_size": (self.width, self.height)}
+        return {
+            "schema": self.schema.name,
+            "targets": len(self.schema.targets),
+            "image_size": (self.width, self.height),
+        }

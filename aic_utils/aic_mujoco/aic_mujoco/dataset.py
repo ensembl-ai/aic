@@ -356,9 +356,7 @@ class SyntheticDataset:
         slots: list[tuple[str, int]] = []
         for split in SPLIT_NAMES:
             unavailable = (
-                self.completed[split]
-                | self.rollout_ready[split]
-                | self.reserved[split]
+                self.completed[split] | self.rollout_ready[split] | self.reserved[split]
             )
             for episode_index in range(self.requested[split]):
                 if episode_index not in unavailable:
@@ -479,8 +477,7 @@ class SyntheticDataset:
         """Return whether every requested dataset slot has RGB and labels."""
 
         return all(
-            len(self.completed[split]) == self.requested[split]
-            for split in SPLIT_NAMES
+            len(self.completed[split]) == self.requested[split] for split in SPLIT_NAMES
         )
 
     def validate(self) -> None:

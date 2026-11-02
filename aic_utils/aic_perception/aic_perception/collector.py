@@ -109,10 +109,14 @@ class SceneCollector(Node):
         self.edges_after = float("inf")
         self.tf_buffer = tf2_ros.Buffer()
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
-        self.create_subscription(Observation, "/observations", self.store_observation, 2)
+        self.create_subscription(
+            Observation, "/observations", self.store_observation, 2
+        )
         self.create_subscription(TFMessage, "/scoring/tf", self.store_ground_truth, 20)
         self.spawn_client = self.create_client(SpawnEntity, "/gz_server/spawn_entity")
-        self.delete_client = self.create_client(DeleteEntity, "/gz_server/delete_entity")
+        self.delete_client = self.create_client(
+            DeleteEntity, "/gz_server/delete_entity"
+        )
 
     def store_observation(self, message: Observation) -> None:
         """Keep the newest synchronized observation."""
@@ -134,7 +138,9 @@ class SceneCollector(Node):
 
         return self.get_clock().now().nanoseconds * 1e-9
 
-    def wait_until(self, condition: Callable[[], bool], timeout: float, what: str) -> None:
+    def wait_until(
+        self, condition: Callable[[], bool], timeout: float, what: str
+    ) -> None:
         """Spin until a condition holds.
 
         Args:
@@ -174,7 +180,9 @@ class SceneCollector(Node):
         for client in (self.spawn_client, self.delete_client):
             if not client.wait_for_service(timeout_sec=timeout):
                 raise TimeoutError(f"Service {client.srv_name} is unavailable")
-        self.wait_until(lambda: self.observation is not None, timeout, "first observation")
+        self.wait_until(
+            lambda: self.observation is not None, timeout, "first observation"
+        )
         self.call(self.delete_client, DeleteEntity.Request(entity=ENTITY_NAME))
         ready_after = self.sim_time() + self.timing["settle_time_s"]
         self.wait_until(
@@ -199,7 +207,9 @@ class SceneCollector(Node):
 
         if image.encoding != "rgb8":
             raise RuntimeError(f"Unexpected image encoding {image.encoding}")
-        pixels = np.frombuffer(image.data, np.uint8).reshape(image.height, image.width, 3)
+        pixels = np.frombuffer(image.data, np.uint8).reshape(
+            image.height, image.width, 3
+        )
         size = (self.config["images"]["width"], self.config["images"]["height"])
         return cv2.resize(pixels, size, interpolation=cv2.INTER_AREA)
 
@@ -218,13 +228,19 @@ class SceneCollector(Node):
 
         self.call(self.delete_client, DeleteEntity.Request(entity=ENTITY_NAME))
         urdf = subprocess.run(
-            ["xacro", self.config["collection"]["task_board_xacro"], *xacro_arguments(scene)],
+            [
+                "xacro",
+                self.config["collection"]["task_board_xacro"],
+                *xacro_arguments(scene),
+            ],
             check=True,
             capture_output=True,
             text=True,
         ).stdout
         board = scene["board"]
-        request = SpawnEntity.Request(name=ENTITY_NAME, allow_renaming=False, resource_string=urdf)
+        request = SpawnEntity.Request(
+            name=ENTITY_NAME, allow_renaming=False, resource_string=urdf
+        )
         request.initial_pose.header.frame_id = "world"
         request.initial_pose.pose.position.x = board["x"]
         request.initial_pose.pose.position.y = board["y"]
@@ -256,7 +272,9 @@ class SceneCollector(Node):
         )
         return matrix_from_transform(message.transform)
 
-    def capture(self, scene: dict[str, Any], spawn_time: float) -> tuple[dict[str, Any], dict[str, np.ndarray]]:
+    def capture(
+        self, scene: dict[str, Any], spawn_time: float
+    ) -> tuple[dict[str, Any], dict[str, np.ndarray]]:
         """Wait for a fresh observation and label it.
 
         Args:
@@ -290,7 +308,9 @@ class SceneCollector(Node):
                 "width": width,
                 "height": height,
                 "intrinsics": scaled_intrinsics(
-                    np.asarray(info.k).reshape(3, 3), width / image.width, height / image.height
+                    np.asarray(info.k).reshape(3, 3),
+                    width / image.width,
+                    height / image.height,
                 ),
                 "base_from_camera": self.lookup(
                     self.schema.base_frame, image.header.frame_id, stamp
@@ -298,14 +318,24 @@ class SceneCollector(Node):
             }
         world_from_base = self.lookup("world", self.schema.base_frame, stamp)
         label = build_label(
-            self.schema, scene, dict(self.edges), world_from_base, cameras, seconds(stamp)
+            self.schema,
+            scene,
+            dict(self.edges),
+            world_from_base,
+            cameras,
+            seconds(stamp),
         )
         label["joint_positions"] = dict(
-            zip(observation.joint_states.name, map(float, observation.joint_states.position))
+            zip(
+                observation.joint_states.name,
+                map(float, observation.joint_states.position),
+            )
         )
         return label, images
 
-    def save(self, scene_id: int, label: dict[str, Any], images: dict[str, np.ndarray]) -> None:
+    def save(
+        self, scene_id: int, label: dict[str, Any], images: dict[str, np.ndarray]
+    ) -> None:
         """Write one scene's images, then its label as the completion marker.
 
         Every file is written under a temporary name and renamed, so readers
@@ -324,7 +354,9 @@ class SceneCollector(Node):
         for name, image in images.items():
             final = image_path(root, split, scene_id, name)
             staging = final.with_name(f".{final.stem}.tmp.jpg")
-            if not cv2.imwrite(str(staging), cv2.cvtColor(image, cv2.COLOR_RGB2BGR), quality):
+            if not cv2.imwrite(
+                str(staging), cv2.cvtColor(image, cv2.COLOR_RGB2BGR), quality
+            ):
                 raise RuntimeError(f"Failed to write {final}")
             os.replace(staging, final)
         final = label_path(root, split, scene_id)
@@ -343,7 +375,9 @@ class SceneCollector(Node):
             if not label_path(root, split_of(self.config, scene_id), scene_id).is_file()
         ]
 
-    def check_rendering(self, images: dict[str, np.ndarray], board_visible: bool) -> None:
+    def check_rendering(
+        self, images: dict[str, np.ndarray], board_visible: bool
+    ) -> None:
         """Reject a capture in which the newly spawned board was not rendered.
 
         Every scene spawns a differently placed board, so a capture whose
@@ -366,13 +400,16 @@ class SceneCollector(Node):
             """Whether every camera matches the reference within the threshold."""
 
             return bool(reference) and all(
-                np.abs(current[name] - reference[name]).mean() < threshold for name in current
+                np.abs(current[name] - reference[name]).mean() < threshold
+                for name in current
             )
 
         if unchanged(self.previous_thumbnails):
             raise FrozenRendererError("Camera images did not change after a new spawn")
         if board_visible and unchanged(self.empty_thumbnails):
-            raise FrozenRendererError("Camera images show the empty scene after a spawn")
+            raise FrozenRendererError(
+                "Camera images show the empty scene after a spawn"
+            )
         self.previous_thumbnails = current
 
     def run(self) -> int:
@@ -385,7 +422,9 @@ class SceneCollector(Node):
 
         self.wait_for_simulation()
         pending = self.assigned_scenes()
-        self.get_logger().info(f"Worker {self.worker_index}: {len(pending)} scenes to collect")
+        self.get_logger().info(
+            f"Worker {self.worker_index}: {len(pending)} scenes to collect"
+        )
         failures = 0
         for scene_id in pending:
             scene = sample_scene(self.config, scene_id)
@@ -397,9 +436,16 @@ class SceneCollector(Node):
                 self.save(scene_id, label, images)
                 failures = 0
             except FrozenRendererError as error:
-                self.get_logger().error(f"Scene {scene_id} not saved: {error}; exiting for a restart")
+                self.get_logger().error(
+                    f"Scene {scene_id} not saved: {error}; exiting for a restart"
+                )
                 return FROZEN_RENDERER_EXIT_CODE
-            except (TimeoutError, RuntimeError, subprocess.CalledProcessError, tf2_ros.TransformException) as error:
+            except (
+                TimeoutError,
+                RuntimeError,
+                subprocess.CalledProcessError,
+                tf2_ros.TransformException,
+            ) as error:
                 failures += 1
                 self.get_logger().error(f"Scene {scene_id} failed: {error}")
                 if failures >= MAXIMUM_CONSECUTIVE_FAILURES:

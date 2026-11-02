@@ -145,7 +145,9 @@ def copy_defaults(robot: ET.Element, world: ET.Element) -> ET.Element:
                 output.append(copy.deepcopy(child))
     found = {child.get("class") for child in output}
     if found != permitted:
-        raise ValueError(f"Required default classes missing: {sorted(permitted - found)}")
+        raise ValueError(
+            f"Required default classes missing: {sorted(permitted - found)}"
+        )
     return output
 
 
@@ -272,7 +274,9 @@ def prepare_scene(config: dict[str, Any]) -> Path:
     world_path = Path(scene["source_world"])
     output_path = Path(scene["output"])
     if not robot_path.is_file() or not world_path.is_file():
-        raise FileNotFoundError("Both source MJCF files must exist before scene preparation")
+        raise FileNotFoundError(
+            "Both source MJCF files must exist before scene preparation"
+        )
     if len({robot_path.parent, world_path.parent, output_path.parent}) != 1:
         raise ValueError("Source and reduced MJCF files must share one asset directory")
     if output_path in (robot_path, world_path):
@@ -294,7 +298,9 @@ def prepare_scene(config: dict[str, Any]) -> Path:
         if joint.get("type") != "slide":
             raise ValueError(f"Fixed gripper joint is not a slide joint: {joint_name}")
         if joint.get("limited") != "true":
-            raise ValueError(f"Fixed gripper joint is not explicitly limited: {joint_name}")
+            raise ValueError(
+                f"Fixed gripper joint is not explicitly limited: {joint_name}"
+            )
         joint_range = parse_vector(joint.get("range"), 2, f"{joint_name} range")
         if fixed_position < joint_range[0] or fixed_position > joint_range[1]:
             raise ValueError(
@@ -370,10 +376,14 @@ def prepare_scene(config: dict[str, Any]) -> Path:
     light = copy.deepcopy(named_element(world, "light", names["light"]))
     for camera_name in names["cameras"].values():
         camera = named_element(robot_body, "camera", camera_name)
-        camera.set("resolution", f'{config["cameras"]["width"]} {config["cameras"]["height"]}')
+        camera.set(
+            "resolution", f'{config["cameras"]["width"]} {config["cameras"]["height"]}'
+        )
 
     output = ET.Element("mujoco", {"model": scene["model_name"]})
-    output.append(copy.deepcopy(required_element(robot, "compiler", "compiler settings")))
+    output.append(
+        copy.deepcopy(required_element(robot, "compiler", "compiler settings"))
+    )
     physics = config["physics"]
     output.append(
         ET.Element(

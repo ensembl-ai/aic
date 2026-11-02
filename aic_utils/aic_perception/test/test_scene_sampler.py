@@ -35,8 +35,16 @@ def test_samples_respect_configured_ranges() -> None:
         components = scene["components"]
         nic_count = sum(name in components for name in NIC_MOUNTS)
         sc_count = sum(name in components for name in SC_PORTS)
-        assert randomization["nic_cards"]["count"][0] <= nic_count <= randomization["nic_cards"]["count"][1]
-        assert randomization["sc_ports"]["count"][0] <= sc_count <= randomization["sc_ports"]["count"][1]
+        assert (
+            randomization["nic_cards"]["count"][0]
+            <= nic_count
+            <= randomization["nic_cards"]["count"][1]
+        )
+        assert (
+            randomization["sc_ports"]["count"][0]
+            <= sc_count
+            <= randomization["sc_ports"]["count"][1]
+        )
         for name in SC_PORTS:
             if name in components:
                 low, high = randomization["sc_ports"]["translation"]
@@ -50,7 +58,9 @@ def test_sc_ports_on_one_rail_never_overlap() -> None:
     for scene_id in range(500):
         components = sample_scene(CONFIG, scene_id)["components"]
         for rail in SC_RAILS:
-            offsets = sorted(components[name]["translation"] for name in rail if name in components)
+            offsets = sorted(
+                components[name]["translation"] for name in rail if name in components
+            )
             assert all(b - a >= spacing - 1e-9 for a, b in zip(offsets, offsets[1:]))
 
 
@@ -88,5 +98,7 @@ def test_xacro_arguments_list_every_slot() -> None:
 
     arguments = xacro_arguments(sample_scene(CONFIG, 3))
     for name in NIC_MOUNTS + SC_PORTS + FIXTURE_MOUNTS:
-        assert sum(argument.startswith(f"{name}_present:=") for argument in arguments) == 1
+        assert (
+            sum(argument.startswith(f"{name}_present:=") for argument in arguments) == 1
+        )
     assert "ground_truth:=true" in arguments

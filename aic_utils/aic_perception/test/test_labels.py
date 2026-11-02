@@ -86,7 +86,9 @@ def test_label_marks_spawned_and_visible_targets() -> None:
         "intrinsics": scaled_intrinsics(INTRINSICS, 0.5, 0.5),
         "base_from_camera": base_from_camera,
     }
-    label = build_label(schema, {"scene_id": 0}, edges, world_from_base, {"center": camera}, 1.0)
+    label = build_label(
+        schema, {"scene_id": 0}, edges, world_from_base, {"center": camera}, 1.0
+    )
     targets = label["targets"]
     assert targets["task_board"]["spawned"] and targets["task_board"]["visible"]
     assert targets[port.id]["visible"]

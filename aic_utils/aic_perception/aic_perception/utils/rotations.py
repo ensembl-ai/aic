@@ -24,7 +24,9 @@ def matrix_from_6d(values: torch.Tensor) -> torch.Tensor:
 
     first = F.normalize(values[..., 0:3], dim=-1)
     second = values[..., 3:6]
-    second = F.normalize(second - (first * second).sum(-1, keepdim=True) * first, dim=-1)
+    second = F.normalize(
+        second - (first * second).sum(-1, keepdim=True) * first, dim=-1
+    )
     third = torch.cross(first, second, dim=-1)
     return torch.stack((first, second, third), dim=-1)
 

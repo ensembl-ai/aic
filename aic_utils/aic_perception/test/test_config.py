@@ -34,7 +34,9 @@ def edited_copy(tmp_path: Path, name: str, edit) -> Path:
 def test_unknown_key_is_rejected(tmp_path: Path) -> None:
     """Typos fail loudly instead of being ignored."""
 
-    directory = edited_copy(tmp_path, "train.json", lambda d: d["model"].update(dmodel=1))
+    directory = edited_copy(
+        tmp_path, "train.json", lambda d: d["model"].update(dmodel=1)
+    )
     with pytest.raises(KeyError, match="Unknown"):
         load_config("train", directory)
 
@@ -42,7 +44,9 @@ def test_unknown_key_is_rejected(tmp_path: Path) -> None:
 def test_invalid_rendering_mode_is_rejected(tmp_path: Path) -> None:
     """Only supported rendering modes are accepted."""
 
-    directory = edited_copy(tmp_path, "collect.json", lambda d: d["docker"].update(rendering="vulkan"))
+    directory = edited_copy(
+        tmp_path, "collect.json", lambda d: d["docker"].update(rendering="vulkan")
+    )
     with pytest.raises(ValueError, match="rendering"):
         load_config("collect", directory)
 

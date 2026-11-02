@@ -32,9 +32,7 @@ class RuntimeOutputs:
         self.visual_envs = (
             list(range(runtime.num_envs))
             if visualization_enabled and visualization_selection == "all"
-            else list(visualization_selection)
-            if visualization_enabled
-            else []
+            else list(visualization_selection) if visualization_enabled else []
         )
         self.visual_ids = self.device_ids(self.visual_envs, runtime)
         self.visual_geom_ids = (
@@ -192,27 +190,27 @@ class RuntimeOutputs:
             for geom_id in self.visual_geom_ids:
                 mesh_id = int(model.geom_dataid[geom_id])
                 if mesh_id < 0:
-                    raise ValueError(
-                        f"Viser geometry {geom_id} is not a compiled mesh"
-                    )
+                    raise ValueError(f"Viser geometry {geom_id} is not a compiled mesh")
                 vertex_start = int(model.mesh_vertadr[mesh_id])
                 vertex_end = vertex_start + int(model.mesh_vertnum[mesh_id])
                 face_start = int(model.mesh_faceadr[mesh_id])
                 face_end = face_start + int(model.mesh_facenum[mesh_id])
                 color, opacity = self.mesh_color(model, geom_id)
-                self.mesh_handles[(env_id, geom_id)] = self.server.scene.add_mesh_simple(
-                    f"{env_root}/geometry/{geom_id:04d}",
-                    vertices=np.asarray(
-                        model.mesh_vert[vertex_start:vertex_end], dtype=np.float32
-                    ).copy(),
-                    faces=np.asarray(
-                        model.mesh_face[face_start:face_end], dtype=np.uint32
-                    ).copy(),
-                    color=color,
-                    opacity=opacity,
-                    side="double",
-                    position=geom_positions[local_index, geom_id],
-                    wxyz=self.wxyz(geom_orientations[local_index, geom_id]),
+                self.mesh_handles[(env_id, geom_id)] = (
+                    self.server.scene.add_mesh_simple(
+                        f"{env_root}/geometry/{geom_id:04d}",
+                        vertices=np.asarray(
+                            model.mesh_vert[vertex_start:vertex_end], dtype=np.float32
+                        ).copy(),
+                        faces=np.asarray(
+                            model.mesh_face[face_start:face_end], dtype=np.uint32
+                        ).copy(),
+                        color=color,
+                        opacity=opacity,
+                        side="double",
+                        position=geom_positions[local_index, geom_id],
+                        wxyz=self.wxyz(geom_orientations[local_index, geom_id]),
+                    )
                 )
 
         print(f"Viewer: http://{visual['host']}:{visual['port']}")

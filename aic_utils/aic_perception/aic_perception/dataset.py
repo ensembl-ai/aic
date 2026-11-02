@@ -28,10 +28,14 @@ def read_manifest(config: dict[str, Any]) -> dict[str, Any]:
 
     path = Path(config["dataset"]["directory"]) / "manifest.json"
     if not path.is_file():
-        raise FileNotFoundError(f"{path} is missing; run scripts/curate_dataset.py first")
+        raise FileNotFoundError(
+            f"{path} is missing; run scripts/curate_dataset.py first"
+        )
     manifest = json.loads(path.read_text(encoding="utf-8"))
     if manifest["schema"] != config["schema"]["name"]:
-        raise ValueError(f"Manifest schema {manifest['schema']} != {config['schema']['name']}")
+        raise ValueError(
+            f"Manifest schema {manifest['schema']} != {config['schema']['name']}"
+        )
     return manifest
 
 
@@ -41,7 +45,9 @@ class SceneDataset(Dataset):
     Images stay ``uint8``; normalization happens on the GPU inside the model.
     """
 
-    def __init__(self, config: dict[str, Any], split: str, scene_ids: list[int], augment: bool):
+    def __init__(
+        self, config: dict[str, Any], split: str, scene_ids: list[int], augment: bool
+    ):
         """Index the usable scenes of one split.
 
         Args:
@@ -57,7 +63,9 @@ class SceneDataset(Dataset):
         self.scene_ids = scene_ids
         settings = config["augmentation"]
         self.jitter = (
-            v2.ColorJitter(settings["brightness"], settings["contrast"], settings["saturation"])
+            v2.ColorJitter(
+                settings["brightness"], settings["contrast"], settings["saturation"]
+            )
             if augment
             else None
         )
@@ -80,19 +88,28 @@ class SceneDataset(Dataset):
         """
 
         scene_id = self.scene_ids[index]
-        label = json.loads(label_path(self.root, self.split, scene_id).read_text(encoding="utf-8"))
+        label = json.loads(
+            label_path(self.root, self.split, scene_id).read_text(encoding="utf-8")
+        )
         images = []
         for name in self.schema.cameras:
-            image = decode_jpeg(read_file(str(image_path(self.root, self.split, scene_id, name))))
+            image = decode_jpeg(
+                read_file(str(image_path(self.root, self.split, scene_id, name)))
+            )
             images.append(self.jitter(image) if self.jitter else image)
         cameras = [label["cameras"][name] for name in self.schema.cameras]
         targets = [label["targets"][target.id] for target in self.schema.targets]
         poses = np.stack(
-            [np.asarray(t["base_from_target"]) if t["visible"] else np.eye(4) for t in targets]
+            [
+                np.asarray(t["base_from_target"]) if t["visible"] else np.eye(4)
+                for t in targets
+            ]
         )
         return {
             "images": torch.stack(images),
-            "intrinsics": torch.tensor([c["intrinsics"] for c in cameras], dtype=torch.float32),
+            "intrinsics": torch.tensor(
+                [c["intrinsics"] for c in cameras], dtype=torch.float32
+            ),
             "base_from_camera": torch.tensor(
                 [c["base_from_camera"] for c in cameras], dtype=torch.float32
             ),

@@ -7,8 +7,23 @@ from pathlib import Path
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 SOURCES = [p for p in sorted(PACKAGE_ROOT.rglob("*.py")) if p.parent.name != "test"]
-CONTAINER_MODULES = {"collector.py", "labels.py", "scene_sampler.py", "schema.py", "config.py", "geometry.py", "layout.py"}
-TORCH_MODULES = {"dataset.py", "model.py", "training.py", "estimator.py", "inference_node.py", "curation.py"}
+CONTAINER_MODULES = {
+    "collector.py",
+    "labels.py",
+    "scene_sampler.py",
+    "schema.py",
+    "config.py",
+    "geometry.py",
+    "layout.py",
+}
+TORCH_MODULES = {
+    "dataset.py",
+    "model.py",
+    "training.py",
+    "estimator.py",
+    "inference_node.py",
+    "curation.py",
+}
 
 
 def imported_modules(tree: ast.AST) -> set[str]:
@@ -32,7 +47,10 @@ def test_every_module_and_callable_has_a_docstring() -> None:
         if ast.get_docstring(tree) is None:
             missing.append(f"{path.name}: module")
         for node in ast.walk(tree):
-            if isinstance(node, (ast.ClassDef, ast.FunctionDef)) and ast.get_docstring(node) is None:
+            if (
+                isinstance(node, (ast.ClassDef, ast.FunctionDef))
+                and ast.get_docstring(node) is None
+            ):
                 missing.append(f"{path.name}:{node.lineno} {node.name}")
     assert not missing, "\n".join(missing)
 
@@ -45,7 +63,9 @@ def test_no_leading_underscore_names() -> None:
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
             if isinstance(node, (ast.ClassDef, ast.FunctionDef)):
                 name = node.name
-                if name.startswith("_") and not (name.startswith("__") and name.endswith("__")):
+                if name.startswith("_") and not (
+                    name.startswith("__") and name.endswith("__")
+                ):
                     offenders.append(f"{path.name}:{node.lineno} {name}")
     assert not offenders, "\n".join(offenders)
 

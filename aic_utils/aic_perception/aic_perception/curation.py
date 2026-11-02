@@ -20,11 +20,21 @@ from typing import Any
 import numpy as np
 from PIL import Image, ImageDraw
 
-from aic_perception.layout import SPLITS, completed_ids, image_path, label_path, scene_name
+from aic_perception.layout import (
+    SPLITS,
+    completed_ids,
+    image_path,
+    label_path,
+    scene_name,
+)
 from aic_perception.scene_sampler import rail_order_names
 from aic_perception.schema import BoardSchema
 
-TYPE_COLORS = {"board": (255, 64, 64), "sfp_port": (64, 220, 64), "sc_port": (64, 160, 255)}
+TYPE_COLORS = {
+    "board": (255, 64, 64),
+    "sfp_port": (64, 220, 64),
+    "sc_port": (64, 160, 255),
+}
 
 
 def check_scene(
@@ -47,7 +57,9 @@ def check_scene(
 
     digest = hashlib.md5()
     try:
-        label = json.loads(label_path(root, split, scene_id).read_text(encoding="utf-8"))
+        label = json.loads(
+            label_path(root, split, scene_id).read_text(encoding="utf-8")
+        )
         for name in cameras:
             path = image_path(root, split, scene_id, name)
             digest.update(path.read_bytes())
@@ -62,7 +74,9 @@ def check_scene(
     return status, digest.hexdigest()
 
 
-def draw_preview(root: Path, split: str, scene_id: int, schema: BoardSchema, output: Path) -> None:
+def draw_preview(
+    root: Path, split: str, scene_id: int, schema: BoardSchema, output: Path
+) -> None:
     """Save the camera images side by side with projected target origins.
 
     Args:
@@ -87,10 +101,14 @@ def draw_preview(root: Path, split: str, scene_id: int, schema: BoardSchema, out
                 continue
             color = TYPE_COLORS.get(target.type, (255, 255, 0))
             draw.ellipse((u - 4, v - 4, u + 4, v + 4), outline=color, width=2)
-            draw.text((u + 6, v - 6), target.id.replace("nic_card_mount_", "nic"), fill=color)
+            draw.text(
+                (u + 6, v - 6), target.id.replace("nic_card_mount_", "nic"), fill=color
+            )
         draw.text((6, 6), name, fill=(255, 255, 0))
         panels.append(image)
-    sheet = Image.new("RGB", (sum(p.width for p in panels), max(p.height for p in panels)))
+    sheet = Image.new(
+        "RGB", (sum(p.width for p in panels), max(p.height for p in panels))
+    )
     offset = 0
     for panel in panels:
         sheet.paste(panel, (offset, 0))
@@ -116,7 +134,9 @@ def label_statistics(
     visible = {target.id: 0 for target in schema.targets}
     translations = []
     for scene_id in scene_ids:
-        label = json.loads(label_path(root, "train", scene_id).read_text(encoding="utf-8"))
+        label = json.loads(
+            label_path(root, "train", scene_id).read_text(encoding="utf-8")
+        )
         for target in schema.targets:
             item = label["targets"][target.id]
             if item["visible"]:
@@ -160,8 +180,12 @@ def curate(config: dict[str, Any]) -> dict[str, Any]:
                     chunksize=64,
                 )
             )
-            checked[split] = [(i, status, digest) for i, (status, digest) in zip(ids, results)]
-    occurrences = Counter(digest for rows in checked.values() for _, _, digest in rows if digest)
+            checked[split] = [
+                (i, status, digest) for i, (status, digest) in zip(ids, results)
+            ]
+    occurrences = Counter(
+        digest for rows in checked.values() for _, _, digest in rows if digest
+    )
     usable: dict[str, list[int]] = {}
     rejected: dict[str, dict[str, int]] = {}
     for split, rows in checked.items():
@@ -174,7 +198,9 @@ def curate(config: dict[str, Any]) -> dict[str, Any]:
             else:
                 rejected[split][status] = rejected[split].get(status, 0) + 1
     if not usable["train"] or not usable["val"]:
-        raise ValueError(f"Both splits need usable scenes; found {[len(v) for v in usable.values()]}")
+        raise ValueError(
+            f"Both splits need usable scenes; found {[len(v) for v in usable.values()]}"
+        )
 
     visible_fraction, normalization = label_statistics(root, schema, usable["train"])
     manifest = {
@@ -188,10 +214,14 @@ def curate(config: dict[str, Any]) -> dict[str, Any]:
             "train_visible_fraction": visible_fraction,
         },
     }
-    (root / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    (root / "manifest.json").write_text(
+        json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
+    )
 
     previews = root / "previews"
     previews.mkdir(exist_ok=True)
     for scene_id in usable["val"][: config["curation"]["preview_count"]]:
-        draw_preview(root, "val", scene_id, schema, previews / f"{scene_name(scene_id)}.jpg")
+        draw_preview(
+            root, "val", scene_id, schema, previews / f"{scene_name(scene_id)}.jpg"
+        )
     return manifest

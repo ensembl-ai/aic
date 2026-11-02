@@ -23,14 +23,22 @@ def main() -> None:
 
     config = load_config("train")
     run_directory = Path(config["run"]["directory"]) / config["run"]["name"]
-    model, trained_config = load_checkpoint(run_directory / "checkpoints" / "best.pt", config["run"]["device"])
+    model, trained_config = load_checkpoint(
+        run_directory / "checkpoints" / "best.pt", config["run"]["device"]
+    )
     if trained_config["schema"] != config["schema"]:
         raise ValueError("The checkpoint was trained with a different board schema")
     loader = make_loader(config, read_manifest(config), "val")
     summary = evaluate(
-        model, loader, BoardSchema.from_config(config), model.translation_mean.device, config["optimization"]["bf16"]
+        model,
+        loader,
+        BoardSchema.from_config(config),
+        model.translation_mean.device,
+        config["optimization"]["bf16"],
     )
-    (run_directory / "evaluation.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+    (run_directory / "evaluation.json").write_text(
+        json.dumps(summary, indent=2) + "\n", encoding="utf-8"
+    )
     print(json.dumps(summary["per_type"], indent=2))
     print(f"Full report: {run_directory / 'evaluation.json'}")
 

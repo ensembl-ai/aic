@@ -37,7 +37,10 @@ def main() -> None:
             if events.camera:
                 outputs.update(runtime)
             step_index += 1
-            if config["visualization"]["enabled"] and config["visualization"]["realtime"]:
+            if (
+                config["visualization"]["enabled"]
+                and config["visualization"]["realtime"]
+            ):
                 wait_for_realtime(started, step_index, timestep)
     except KeyboardInterrupt:
         print("\nStopping AIC MuJoCo-Warp cleanly.")

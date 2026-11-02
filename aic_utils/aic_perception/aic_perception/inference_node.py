@@ -68,10 +68,16 @@ class SceneEstimatorNode(Node):
         self.tf_buffer = tf2_ros.Buffer()
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
         self.tf_broadcaster = tf2_ros.TransformBroadcaster(self)
-        self.publisher = self.create_publisher(SceneEstimate, settings["estimate_topic"], 10)
-        self.create_subscription(Observation, settings["observation_topic"], self.store, 2)
+        self.publisher = self.create_publisher(
+            SceneEstimate, settings["estimate_topic"], 10
+        )
+        self.create_subscription(
+            Observation, settings["observation_topic"], self.store, 2
+        )
         self.create_timer(1.0 / settings["rate_hz"], self.estimate)
-        self.get_logger().info(f"Loaded {settings['checkpoint']}: {self.runtime.describe()}")
+        self.get_logger().info(
+            f"Loaded {settings['checkpoint']}: {self.runtime.describe()}"
+        )
 
     def store(self, message: Observation) -> None:
         """Keep the newest observation."""
@@ -82,7 +88,10 @@ class SceneEstimatorNode(Node):
         """Estimate the scene from the newest unprocessed observation."""
 
         observation = self.observation
-        if observation is None or observation.center_image.header.stamp == self.processed_stamp:
+        if (
+            observation is None
+            or observation.center_image.header.stamp == self.processed_stamp
+        ):
             return
         stamp = observation.center_image.header.stamp
         images, intrinsics, poses = [], [], []
@@ -91,7 +100,9 @@ class SceneEstimatorNode(Node):
                 image = getattr(observation, f"{name}_image")
                 info = getattr(observation, f"{name}_camera_info")
                 images.append(
-                    np.frombuffer(image.data, np.uint8).reshape(image.height, image.width, 3)
+                    np.frombuffer(image.data, np.uint8).reshape(
+                        image.height, image.width, 3
+                    )
                 )
                 intrinsics.append(np.asarray(info.k, dtype=float).reshape(3, 3))
                 lookup = self.tf_buffer.lookup_transform(
@@ -102,7 +113,9 @@ class SceneEstimatorNode(Node):
                 )
                 poses.append(matrix_from_transform(lookup.transform))
         except tf2_ros.TransformException as error:
-            self.get_logger().warning(f"Camera pose unavailable: {error}", throttle_duration_sec=5.0)
+            self.get_logger().warning(
+                f"Camera pose unavailable: {error}", throttle_duration_sec=5.0
+            )
             return
         self.processed_stamp = stamp
         estimates = self.runtime.predict(images, intrinsics, poses)

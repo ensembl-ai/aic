@@ -245,9 +245,7 @@ def main():
         dest="tcp_z_max_deviation_deg",
         type=float,
         default=np.rad2deg(TCP_Z_MAX_DEVIATION_RADIANS),
-        help=(
-            "Maximum angle in degrees between sampled TCP Z and reference TCP Z."
-        ),
+        help=("Maximum angle in degrees between sampled TCP Z and reference TCP Z."),
     )
     parser.add_argument(
         "--reachable-sample-attempts",
@@ -311,18 +309,14 @@ def main():
         closest_solution = closest_joint_solution(solutions, home_config)
         robot.SetActiveDOFValues(closest_solution)
         fk = robot.ComputeFK()
-        position_error = float(
-            np.linalg.norm(fk[:3, 3] - target_transform[:3, 3])
-        )
+        position_error = float(np.linalg.norm(fk[:3, 3] - target_transform[:3, 3]))
         orientation_error = rotation_error_radians(fk, target_transform)
         checked_solutions += 1
         if (
             position_error > position_tolerance
             or orientation_error > orientation_tolerance
         ):
-            bad_solutions.append(
-                (sample_index, 0, position_error, orientation_error)
-            )
+            bad_solutions.append((sample_index, 0, position_error, orientation_error))
 
     successful_samples = args.num_samples - ik_failures
     print("\nIK/FK sampled validation")
@@ -533,10 +527,7 @@ def main():
     if planner_failures:
         print("\nFirst planner failures:")
         for failure in planner_failures[:10]:
-            print(
-                f"  sample={failure['sample_index']} "
-                f"reason={failure['reason']}"
-            )
+            print(f"  sample={failure['sample_index']} " f"reason={failure['reason']}")
             if failure["goal_config"] is None:
                 continue
             print(
@@ -552,10 +543,7 @@ def main():
     if planner_path_failures:
         print("\nFirst planner path failures:")
         for failure in planner_path_failures[:10]:
-            print(
-                f"  sample={failure['sample_index']} "
-                f"reason={failure['reason']}"
-            )
+            print(f"  sample={failure['sample_index']} " f"reason={failure['reason']}")
             print(
                 f"    state_waypoints={failure['state_waypoint_count']} "
                 f"max_joint_step={failure['max_joint_step']}"
@@ -579,10 +567,7 @@ def main():
     if planner_goal_failures:
         print("\nFirst planner goal mismatches:")
         for failure in planner_goal_failures[:10]:
-            print(
-                f"  sample={failure['sample_index']} "
-                f"reason={failure['reason']}"
-            )
+            print(f"  sample={failure['sample_index']} " f"reason={failure['reason']}")
             print(f"    joint_err={failure['joint_error']:.3e}")
             if failure["position_error"] is None:
                 print(f"    goal_joints={format_vector(failure['goal_config'])}")

@@ -16,4 +16,3 @@ from aic_mujoco.collection import main
 
 if __name__ == "__main__":
     main()
-

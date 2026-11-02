@@ -106,9 +106,7 @@ class EnsemblExecutor:
                 velocities.tolist() if velocities.size == positions.size else []
             )
             joint_motion_update.target_state.accelerations = (
-                accelerations.tolist()
-                if accelerations.size == positions.size
-                else []
+                accelerations.tolist() if accelerations.size == positions.size else []
             )
             joint_motion_update.target_state.time_from_start = Duration(
                 seconds=waypoint_time,

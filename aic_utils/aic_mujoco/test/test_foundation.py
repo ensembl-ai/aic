@@ -81,8 +81,8 @@ def test_reduced_scene_contract(configured_scene: dict) -> None:
     assert "cable_end" not in text
     assert "lc_plug_link" not in text
     assert "elasticity.cable" not in text
-    assert "gripper/left_finger_joint\"" not in text
-    assert "gripper/right_finger_joint\"" not in text
+    assert 'gripper/left_finger_joint"' not in text
+    assert 'gripper/right_finger_joint"' not in text
     names = configured_scene["scene"]["names"]
     tool_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, names["tool_body"])
     sfp_id = mujoco.mj_name2id(
@@ -138,10 +138,12 @@ def test_independent_warp_worlds_and_observations(configured_scene: dict) -> Non
     assert np.all(hold >= lower) and np.all(hold <= upper)
     board = runtime.board_position.numpy()
     assert np.all(
-        board >= np.asarray(config["domain_randomization"]["board_position_lower"]) - 1e-6
+        board
+        >= np.asarray(config["domain_randomization"]["board_position_lower"]) - 1e-6
     )
     assert np.all(
-        board <= np.asarray(config["domain_randomization"]["board_position_upper"]) + 1e-6
+        board
+        <= np.asarray(config["domain_randomization"]["board_position_upper"]) + 1e-6
     )
     assert set(runtime.nic_rail_index.numpy()).issubset(
         config["domain_randomization"]["nic_rail_indices"]
@@ -168,10 +170,6 @@ def test_independent_warp_worlds_and_observations(configured_scene: dict) -> Non
     for _ in range(tare_steps):
         runtime.step()
     assert np.all(runtime.tare_ready.numpy())
-    np.testing.assert_array_equal(
-        runtime.episode_steps.numpy(), [25 + tare_steps, 0]
-    )
+    np.testing.assert_array_equal(runtime.episode_steps.numpy(), [25 + tare_steps, 0])
     runtime.step()
-    np.testing.assert_array_equal(
-        runtime.episode_steps.numpy(), [26 + tare_steps, 1]
-    )
+    np.testing.assert_array_equal(runtime.episode_steps.numpy(), [26 + tare_steps, 1])

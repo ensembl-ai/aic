@@ -77,7 +77,11 @@ class SceneEstimator(nn.Module):
 
         super().__init__()
         d_model = model_config["d_model"]
-        weights = ResNet18_Weights.IMAGENET1K_V1 if model_config["pretrained_backbone"] else None
+        weights = (
+            ResNet18_Weights.IMAGENET1K_V1
+            if model_config["pretrained_backbone"]
+            else None
+        )
         backbone = resnet18(weights=weights)
         self.backbone = nn.Sequential(*list(backbone.children())[:-2]).to(
             memory_format=torch.channels_last
@@ -105,9 +109,12 @@ class SceneEstimator(nn.Module):
         )
         self.queries = nn.Embedding(num_targets, d_model)
         self.decoder = nn.TransformerDecoder(
-            nn.TransformerDecoderLayer(**layer), num_layers=model_config["decoder_layers"]
+            nn.TransformerDecoderLayer(**layer),
+            num_layers=model_config["decoder_layers"],
         )
-        self.head = nn.Sequential(nn.LayerNorm(d_model), nn.Linear(d_model, OUTPUTS_PER_QUERY))
+        self.head = nn.Sequential(
+            nn.LayerNorm(d_model), nn.Linear(d_model, OUTPUTS_PER_QUERY)
+        )
         self.register_buffer("image_mean", torch.tensor(IMAGENET_MEAN).view(1, 3, 1, 1))
         self.register_buffer("image_std", torch.tensor(IMAGENET_STD).view(1, 3, 1, 1))
         self.register_buffer("translation_mean", torch.tensor(translation_mean))
@@ -164,7 +171,8 @@ class SceneEstimator(nn.Module):
         outputs = self.head(self.decoder(queries, memory)).float()
         return {
             "presence_logit": outputs[..., 0],
-            "translation": self.translation_mean + outputs[..., 1:4] * self.translation_std,
+            "translation": self.translation_mean
+            + outputs[..., 1:4] * self.translation_std,
             "rotation": matrix_from_6d(outputs[..., 4:10]),
             "confidence_logit": outputs[..., 10],
         }

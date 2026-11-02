@@ -149,9 +149,7 @@ def cartesian_delta_move(
     linear_step = scale_to_limit(
         linear_error * translation_gain, maximum_translation_step
     )
-    angular_step = scale_to_limit(
-        angular_error * rotation_gain, maximum_rotation_step
-    )
+    angular_step = scale_to_limit(angular_error * rotation_gain, maximum_rotation_step)
     cartesian_step = Vector6(
         linear_step[0],
         linear_step[1],
@@ -253,12 +251,8 @@ class JointHoldController:
         self.num_envs = num_envs
         self.joint_count = joints.count
         self.device = device
-        self.qpos_addresses = wp.array(
-            joints.qpos_addresses, dtype=int, device=device
-        )
-        self.dof_addresses = wp.array(
-            joints.dof_addresses, dtype=int, device=device
-        )
+        self.qpos_addresses = wp.array(joints.qpos_addresses, dtype=int, device=device)
+        self.dof_addresses = wp.array(joints.dof_addresses, dtype=int, device=device)
         self.actuator_addresses = wp.array(
             joints.actuator_addresses, dtype=int, device=device
         )
@@ -328,18 +322,14 @@ class CartesianMoveController:
         self.controlled_body_id = controlled_body_id
         self.target_body_id = target_body_id
         self.joint_ids = wp.array(joints.joint_ids, dtype=int, device=device)
-        self.qpos_addresses = wp.array(
-            joints.qpos_addresses, dtype=int, device=device
-        )
+        self.qpos_addresses = wp.array(joints.qpos_addresses, dtype=int, device=device)
         self.joint_lower = wp.array(joints.ranges[:, 0], dtype=float, device=device)
         self.joint_upper = wp.array(joints.ranges[:, 1], dtype=float, device=device)
         self.maximum_joint_step = wp.array(
             expert["maximum_joint_step"], dtype=float, device=device
         )
         self.offset_position = wp.vec3(expert["goal_offset_position"])
-        self.offset_rotation = wp.mat33(
-            *expert["goal_offset_rotation_matrix"]
-        )
+        self.offset_rotation = wp.mat33(*expert["goal_offset_rotation_matrix"])
         self.maximum_translation_step = expert["maximum_translation_step"]
         self.maximum_rotation_step = expert["maximum_rotation_step"]
         self.translation_gain = expert["translation_gain"]
@@ -353,9 +343,7 @@ class CartesianMoveController:
         self.command = CartesianPoseCommand(num_envs, device)
         self.action = JointDeltaAction(num_envs, joints.count, device)
         self.current_position = wp.zeros(num_envs, dtype=wp.vec3, device=device)
-        self.current_rotation = wp.zeros(
-            num_envs, dtype=wp.mat33, device=device
-        )
+        self.current_rotation = wp.zeros(num_envs, dtype=wp.mat33, device=device)
         self.position_error = wp.zeros(num_envs, dtype=float, device=device)
         self.orientation_error = wp.zeros(num_envs, dtype=float, device=device)
 
@@ -367,7 +355,9 @@ class CartesianMoveController:
         while body_id > 0:
             ancestor_bodies.add(body_id)
             body_id = int(model.body_parentid[body_id])
-        joint_bodies = {int(model.jnt_bodyid[joint_id]) for joint_id in joints.joint_ids}
+        joint_bodies = {
+            int(model.jnt_bodyid[joint_id]) for joint_id in joints.joint_ids
+        }
         if not joint_bodies.issubset(ancestor_bodies):
             raise ValueError(
                 "Every configured arm joint must be an ancestor of the controlled body"
@@ -375,7 +365,9 @@ class CartesianMoveController:
         margin = self.joint_limit_margin
         for lower, upper in joints.ranges:
             if float(lower) + margin >= float(upper) - margin:
-                raise ValueError("expert.joint_limit_margin leaves an empty joint range")
+                raise ValueError(
+                    "expert.joint_limit_margin leaves an empty joint range"
+                )
 
     def set_active(self, active: list[bool]) -> None:
         """Select environments controlled by the Cartesian teacher."""

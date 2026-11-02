@@ -49,7 +49,9 @@ def split_of(config: dict[str, Any], scene_id: int) -> str:
         Split name.
     """
 
-    draw = np.random.default_rng([config["collection"]["seed"], scene_id, SPLIT_STREAM]).uniform()
+    draw = np.random.default_rng(
+        [config["collection"]["seed"], scene_id, SPLIT_STREAM]
+    ).uniform()
     return "val" if draw < config["dataset"]["validation_fraction"] else "train"
 
 
@@ -80,5 +82,7 @@ def completed_ids(root: str | Path, split: str) -> list[int]:
     if not labels.is_dir():
         return []
     return sorted(
-        scene_id_from_name(path.name) for path in labels.iterdir() if path.suffix == ".json"
+        scene_id_from_name(path.name)
+        for path in labels.iterdir()
+        if path.suffix == ".json"
     )
