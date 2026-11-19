@@ -45,7 +45,7 @@
     "control_period_s": 0.05,
     "approach_duration_s": 5.0,
     "coarse_height_m": 0.05,
-    "tracking_approach": true,
+    "tracking_approach": false,
     "track_alpha": 0.2,
     "track_gate_m": 0.008,
     "track_reset_after": 5,
