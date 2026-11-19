@@ -94,3 +94,32 @@ estimates instead of stopping at the 5 cm hover.
   recording take, sample1 and bench_16 scored about 70 ("partial
   insertion" at full depth); in the next take all five scored about 95.
   The seat hold should be added to staged and checked on the benchmark.
+
+## 2026-11-19: first 40-trial benchmark (staged policy, v5, refiner off)
+
+Total 2125 of 40 trials (53 per trial). The machine restarted at 00:44 for a
+Windows Update right after the run; it was not caused by the run (the
+cleanup had finished at 00:42).
+
+| Type | Trials | Full (>90) | Partial (61-70) | Failed (1) | Mean |
+|---|---|---|---|---|---|
+| SFP | 26 | 14 | 3 | 9 | 59.4 |
+| SC | 14 | 4 | 3 | 7 | 41.6 |
+
+Failure causes:
+- **Target port never detected at the start pose: 9 SFP + 1 SC.** The
+  model saw other parts of the board but reported the target card's ports
+  absent (presence 0.00 for 30 s), often missing several cards at once. On
+  validation home views the same model has 97% presence recall, so this is
+  a gap between the collection scenes and the engine's trials, not a
+  model weakness seen in training data. Not yet explained; next step is to
+  capture the home images of a failing trial and compare them with a
+  training image of the same board.
+- **Partial insertion at full depth: 3 SFP + 3 SC** (61 to 70 points). The
+  plug was fully seated (SFP -46.7 mm, SC -15.6 mm) but the engine did not
+  count it: the seat hold would recover about 25 points each.
+- **SC did not enter: 4 trials** stalled on the surface (-1.5 to -2.2 mm)
+  with the plug 1.3 to 2.0 mm off axis and 0.1 to 1.3 degrees rotated; the
+  spiral search did not find the opening.
+- **SC drift or wrong depth: 2 trials** (plug drifted 15 mm sideways; plug
+  went 35 mm deep, i.e. beside the port).
