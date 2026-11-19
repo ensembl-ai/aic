@@ -75,12 +75,25 @@ class Backbone(nn.Module):
         if self.input_size is not None:
             width, height = self.input_size
             if pixels.shape[-2:] != (height, width):
-                pixels = F.interpolate(pixels, size=(height, width), mode="bilinear", antialias=True, align_corners=False)
+                pixels = F.interpolate(
+                    pixels,
+                    size=(height, width),
+                    mode="bilinear",
+                    antialias=True,
+                    align_corners=False,
+                )
         if self.name == "resnet18":
             return self.encoder(pixels.contiguous(memory_format=torch.channels_last))
-        tokens = self.encoder.forward_features(pixels)[:, self.encoder.num_prefix_tokens :]
-        rows, columns = pixels.shape[-2] // DINOV2_PATCH, pixels.shape[-1] // DINOV2_PATCH
-        return tokens.transpose(1, 2).reshape(tokens.shape[0], self.channels, rows, columns)
+        tokens = self.encoder.forward_features(pixels)[
+            :, self.encoder.num_prefix_tokens :
+        ]
+        rows, columns = (
+            pixels.shape[-2] // DINOV2_PATCH,
+            pixels.shape[-1] // DINOV2_PATCH,
+        )
+        return tokens.transpose(1, 2).reshape(
+            tokens.shape[0], self.channels, rows, columns
+        )
 
 
 def build_backbone(model_config: dict[str, Any]) -> Backbone:

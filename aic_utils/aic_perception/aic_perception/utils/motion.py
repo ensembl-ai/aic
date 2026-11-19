@@ -29,7 +29,9 @@ def level_rotation(rotation: np.ndarray) -> np.ndarray:
     columns = rotation.copy()
     columns[:, axis] = np.sign(rotation[2, axis]) * UP
     following = (axis + 1) % 3
-    projected = columns[:, following] - columns[:, axis] * (columns[:, axis] @ columns[:, following])
+    projected = columns[:, following] - columns[:, axis] * (
+        columns[:, axis] @ columns[:, following]
+    )
     columns[:, following] = projected / np.linalg.norm(projected)
     last = (axis + 2) % 3
     columns[:, last] = np.cross(columns[:, axis], columns[:, following])
@@ -93,7 +95,9 @@ class PortAverage:
     estimate cannot lock out all later evidence.
     """
 
-    def __init__(self, initial: np.ndarray, alpha: float, gate: float, reset_after: int):
+    def __init__(
+        self, initial: np.ndarray, alpha: float, gate: float, reset_after: int
+    ):
         """Start from an initial estimate.
 
         Args:
@@ -147,7 +151,12 @@ def funnel_target(port: np.ndarray, plug: np.ndarray, height: float) -> np.ndarr
 
 
 def speed_limited_step(
-    position: np.ndarray, target: np.ndarray, speed: float, max_speed: float, accel: float, period: float
+    position: np.ndarray,
+    target: np.ndarray,
+    speed: float,
+    max_speed: float,
+    accel: float,
+    period: float,
 ) -> tuple[np.ndarray, float]:
     """Move a commanded point toward a (possibly moving) target with bounded speed and acceleration.
 

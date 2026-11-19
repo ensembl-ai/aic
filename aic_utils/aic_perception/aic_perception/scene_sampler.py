@@ -155,10 +155,14 @@ def sample_scene(config: dict[str, Any], board_id: int) -> dict[str, Any]:
         "z": float(randomization["board_z"]),
         "yaw": float(rng.uniform(*randomization["board_yaw"])),
     }
-    nic_cards = sample_components(rng, NIC_MOUNTS, randomization["nic_cards"], int(port_type == "sfp"))
+    nic_cards = sample_components(
+        rng, NIC_MOUNTS, randomization["nic_cards"], int(port_type == "sfp")
+    )
     sc_ports = separate_on_rails(
         rng,
-        sample_components(rng, SC_PORTS, randomization["sc_ports"], int(port_type == "sc")),
+        sample_components(
+            rng, SC_PORTS, randomization["sc_ports"], int(port_type == "sc")
+        ),
         randomization["sc_ports"],
     )
     if port_type == "sfp":
@@ -183,7 +187,12 @@ def sample_scene(config: dict[str, Any], board_id: int) -> dict[str, Any]:
                 "translation": float(rng.uniform(*mounts["translation"])),
                 "yaw": math.radians(float(rng.uniform(*mounts["yaw_deg"]))),
             }
-    return {"board_id": board_id, "board": board, "components": components, "task": task}
+    return {
+        "board_id": board_id,
+        "board": board,
+        "components": components,
+        "task": task,
+    }
 
 
 def xacro_arguments(scene: dict[str, Any]) -> list[str]:
@@ -235,7 +244,9 @@ def sample_approach(config: dict[str, Any], board_id: int) -> list[dict[str, Any
     """
 
     settings = config["viewpoints"]
-    rng = np.random.default_rng([config["collection"]["seed"], board_id, VIEWPOINT_STREAM])
+    rng = np.random.default_rng(
+        [config["collection"]["seed"], board_id, VIEWPOINT_STREAM]
+    )
     low, high = settings["height_m"]
     stops = config["collection"]["views_per_board"] - settings["home_view"]
     views = [{"mode": "home"}] if settings["home_view"] else []
@@ -251,7 +262,9 @@ def sample_approach(config: dict[str, Any], board_id: int) -> list[dict[str, Any
                 "mode": "close",
                 "height": height,
                 "offset": [radius * math.cos(direction), radius * math.sin(direction)],
-                "yaw": math.radians(float(rng.uniform(-settings["yaw_deg"], settings["yaw_deg"]))),
+                "yaw": math.radians(
+                    float(rng.uniform(-settings["yaw_deg"], settings["yaw_deg"]))
+                ),
             }
         )
     return views

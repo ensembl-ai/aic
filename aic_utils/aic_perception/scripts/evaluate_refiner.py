@@ -27,15 +27,27 @@ def main() -> None:
 
     config = load_config("refine")
     run_directory = Path(config["run"]["directory"]) / config["run"]["name"]
-    model, checkpoint = load_refiner(run_directory / "checkpoints" / "best.pt", config["run"]["device"])
+    model, checkpoint = load_refiner(
+        run_directory / "checkpoints" / "best.pt", config["run"]["device"]
+    )
     samples = select_samples(config, "val")
     loader = make_refiner_loader(config, "val", samples, checkpoint["windows"])
-    summary = evaluate_refiner(model, loader, model.offset_mean.device, config["optimization"]["bf16"])
-    (run_directory / "evaluation.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+    summary = evaluate_refiner(
+        model, loader, model.offset_mean.device, config["optimization"]["bf16"]
+    )
+    (run_directory / "evaluation.json").write_text(
+        json.dumps(summary, indent=2) + "\n", encoding="utf-8"
+    )
     print(f"Best epoch {checkpoint['epoch']}, {summary['samples']} val samples")
-    print("Offset = port minus plug (what the policy corrects). 'uncorrected' is the true misalignment before correcting.")
+    print(
+        "Offset = port minus plug (what the policy corrects). 'uncorrected' is the true misalignment before correcting."
+    )
     header = f"{'group':22} {'samples':>7} {'offset mean':>11} {'median':>7} {'p90':>6} {'<0.5mm':>7} {'<1mm':>6} {'plug mm':>8} {'rot deg':>8} {'uncorrected':>11}"
-    for title, group in (("Per plug type", "per_type"), ("Per starting misalignment", "per_misalignment"), ("Per plug height", "per_height")):
+    for title, group in (
+        ("Per plug type", "per_type"),
+        ("Per starting misalignment", "per_misalignment"),
+        ("Per plug height", "per_height"),
+    ):
         print(f"\n{title}:\n{header}")
         for name, m in sorted(summary[group].items()):
             if m["samples"]:

@@ -73,7 +73,11 @@ def label_sample(label: dict[str, Any], camera: str) -> dict[str, Any] | None:
 
     scene = label["scene"]
     held = label.get("held_plug")
-    if scene.get("viewpoint", {}).get("mode") != "close" or not held or held["base_from_plug"] is None:
+    if (
+        scene.get("viewpoint", {}).get("mode") != "close"
+        or not held
+        or held["base_from_plug"] is None
+    ):
         return None
     target = label["targets"][scene["target"]]
     if not target["spawned"]:
@@ -125,7 +129,9 @@ def select_samples(config: dict[str, Any], split: str) -> list[dict[str, Any]]:
     for directory in config["datasets"]:
         root = Path(directory)
         for scene_id in read_manifest(config, root)[split]:
-            label = json.loads(label_path(root, split, scene_id).read_text(encoding="utf-8"))
+            label = json.loads(
+                label_path(root, split, scene_id).read_text(encoding="utf-8")
+            )
             sample = label_sample(label, selection["reference_camera"])
             if (
                 sample is not None
@@ -138,7 +144,11 @@ def select_samples(config: dict[str, Any], split: str) -> list[dict[str, Any]]:
 
 
 def crop_windows(
-    samples: list[dict[str, Any]], cameras: list[str], width: int, height: int, size: int
+    samples: list[dict[str, Any]],
+    cameras: list[str],
+    width: int,
+    height: int,
+    size: int,
 ) -> dict[str, dict[str, list[int]]]:
     """Top-left corner of each camera's crop, per plug type.
 
@@ -210,7 +220,9 @@ class RefinerDataset(Dataset):
         self.cameras = config["schema"]["cameras"]
         settings = config["augmentation"]
         self.jitter = (
-            v2.ColorJitter(settings["brightness"], settings["contrast"], settings["saturation"])
+            v2.ColorJitter(
+                settings["brightness"], settings["contrast"], settings["saturation"]
+            )
             if augment
             else None
         )
@@ -233,7 +245,15 @@ class RefinerDataset(Dataset):
         windows = self.windows[sample["plug_type"]]
         crops = []
         for camera in self.cameras:
-            image = decode_jpeg(read_file(str(image_path(sample["root"], self.split, sample["scene_id"], camera))))
+            image = decode_jpeg(
+                read_file(
+                    str(
+                        image_path(
+                            sample["root"], self.split, sample["scene_id"], camera
+                        )
+                    )
+                )
+            )
             patch = crop(image, windows[camera], self.size)
             crops.append(self.jitter(patch) if self.jitter else patch)
         return {
@@ -270,7 +290,9 @@ class Refiner(nn.Module):
         d_model = model_config["d_model"]
         self.backbone = build_backbone(model_config)
         with torch.no_grad():
-            cells = self.backbone(torch.zeros(1, 3, crop_size, crop_size, dtype=torch.uint8)).shape[-2:]
+            cells = self.backbone(
+                torch.zeros(1, 3, crop_size, crop_size, dtype=torch.uint8)
+            ).shape[-2:]
         self.projection = nn.Conv2d(self.backbone.channels, d_model, kernel_size=1)
         self.position = nn.Parameter(torch.zeros(cameras, cells[0] * cells[1], d_model))
         self.plug_embedding = nn.Embedding(len(PLUG_TYPES), d_model)
@@ -304,7 +326,9 @@ class Refiner(nn.Module):
         backbone = {id(parameter) for parameter in self.backbone.parameters()}
         return [p for p in self.parameters() if id(p) not in backbone]
 
-    def forward(self, crops: torch.Tensor, plug_index: torch.Tensor) -> dict[str, torch.Tensor]:
+    def forward(
+        self, crops: torch.Tensor, plug_index: torch.Tensor
+    ) -> dict[str, torch.Tensor]:
         """Estimate the plug-to-port offset, the plug position, and the rotation.
 
         Args:
@@ -318,8 +342,14 @@ class Refiner(nn.Module):
 
         batch, cameras = crops.shape[:2]
         features = self.projection(self.backbone(crops.flatten(0, 1)))
-        tokens = features.flatten(2).transpose(1, 2).reshape(batch, cameras, -1, features.shape[1])
-        tokens = (tokens + self.position).flatten(1, 2) + self.plug_embedding(plug_index)[:, None]
+        tokens = (
+            features.flatten(2)
+            .transpose(1, 2)
+            .reshape(batch, cameras, -1, features.shape[1])
+        )
+        tokens = (tokens + self.position).flatten(1, 2) + self.plug_embedding(
+            plug_index
+        )[:, None]
         tokens = torch.cat((self.readout.expand(batch, -1, -1), tokens), dim=1)
         outputs = self.head(self.encoder(tokens)[:, 0]).float()
         return {
@@ -330,14 +360,20 @@ class Refiner(nn.Module):
 
 
 def refiner_losses(
-    outputs: dict[str, torch.Tensor], batch: dict[str, torch.Tensor], weights: dict[str, float]
+    outputs: dict[str, torch.Tensor],
+    batch: dict[str, torch.Tensor],
+    weights: dict[str, float],
 ) -> tuple[torch.Tensor, dict[str, float]]:
     """L1 losses in millimetres and degrees, weighted per output."""
 
     offset = (outputs["offset"] - batch["offset"]).abs().mean() * 1000.0
     plug = (outputs["plug"] - batch["plug"]).abs().mean() * 1000.0
     rotation = torch.rad2deg((outputs["rotation"] - batch["rotation"]).abs()).mean()
-    total = weights["offset"] * offset + weights["plug"] * plug + weights["rotation"] * rotation
+    total = (
+        weights["offset"] * offset
+        + weights["plug"] * plug
+        + weights["rotation"] * rotation
+    )
     return total, {
         "loss/total": total.item(),
         "loss/offset_mm": offset.item(),
@@ -358,7 +394,9 @@ def band_name(value: float, edges: tuple[float, ...], unit: str, scale: float) -
 
 
 @torch.no_grad()
-def evaluate_refiner(model: Refiner, loader: DataLoader, device: torch.device, bf16: bool) -> dict[str, Any]:
+def evaluate_refiner(
+    model: Refiner, loader: DataLoader, device: torch.device, bf16: bool
+) -> dict[str, Any]:
     """Errors of the refiner per plug type, starting misalignment, and height.
 
     ``uncorrected_mm`` is the true lateral misalignment the refiner had to
@@ -373,12 +411,20 @@ def evaluate_refiner(model: Refiner, loader: DataLoader, device: torch.device, b
     model.eval()
     rows = []
     for batch in loader:
-        batch = {key: value.to(device, non_blocking=True) for key, value in batch.items()}
+        batch = {
+            key: value.to(device, non_blocking=True) for key, value in batch.items()
+        }
         with torch.autocast(device.type, dtype=torch.bfloat16, enabled=bf16):
             outputs = model(batch["crops"], batch["plug_index"])
         error = (outputs["offset"] - batch["offset"]).float().cpu().numpy()
         plug = (outputs["plug"] - batch["plug"]).float().norm(dim=-1).cpu().numpy()
-        rotation = torch.rad2deg((outputs["rotation"] - batch["rotation"]).float().norm(dim=-1)).cpu().numpy()
+        rotation = (
+            torch.rad2deg(
+                (outputs["rotation"] - batch["rotation"]).float().norm(dim=-1)
+            )
+            .cpu()
+            .numpy()
+        )
         for index in range(error.shape[0]):
             rows.append(
                 {
@@ -409,23 +455,45 @@ def evaluate_refiner(model: Refiner, loader: DataLoader, device: torch.device, b
             "uncorrected_mean_mm": float(np.mean([r["uncorrected_mm"] for r in group])),
         }
 
-    summary: dict[str, Any] = {"samples": len(rows), "per_type": {}, "per_misalignment": {}, "per_height": {}}
+    summary: dict[str, Any] = {
+        "samples": len(rows),
+        "per_type": {},
+        "per_misalignment": {},
+        "per_height": {},
+    }
     for plug_type in PLUG_TYPES:
         group = [r for r in rows if r["type"] == plug_type]
         summary["per_type"][plug_type] = describe(group)
         for row in group:
-            row["misalignment"] = band_name(row["uncorrected_mm"] / 1000.0, tuple(e / 1000.0 for e in LATERAL_BANDS_MM), "mm", 1000.0)
+            row["misalignment"] = band_name(
+                row["uncorrected_mm"] / 1000.0,
+                tuple(e / 1000.0 for e in LATERAL_BANDS_MM),
+                "mm",
+                1000.0,
+            )
             row["height_band"] = band_name(row["height"], HEIGHT_BANDS_M, "cm", 100.0)
-        for key, target in (("misalignment", "per_misalignment"), ("height_band", "per_height")):
+        for key, target in (
+            ("misalignment", "per_misalignment"),
+            ("height_band", "per_height"),
+        ):
             for band in dict.fromkeys(r[key] for r in group):
-                summary[target][f"{plug_type}/{band}"] = describe([r for r in group if r[key] == band])
+                summary[target][f"{plug_type}/{band}"] = describe(
+                    [r for r in group if r[key] == band]
+                )
     return summary
 
 
-def build_refiner(config: dict[str, Any], statistics: dict[str, list[float]]) -> Refiner:
+def build_refiner(
+    config: dict[str, Any], statistics: dict[str, list[float]]
+) -> Refiner:
     """Construct the refiner for a configuration."""
 
-    return Refiner(config["model"], len(config["schema"]["cameras"]), config["crop"]["size"], statistics)
+    return Refiner(
+        config["model"],
+        len(config["schema"]["cameras"]),
+        config["crop"]["size"],
+        statistics,
+    )
 
 
 def load_refiner(path: str | Path, device: str) -> tuple[Refiner, dict[str, Any]]:
@@ -445,7 +513,10 @@ def load_refiner(path: str | Path, device: str) -> tuple[Refiner, dict[str, Any]
 
 
 def make_refiner_loader(
-    config: dict[str, Any], split: str, samples: list[dict[str, Any]], windows: dict[str, dict[str, list[int]]]
+    config: dict[str, Any],
+    split: str,
+    samples: list[dict[str, Any]],
+    windows: dict[str, dict[str, list[int]]],
 ) -> DataLoader:
     """Data loader of one split (shuffled and augmented for training)."""
 
@@ -469,7 +540,12 @@ def flatten_refiner_summary(summary: dict[str, Any]) -> dict[str, float]:
     flat = {}
     for group in ("per_type", "per_misalignment"):
         for name, metrics in summary[group].items():
-            for key in ("offset_mean_mm", "offset_within_1mm", "plug_mean_mm", "rotation_mean_deg"):
+            for key in (
+                "offset_mean_mm",
+                "offset_within_1mm",
+                "plug_mean_mm",
+                "rotation_mean_deg",
+            ):
                 if key in metrics:
                     flat[f"validation/{name}/{key}"] = metrics[key]
     return flat
@@ -498,14 +574,23 @@ def train_refiner(config: dict[str, Any]) -> Path:
 
     samples = {split: select_samples(config, split) for split in ("train", "val")}
     images = config["images"]
-    windows = crop_windows(samples["train"], config["schema"]["cameras"], images["width"], images["height"], config["crop"]["size"])
+    windows = crop_windows(
+        samples["train"],
+        config["schema"]["cameras"],
+        images["width"],
+        images["height"],
+        config["crop"]["size"],
+    )
     statistics = target_statistics(samples["train"])
     train_loader = make_refiner_loader(config, "train", samples["train"], windows)
     validation_loader = make_refiner_loader(config, "val", samples["val"], windows)
     model = build_refiner(config, statistics).to(device)
     optimizer = torch.optim.AdamW(
         [
-            {"params": model.backbone_parameters(), "lr": optimization["backbone_learning_rate"]},
+            {
+                "params": model.backbone_parameters(),
+                "lr": optimization["backbone_learning_rate"],
+            },
             {"params": model.head_parameters(), "lr": optimization["learning_rate"]},
         ],
         weight_decay=optimization["weight_decay"],
@@ -525,11 +610,24 @@ def train_refiner(config: dict[str, Any]) -> Path:
     run_directory = Path(run["directory"]) / run["name"]
     checkpoints = run_directory / "checkpoints"
     checkpoints.mkdir(parents=True, exist_ok=True)
-    (run_directory / "config.json").write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
-    counts = {split: {t: sum(s["plug_type"] == t for s in samples[split]) for t in PLUG_TYPES} for split in samples}
+    (run_directory / "config.json").write_text(
+        json.dumps(config, indent=2) + "\n", encoding="utf-8"
+    )
+    counts = {
+        split: {t: sum(s["plug_type"] == t for s in samples[split]) for t in PLUG_TYPES}
+        for split in samples
+    }
     logging = config["logging"]
-    wandb.init(project=logging["wandb_project"], name=run["name"], mode=logging["wandb_mode"], dir=str(run_directory), config=config)
-    print(f"Refiner samples {counts}, crop windows {windows}, {total_steps} steps, run directory {run_directory}")
+    wandb.init(
+        project=logging["wandb_project"],
+        name=run["name"],
+        mode=logging["wandb_mode"],
+        dir=str(run_directory),
+        config=config,
+    )
+    print(
+        f"Refiner samples {counts}, crop windows {windows}, {total_steps} steps, run directory {run_directory}"
+    )
 
     history = run_directory / "history.jsonl"
     append_history(history, {"kind": "samples", "counts": counts, "windows": windows})
@@ -540,24 +638,39 @@ def train_refiner(config: dict[str, Any]) -> Path:
         model.train()
         started = time.perf_counter()
         for batch in train_loader:
-            batch = {key: value.to(device, non_blocking=True) for key, value in batch.items()}
+            batch = {
+                key: value.to(device, non_blocking=True) for key, value in batch.items()
+            }
             with torch.autocast(device.type, dtype=torch.bfloat16, enabled=bf16):
                 outputs = model(batch["crops"], batch["plug_index"])
             loss, values = refiner_losses(outputs, batch, config["loss"])
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
-            gradient_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), optimization["gradient_clip"])
+            gradient_norm = torch.nn.utils.clip_grad_norm_(
+                model.parameters(), optimization["gradient_clip"]
+            )
             optimizer.step()
             scheduler.step()
             step += 1
             if step % logging["log_every_steps"] == 0:
                 wandb.log(
-                    {**values, "train/gradient_norm": gradient_norm.item(), "train/learning_rate": scheduler.get_last_lr()[1], "train/epoch": epoch},
+                    {
+                        **values,
+                        "train/gradient_norm": gradient_norm.item(),
+                        "train/learning_rate": scheduler.get_last_lr()[1],
+                        "train/epoch": epoch,
+                    },
                     step=step,
                 )
                 append_history(
                     history,
-                    {"kind": "train", "epoch": epoch, "step": step, "learning_rate": scheduler.get_last_lr()[1], **values},
+                    {
+                        "kind": "train",
+                        "epoch": epoch,
+                        "step": step,
+                        "learning_rate": scheduler.get_last_lr()[1],
+                        **values,
+                    },
                 )
                 print(
                     f"epoch {epoch} step {step}/{total_steps} loss {values['loss/total']:.3f} offset {values['loss/offset_mm']:.2f} mm "
@@ -566,12 +679,35 @@ def train_refiner(config: dict[str, Any]) -> Path:
                     flush=True,
                 )
         summary = evaluate_refiner(model, validation_loader, device, bf16)
-        error = float(np.mean([summary["per_type"][t]["offset_mean_mm"] for t in PLUG_TYPES if summary["per_type"][t]["samples"]]))
-        wandb.log({**flatten_refiner_summary(summary), "validation/offset_mm": error}, step=step)
-        append_history(history, {"kind": "validation", "epoch": epoch, "step": step, "offset_mm": error, **summary})
+        error = float(
+            np.mean(
+                [
+                    summary["per_type"][t]["offset_mean_mm"]
+                    for t in PLUG_TYPES
+                    if summary["per_type"][t]["samples"]
+                ]
+            )
+        )
+        wandb.log(
+            {**flatten_refiner_summary(summary), "validation/offset_mm": error},
+            step=step,
+        )
+        append_history(
+            history,
+            {
+                "kind": "validation",
+                "epoch": epoch,
+                "step": step,
+                "offset_mm": error,
+                **summary,
+            },
+        )
         print(
             f"epoch {epoch} validation offset error "
-            + ", ".join(f"{t} {summary['per_type'][t].get('offset_mean_mm', float('nan')):.2f} mm" for t in PLUG_TYPES),
+            + ", ".join(
+                f"{t} {summary['per_type'][t].get('offset_mean_mm', float('nan')):.2f} mm"
+                for t in PLUG_TYPES
+            ),
             flush=True,
         )
         state = {
@@ -586,11 +722,20 @@ def train_refiner(config: dict[str, Any]) -> Path:
         if error < best:
             best = error
             torch.save(state, checkpoints / "best.pt")
-            (run_directory / "best_validation.json").write_text(json.dumps({"epoch": epoch, **summary}, indent=2) + "\n", encoding="utf-8")
+            (run_directory / "best_validation.json").write_text(
+                json.dumps({"epoch": epoch, **summary}, indent=2) + "\n",
+                encoding="utf-8",
+            )
         errors.append(error)
-        if should_stop(errors, optimization["early_stopping_patience"], optimization["early_stopping_min_delta"]):
+        if should_stop(
+            errors,
+            optimization["early_stopping_patience"],
+            optimization["early_stopping_min_delta"],
+        ):
             print(f"Early stop after epoch {epoch}: best {best:.3f} mm", flush=True)
-            append_history(history, {"kind": "early_stop", "epoch": epoch, "best_mm": best})
+            append_history(
+                history, {"kind": "early_stop", "epoch": epoch, "best_mm": best}
+            )
             break
     wandb.finish()
     return checkpoints / "best.pt"
@@ -612,13 +757,20 @@ class RefinerRuntime:
         self.config = metadata["config"]
         self.windows = metadata["windows"]
         self.cameras = self.config["schema"]["cameras"]
-        self.reference = self.cameras.index(self.config["selection"]["reference_camera"])
+        self.reference = self.cameras.index(
+            self.config["selection"]["reference_camera"]
+        )
         self.size = self.config["crop"]["size"]
         self.width = self.config["images"]["width"]
         self.height = self.config["images"]["height"]
 
     @torch.no_grad()
-    def predict(self, images: list[np.ndarray], base_from_camera: list[np.ndarray], plug_type: str) -> dict[str, np.ndarray]:
+    def predict(
+        self,
+        images: list[np.ndarray],
+        base_from_camera: list[np.ndarray],
+        plug_type: str,
+    ) -> dict[str, np.ndarray]:
         """Measure the port relative to the held plug from one observation.
 
         Args:
@@ -635,11 +787,19 @@ class RefinerRuntime:
 
         crops = []
         for camera, image in zip(self.cameras, images, strict=True):
-            pixels = torch.from_numpy(np.ascontiguousarray(image)).to(self.device).permute(2, 0, 1)[None].float()
+            pixels = (
+                torch.from_numpy(np.ascontiguousarray(image))
+                .to(self.device)
+                .permute(2, 0, 1)[None]
+                .float()
+            )
             resized = F.interpolate(pixels, size=(self.height, self.width), mode="area")
             stored = resized.round().clamp(0, 255).to(torch.uint8)[0]
             crops.append(crop(stored, self.windows[plug_type][camera], self.size))
-        outputs = self.model(torch.stack(crops)[None], torch.tensor([PLUG_TYPES.index(plug_type)], device=self.device))
+        outputs = self.model(
+            torch.stack(crops)[None],
+            torch.tensor([PLUG_TYPES.index(plug_type)], device=self.device),
+        )
         reference = np.asarray(base_from_camera[self.reference])
         rotation = reference[:3, :3]
         offset = rotation @ outputs["offset"][0].cpu().numpy()

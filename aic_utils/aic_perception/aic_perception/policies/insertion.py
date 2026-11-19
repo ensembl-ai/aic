@@ -49,7 +49,12 @@ from typing import Any
 
 import numpy as np
 from aic_control_interfaces.msg import MotionUpdate, TrajectoryGenerationMode
-from aic_model.policy import GetObservationCallback, MoveRobotCallback, Policy, SendFeedbackCallback
+from aic_model.policy import (
+    GetObservationCallback,
+    MoveRobotCallback,
+    Policy,
+    SendFeedbackCallback,
+)
 from aic_perception_interfaces.msg import SceneEstimate
 from aic_task_interfaces.msg import Task
 from geometry_msgs.msg import Point, Pose, Quaternion, Vector3, Wrench
@@ -62,7 +67,13 @@ from transforms3d._gohlketransforms import quaternion_slerp
 from transforms3d.quaternions import mat2quat, quat2mat
 
 from aic_perception.config import load_config
-from aic_perception.utils.geometry import from_xyz_quaternion_xyzw, from_xyz_rpy, invert, quaternion_xyzw, transform
+from aic_perception.utils.geometry import (
+    from_xyz_quaternion_xyzw,
+    from_xyz_rpy,
+    invert,
+    quaternion_xyzw,
+    transform,
+)
 from aic_perception.utils.motion import (
     PortAverage,
     funnel_target,
@@ -129,7 +140,9 @@ class PortInsertion(Policy):
         self.servo_settings = config["refiner"]
         self.sc_ranks = config["sc_rank_for_slot"]
         self.grasps = config["plug_grasp"]
-        self.trial_log = Path(config["logging"]["trial_directory"]) / time.strftime("trials_%Y%m%d_%H%M%S.jsonl")
+        self.trial_log = Path(config["logging"]["trial_directory"]) / time.strftime(
+            "trials_%Y%m%d_%H%M%S.jsonl"
+        )
         self.record: dict[str, Any] = {}
         self.started = 0.0
         self.spiral_radius = self.settings["spiral_max_radius_m"]
@@ -138,7 +151,9 @@ class PortInsertion(Policy):
         self.refiner = None
         checkpoint = Path(config["refiner"]["checkpoint"])
         if not config["refiner"]["enabled"]:
-            self.get_logger().info("Close-range refiner disabled (refiner.enabled); using the scene estimator alone")
+            self.get_logger().info(
+                "Close-range refiner disabled (refiner.enabled); using the scene estimator alone"
+            )
         elif checkpoint.is_file():
             from aic_perception.refinement import RefinerRuntime
 
@@ -174,7 +189,9 @@ class PortInsertion(Policy):
 
         try:
             if stamp is None:
-                message = self._parent_node._tf_buffer.lookup_transform(target, source, Time())
+                message = self._parent_node._tf_buffer.lookup_transform(
+                    target, source, Time()
+                )
             else:
                 message = self._parent_node._tf_buffer.lookup_transform(
                     target, source, Time.from_msg(stamp), Duration(seconds=0.5)
@@ -222,7 +239,9 @@ class PortInsertion(Policy):
             self.sleep_for(self.settings["control_period_s"])
         return np.mean(samples, axis=0)
 
-    def perceived_port(self, target_id: str, timeout: float | None = None) -> np.ndarray:
+    def perceived_port(
+        self, target_id: str, timeout: float | None = None
+    ) -> np.ndarray:
         """Median of fresh present estimates of one target, with level orientation.
 
         Args:
@@ -238,8 +257,12 @@ class PortInsertion(Policy):
         poses = []
         waited = 0.0
         while len(poses) < self.settings["estimate_count"]:
-            if waited > (self.settings["estimate_timeout_s"] if timeout is None else timeout):
-                raise InsertionFailed(f"No present estimate of {target_id}; is run_inference.py running?")
+            if waited > (
+                self.settings["estimate_timeout_s"] if timeout is None else timeout
+            ):
+                raise InsertionFailed(
+                    f"No present estimate of {target_id}; is run_inference.py running?"
+                )
             while self.estimates:
                 message = self.estimates.pop(0)
                 if stamp_seconds(message.header.stamp) < started:
@@ -247,7 +270,11 @@ class PortInsertion(Policy):
                 for target in message.targets:
                     if target.id == target_id and target.present:
                         p, q = target.pose.position, target.pose.orientation
-                        poses.append(from_xyz_quaternion_xyzw((p.x, p.y, p.z), (q.x, q.y, q.z, q.w)))
+                        poses.append(
+                            from_xyz_quaternion_xyzw(
+                                (p.x, p.y, p.z), (q.x, q.y, q.z, q.w)
+                            )
+                        )
                         self.get_logger().info(
                             f"Estimate {len(poses)}: presence {target.presence_probability:.3f}, "
                             f"confidence {target.confidence:.3f}"
@@ -276,15 +303,22 @@ class PortInsertion(Policy):
                 for target in message.targets:
                     if target.present:
                         p, q = target.pose.position, target.pose.orientation
-                        pose = from_xyz_quaternion_xyzw((p.x, p.y, p.z), (q.x, q.y, q.z, q.w))
+                        pose = from_xyz_quaternion_xyzw(
+                            (p.x, p.y, p.z), (q.x, q.y, q.z, q.w)
+                        )
                         poses.setdefault(target.id, []).append(pose)
             self.sleep_for(0.1)
         return {
-            target_id: transform(level_rotation(found[-1][:3, :3]), np.median([pose[:3, 3] for pose in found], axis=0))
+            target_id: transform(
+                level_rotation(found[-1][:3, :3]),
+                np.median([pose[:3, 3] for pose in found], axis=0),
+            )
             for target_id, found in poses.items()
         }
 
-    def expected_port(self, target_id: str, seen: dict[str, np.ndarray]) -> tuple[np.ndarray, str]:
+    def expected_port(
+        self, target_id: str, seen: dict[str, np.ndarray]
+    ) -> tuple[np.ndarray, str]:
         """Where the unseen target port should be, from what the start pose does see.
 
         Position: from the sibling port on the same card when it is seen
@@ -300,24 +334,37 @@ class PortInsertion(Policy):
 
         anchors = self.settings["search_anchors"]
         anchor = np.array(anchors[target_id])
-        board = seen["task_board"] if "task_board" in seen else self.perceived_port("task_board")
+        board = (
+            seen["task_board"]
+            if "task_board" in seen
+            else self.perceived_port("task_board")
+        )
         module, port_name = target_id.split("/")
-        sibling = f"{module}/{'sfp_port_1' if port_name == 'sfp_port_0' else 'sfp_port_0'}"
+        sibling = (
+            f"{module}/{'sfp_port_1' if port_name == 'sfp_port_0' else 'sfp_port_0'}"
+        )
         if sibling in seen and sibling in anchors:
-            position = seen[sibling][:3, 3] + board[:3, :3] @ (anchor - np.array(anchors[sibling]))
+            position = seen[sibling][:3, 3] + board[:3, :3] @ (
+                anchor - np.array(anchors[sibling])
+            )
             source = "sibling port"
         else:
             position = (board @ np.append(anchor, 1.0))[:3]
             source = "board"
         ports = [pose for name, pose in seen.items() if name in anchors]
         if ports:
-            nearest = min(ports, key=lambda pose: float(np.linalg.norm(pose[:2, 3] - position[:2])))
+            nearest = min(
+                ports,
+                key=lambda pose: float(np.linalg.norm(pose[:2, 3] - position[:2])),
+            )
             rotation = nearest[:3, :3]
         else:
             rotation = self.plug_pose()[:3, :3]
         return transform(rotation, position), source
 
-    def find_port(self, move_robot: MoveRobotCallback, task: Task, target_id: str) -> np.ndarray:
+    def find_port(
+        self, move_robot: MoveRobotCallback, task: Task, target_id: str
+    ) -> np.ndarray:
         """Perceive the target port, moving closer over the board when it is not seen at first.
 
         If the start pose yields no present estimate within ``search_after_s``,
@@ -339,19 +386,32 @@ class PortInsertion(Policy):
         settings = self.settings
         anchor = settings["search_anchors"].get(target_id)
         try:
-            return self.perceived_port(target_id, settings["search_after_s"] if anchor else None)
+            return self.perceived_port(
+                target_id, settings["search_after_s"] if anchor else None
+            )
         except InsertionFailed:
             if anchor is None:
                 raise
         seen = self.visible_targets(settings["search_snapshot_s"])
         expected, source = self.expected_port(target_id, seen)
-        board_x = (seen["task_board"] if "task_board" in seen else self.perceived_port("task_board"))[:3, 0]
-        self.get_logger().info(f"{target_id} not seen; expected from the {source}, searching")
+        board_x = (
+            seen["task_board"]
+            if "task_board" in seen
+            else self.perceived_port("task_board")
+        )[:3, 0]
+        self.get_logger().info(
+            f"{target_id} not seen; expected from the {source}, searching"
+        )
         self.log_truth(f"search expectation ({source})", task, port=expected)
         for index, (shift, height) in enumerate(settings["search_viewpoints"], start=1):
             point = expected[:3, 3] + shift * board_x
-            transit = transform(expected[:3, :3], point + np.array([0.0, 0.0, settings["search_transit_height_m"]]))
-            self.move_plug(move_robot, transit, settings["search_move_s"], mode="descent")
+            transit = transform(
+                expected[:3, :3],
+                point + np.array([0.0, 0.0, settings["search_transit_height_m"]]),
+            )
+            self.move_plug(
+                move_robot, transit, settings["search_move_s"], mode="descent"
+            )
             goal = transform(expected[:3, :3], point + np.array([0.0, 0.0, height]))
             self.move_plug(move_robot, goal, settings["search_move_s"], mode="descent")
             try:
@@ -361,12 +421,22 @@ class PortInsertion(Policy):
                 continue
             offset = float(np.linalg.norm(port[:2, 3] - expected[:2, 3]))
             if offset > settings["search_max_offset_m"]:
-                self.get_logger().info(f"Search viewpoint {index}: rejected a detection {1000 * offset:.1f} mm from expected")
+                self.get_logger().info(
+                    f"Search viewpoint {index}: rejected a detection {1000 * offset:.1f} mm from expected"
+                )
                 continue
-            self.note("search", viewpoint=index, source=source, expected=expected[:3, 3], port=port[:3, 3])
+            self.note(
+                "search",
+                viewpoint=index,
+                source=source,
+                expected=expected[:3, 3],
+                port=port[:3, 3],
+            )
             self.log_truth(f"found at search viewpoint {index}", task, port=port)
             return port
-        raise InsertionFailed(f"{target_id} not seen from the start pose or {index} search viewpoints")
+        raise InsertionFailed(
+            f"{target_id} not seen from the start pose or {index} search viewpoints"
+        )
 
     def resolve_target(self, task: Task) -> str:
         """Schema target ID of the task's port.
@@ -388,7 +458,9 @@ class PortInsertion(Policy):
         deadline = started + self.settings["estimate_timeout_s"]
         while messages < self.settings["estimate_count"]:
             if self.now() > deadline:
-                raise InsertionFailed("No scene estimates; is run_inference.py running?")
+                raise InsertionFailed(
+                    "No scene estimates; is run_inference.py running?"
+                )
             while self.estimates:
                 message = self.estimates.pop(0)
                 if stamp_seconds(message.header.stamp) < started:
@@ -398,9 +470,13 @@ class PortInsertion(Policy):
                     if target.id in votes and target.present:
                         votes[target.id] += 1
             self.sleep_for(0.1)
-        present = [target_id for target_id, count in votes.items() if 2 * count > messages]
+        present = [
+            target_id for target_id, count in votes.items() if 2 * count > messages
+        ]
         if not present:
-            raise InsertionFailed(f"No SC port is present in the estimates (votes {votes})")
+            raise InsertionFailed(
+                f"No SC port is present in the estimates (votes {votes})"
+            )
         if len(present) == 1:
             target_id = present[0]
         else:
@@ -408,10 +484,14 @@ class PortInsertion(Policy):
             self.get_logger().warning(
                 f"Two SC ports present; {task.target_module_name} assumed to be {target_id} (sc_rank_for_slot)"
             )
-        self.note("target", target_id=target_id, sc_votes=votes, sc_present=len(present))
+        self.note(
+            "target", target_id=target_id, sc_votes=votes, sc_present=len(present)
+        )
         return target_id
 
-    def measure(self, get_observation: GetObservationCallback, plug_type: str) -> dict[str, np.ndarray]:
+    def measure(
+        self, get_observation: GetObservationCallback, plug_type: str
+    ) -> dict[str, np.ndarray]:
         """Run the refiner on the next fresh observation.
 
         Returns:
@@ -436,10 +516,16 @@ class PortInsertion(Policy):
         images, poses = [], []
         for name in CAMERAS:
             image = getattr(observation, f"{name}_image")
-            images.append(np.frombuffer(image.data, np.uint8).reshape(image.height, image.width, 3))
+            images.append(
+                np.frombuffer(image.data, np.uint8).reshape(
+                    image.height, image.width, 3
+                )
+            )
             pose = self.lookup("base_link", image.header.frame_id, stamp)
             if pose is None:
-                raise InsertionFailed(f"No camera pose for {image.header.frame_id} at the image stamp")
+                raise InsertionFailed(
+                    f"No camera pose for {image.header.frame_id} at the image stamp"
+                )
             poses.append(pose)
         tcp = self.lookup("base_link", "gripper/tcp", stamp)
         if tcp is None:
@@ -472,7 +558,9 @@ class PortInsertion(Policy):
             self.sleep_for(dwell)
         return motion
 
-    def servo_measurement(self, get_observation: GetObservationCallback, plug_type: str) -> dict[str, Any]:
+    def servo_measurement(
+        self, get_observation: GetObservationCallback, plug_type: str
+    ) -> dict[str, Any]:
         """Median of ``refiner.samples`` refiner readings that agree with each other.
 
         Each reading gives the port from the image alone (the refiner's plug
@@ -489,13 +577,18 @@ class PortInsertion(Policy):
         settings = self.servo_settings
         for attempt in range(settings["measure_retries"] + 1):
             self.wait_until_still(settings["max_settle_s"], settings["settle_time_s"])
-            samples = [self.measure(get_observation, plug_type) for _ in range(settings["samples"])]
+            samples = [
+                self.measure(get_observation, plug_type)
+                for _ in range(settings["samples"])
+            ]
             ports = np.asarray([m["port"] for m in samples])
             port = np.median(ports, axis=0)
             spread = float(np.max(np.linalg.norm(ports[:, :2] - port[:2], axis=1)))
             if spread <= settings["consistency_m"]:
                 break
-            self.get_logger().info(f"Servo: readings spread {1000 * spread:.2f} mm; measuring again")
+            self.get_logger().info(
+                f"Servo: readings spread {1000 * spread:.2f} mm; measuring again"
+            )
         return {
             "port": port,
             "offset": np.median([m["offset"] for m in samples], axis=0),
@@ -506,7 +599,11 @@ class PortInsertion(Policy):
         }
 
     def servo(
-        self, move_robot: MoveRobotCallback, get_observation: GetObservationCallback, task: Task, port: np.ndarray
+        self,
+        move_robot: MoveRobotCallback,
+        get_observation: GetObservationCallback,
+        task: Task,
+        port: np.ndarray,
     ) -> tuple[np.ndarray, np.ndarray, bool]:
         """Align the plug over the port with the close-range refiner.
 
@@ -541,16 +638,24 @@ class PortInsertion(Policy):
                     f"Servo {iteration}: measured offset {1000 * lateral:.1f} mm is beyond the refiner's range; "
                     "keeping the scene estimate"
                 )
-                self.note("servo", iteration=iteration, offset_mm=1000 * offset, rejected=True)
+                self.note(
+                    "servo", iteration=iteration, offset_mm=1000 * offset, rejected=True
+                )
                 return refined, goal, False
             if iteration == 0 and settings["update_grasp"]:
                 measured = invert(tcp) @ np.append(reading["plug"], 1.0)
                 change = np.linalg.norm(measured[:3] - self.tcp_from_plug[:3, 3])
                 if change <= settings["max_grasp_change_m"]:
                     self.tcp_from_plug[:3, 3] = measured[:3]
-                    self.note("grasp_update", change_mm=1000 * change, tcp_from_plug=measured[:3])
+                    self.note(
+                        "grasp_update",
+                        change_mm=1000 * change,
+                        tcp_from_plug=measured[:3],
+                    )
                 else:
-                    self.get_logger().warning(f"Servo: ignored an implausible {1000 * change:.1f} mm grasp change")
+                    self.get_logger().warning(
+                        f"Servo: ignored an implausible {1000 * change:.1f} mm grasp change"
+                    )
             refined = port.copy()
             refined[:3, 3] = reading["port"]
             self.get_logger().info(
@@ -558,22 +663,41 @@ class PortInsertion(Policy):
                 f"{1000 * offset[2]:+.2f} mm vertically, yaw {np.degrees(yaw):+.2f} deg from the plug "
                 f"(readings within {1000 * reading['spread']:.2f} mm)"
             )
-            truth = self.log_truth(f"servo {iteration}", task, plug=tcp @ self.tcp_from_plug, port=refined)
-            self.note(
-                "servo", iteration=iteration, offset_mm=1000 * offset, yaw_deg=np.degrees(yaw),
-                spread_mm=1000 * reading["spread"], truth=truth,
+            truth = self.log_truth(
+                f"servo {iteration}", task, plug=tcp @ self.tcp_from_plug, port=refined
             )
-            if lateral < settings["tolerance_m"] and abs(np.degrees(yaw)) < settings["min_yaw_deg"]:
+            self.note(
+                "servo",
+                iteration=iteration,
+                offset_mm=1000 * offset,
+                yaw_deg=np.degrees(yaw),
+                spread_mm=1000 * reading["spread"],
+                truth=truth,
+            )
+            if (
+                lateral < settings["tolerance_m"]
+                and abs(np.degrees(yaw)) < settings["min_yaw_deg"]
+            ):
                 return refined, goal, True
             if iteration == settings["iterations"]:
                 break
             plug = reading["plug"]
             step = offset[:2] * min(1.0, settings["max_step_m"] / max(lateral, 1e-9))
-            turn = np.clip(np.degrees(yaw), -settings["max_yaw_deg"], settings["max_yaw_deg"])
+            turn = np.clip(
+                np.degrees(yaw), -settings["max_yaw_deg"], settings["max_yaw_deg"]
+            )
             turn = turn if abs(turn) >= settings["min_yaw_deg"] else 0.0
             current = tcp @ self.tcp_from_plug
-            rotation = level_rotation(from_xyz_rpy((0, 0, 0), (0.0, 0.0, np.radians(turn)))[:3, :3] @ current[:3, :3])
-            goal = transform(rotation, np.array([plug[0] + step[0], plug[1] + step[1], reading["port"][2] + height]))
+            rotation = level_rotation(
+                from_xyz_rpy((0, 0, 0), (0.0, 0.0, np.radians(turn)))[:3, :3]
+                @ current[:3, :3]
+            )
+            goal = transform(
+                rotation,
+                np.array(
+                    [plug[0] + step[0], plug[1] + step[1], reading["port"][2] + height]
+                ),
+            )
             self.move_plug(move_robot, goal, settings["move_duration_s"], mode="servo")
         return refined, goal, lateral < settings["tolerance_m"]
 
@@ -582,7 +706,13 @@ class PortInsertion(Policy):
     def note(self, phase: str, **values: Any) -> None:
         """Append one phase entry to the current trial record."""
 
-        self.record.setdefault("phases", []).append({"phase": phase, "time_s": round(self.now() - self.started, 3), **rounded(values)})
+        self.record.setdefault("phases", []).append(
+            {
+                "phase": phase,
+                "time_s": round(self.now() - self.started, 3),
+                **rounded(values),
+            }
+        )
 
     def write_record(self) -> None:
         """Append the finished trial record to the trial log."""
@@ -597,7 +727,9 @@ class PortInsertion(Policy):
 
     # Commanding --------------------------------------------------------------
 
-    def send(self, move_robot: MoveRobotCallback, plug_goal: np.ndarray, mode: str) -> None:
+    def send(
+        self, move_robot: MoveRobotCallback, plug_goal: np.ndarray, mode: str
+    ) -> None:
         """Command the TCP so the plug reaches ``plug_goal`` (plus tracking correction).
 
         Args:
@@ -613,16 +745,25 @@ class PortInsertion(Policy):
         x, y, z, w = quaternion_xyzw(tcp)
         move_robot(
             motion_update=MotionUpdate(
-                header=Header(frame_id="base_link", stamp=self._parent_node.get_clock().now().to_msg()),
+                header=Header(
+                    frame_id="base_link",
+                    stamp=self._parent_node.get_clock().now().to_msg(),
+                ),
                 pose=Pose(
-                    position=Point(x=float(tcp[0, 3]), y=float(tcp[1, 3]), z=float(tcp[2, 3])),
+                    position=Point(
+                        x=float(tcp[0, 3]), y=float(tcp[1, 3]), z=float(tcp[2, 3])
+                    ),
                     orientation=Quaternion(x=x, y=y, z=z, w=w),
                 ),
                 target_stiffness=diagonal(self.settings[f"{mode}_stiffness"]),
                 target_damping=diagonal(self.settings[f"{mode}_damping"]),
                 feedforward_wrench_at_tip=Wrench(force=Vector3(), torque=Vector3()),
-                wrench_feedback_gains_at_tip=list(self.settings[f"{mode}_feedback_gains"]),
-                trajectory_generation_mode=TrajectoryGenerationMode(mode=TrajectoryGenerationMode.MODE_POSITION),
+                wrench_feedback_gains_at_tip=list(
+                    self.settings[f"{mode}_feedback_gains"]
+                ),
+                trajectory_generation_mode=TrajectoryGenerationMode(
+                    mode=TrajectoryGenerationMode.MODE_POSITION
+                ),
             )
         )
 
@@ -634,7 +775,11 @@ class PortInsertion(Policy):
             raise InsertionFailed("Task time limit reached")
 
     def move_plug(
-        self, move_robot: MoveRobotCallback, goal: np.ndarray, duration: float, mode: str = "free"
+        self,
+        move_robot: MoveRobotCallback,
+        goal: np.ndarray,
+        duration: float,
+        mode: str = "free",
     ) -> None:
         """Interpolate the plug to ``goal``, then settle on it.
 
@@ -671,13 +816,19 @@ class PortInsertion(Policy):
             if np.linalg.norm(error) < settings["position_tolerance_m"]:
                 return
             correction = self.correction + settings["tracking_gain"] * error
-            self.correction = correction * min(1.0, settings["max_correction_m"] / max(float(np.linalg.norm(correction)), 1e-9))
+            self.correction = correction * min(
+                1.0,
+                settings["max_correction_m"]
+                / max(float(np.linalg.norm(correction)), 1e-9),
+            )
             self.send(move_robot, goal, mode)
         self.wait_until_still(settings["still_timeout_s"], 0.0)
 
     # Phases ------------------------------------------------------------------
 
-    def track_approach(self, move_robot: MoveRobotCallback, task: Task, port: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    def track_approach(
+        self, move_robot: MoveRobotCallback, task: Task, port: np.ndarray
+    ) -> tuple[np.ndarray, np.ndarray]:
         """Approach the port continuously while folding in every new estimate of it.
 
         The port estimate is a running average of the scene estimator's
@@ -699,12 +850,24 @@ class PortInsertion(Policy):
 
         settings = self.settings
         height = settings["pre_contact_height_m"]
-        tracker = PortAverage(port[:3, 3], settings["track_alpha"], settings["track_gate_m"], settings["track_reset_after"])
+        tracker = PortAverage(
+            port[:3, 3],
+            settings["track_alpha"],
+            settings["track_gate_m"],
+            settings["track_reset_after"],
+        )
         rotation = port[:3, :3]
         start = self.plug_pose()
         command = start[:3, 3].copy()
         start_q, goal_q = mat2quat(start[:3, :3]), mat2quat(rotation)
-        initial = max(float(np.linalg.norm(funnel_target(tracker.position, command, height) - command)), 1e-6)
+        initial = max(
+            float(
+                np.linalg.norm(
+                    funnel_target(tracker.position, command, height) - command
+                )
+            ),
+            1e-6,
+        )
         period = settings["control_period_s"]
         speed, arrived_at = 0.0, None
         started = self.now()
@@ -720,15 +883,29 @@ class PortInsertion(Policy):
                         tracker.update(np.array([p.x, p.y, p.z]))
             goal = funnel_target(tracker.position, command, height)
             command, speed = speed_limited_step(
-                command, goal, speed, settings["track_speed_m_s"], settings["track_accel_m_s2"], period
+                command,
+                goal,
+                speed,
+                settings["track_speed_m_s"],
+                settings["track_accel_m_s2"],
+                period,
             )
             remaining = float(np.linalg.norm(goal - command))
             fraction = min(1.0, max(0.0, 1.0 - remaining / initial))
-            self.send(move_robot, transform(quat2mat(quaternion_slerp(start_q, goal_q, fraction)), command), "descent")
+            self.send(
+                move_robot,
+                transform(
+                    quat2mat(quaternion_slerp(start_q, goal_q, fraction)), command
+                ),
+                "descent",
+            )
             self.step()
             if remaining == 0.0 and arrived_at is None:
                 arrived_at = self.now()
-            if arrived_at is not None and self.now() - arrived_at >= settings["track_dwell_s"]:
+            if (
+                arrived_at is not None
+                and self.now() - arrived_at >= settings["track_dwell_s"]
+            ):
                 break
         port = transform(rotation, tracker.position)
         pre_contact = port.copy()
@@ -738,15 +915,26 @@ class PortInsertion(Policy):
             f"{tracker.resets} resets, {self.now() - started:.1f} s"
         )
         self.note(
-            "track_approach", accepted=tracker.accepted, rejected=tracker.rejected, resets=tracker.resets,
-            port=tracker.position, duration_s=self.now() - started, arrived=arrived_at is not None,
+            "track_approach",
+            accepted=tracker.accepted,
+            rejected=tracker.rejected,
+            resets=tracker.resets,
+            port=tracker.position,
+            duration_s=self.now() - started,
+            arrived=arrived_at is not None,
         )
         self.log_truth("tracked port", task, port=port)
-        self.move_plug(move_robot, pre_contact, settings["track_final_move_s"], mode="descent")
+        self.move_plug(
+            move_robot, pre_contact, settings["track_final_move_s"], mode="descent"
+        )
         return port, pre_contact
 
     def refine(
-        self, move_robot: MoveRobotCallback, task: Task, port: np.ndarray, pre_contact: np.ndarray
+        self,
+        move_robot: MoveRobotCallback,
+        task: Task,
+        port: np.ndarray,
+        pre_contact: np.ndarray,
     ) -> tuple[np.ndarray, np.ndarray]:
         """Re-estimate the port from the coarse hover and move to pre-contact over it.
 
@@ -761,15 +949,21 @@ class PortInsertion(Policy):
         """
 
         try:
-            refined = self.perceived_port(self.target_id, self.settings["refine_timeout_s"])
+            refined = self.perceived_port(
+                self.target_id, self.settings["refine_timeout_s"]
+            )
         except InsertionFailed:
-            self.get_logger().info("Refine: no present estimate at the coarse hover; keeping the start estimate")
+            self.get_logger().info(
+                "Refine: no present estimate at the coarse hover; keeping the start estimate"
+            )
             self.move_plug(move_robot, pre_contact, 2.0, mode="descent")
             return port, pre_contact
         self.log_truth("re-estimate at coarse hover", task, port=refined)
         shift = np.linalg.norm(refined[:2, 3] - port[:2, 3])
         if shift > self.settings["max_refine_shift_m"]:
-            self.get_logger().info(f"Refine: rejected a {1000 * shift:.1f} mm shift as implausible")
+            self.get_logger().info(
+                f"Refine: rejected a {1000 * shift:.1f} mm shift as implausible"
+            )
             self.move_plug(move_robot, pre_contact, 2.0, mode="descent")
             return port, pre_contact
         self.get_logger().info(
@@ -824,7 +1018,11 @@ class PortInsertion(Policy):
             self.check_drift(plug)
             heights.append(plug[2, 3])
             recent = heights[-window:]
-            if index > grace and len(recent) == window and max(recent) - min(recent) < self.settings["stall_epsilon_m"]:
+            if (
+                index > grace
+                and len(recent) == window
+                and max(recent) - min(recent) < self.settings["stall_epsilon_m"]
+            ):
                 return plug, "stall"
         return self.plug_pose(), "timeout"
 
@@ -840,7 +1038,9 @@ class PortInsertion(Policy):
 
         drift = np.linalg.norm(plug[:2, 3] - self.port_xy)
         if drift > self.settings["max_lateral_drift_m"]:
-            raise InsertionFailed(f"Plug drifted {1000 * drift:.1f} mm sideways from the perceived port")
+            raise InsertionFailed(
+                f"Plug drifted {1000 * drift:.1f} mm sideways from the perceived port"
+            )
 
     def load(self, get_observation: GetObservationCallback) -> float:
         """Contact force magnitude relative to the pre-contact baseline."""
@@ -848,7 +1048,11 @@ class PortInsertion(Policy):
         return float(np.linalg.norm(self.force(get_observation) - self.bias))
 
     def spiral_search(
-        self, move_robot: MoveRobotCallback, get_observation: GetObservationCallback, contact: np.ndarray, entry_z: float
+        self,
+        move_robot: MoveRobotCallback,
+        get_observation: GetObservationCallback,
+        contact: np.ndarray,
+        entry_z: float,
     ) -> tuple[bool, np.ndarray]:
         """Archimedean spiral pressed into the surface until the plug drops.
 
@@ -867,8 +1071,15 @@ class PortInsertion(Policy):
         while True:
             offset = spiral_point(angle, self.settings["spiral_pitch_m"])
             if np.linalg.norm(offset) > self.spiral_radius:
-                self.get_logger().info("Spiral: reached the maximum radius without entry")
-                self.note("spiral", entered=False, radius_mm=1000 * self.spiral_radius, turns=angle / (2 * np.pi))
+                self.get_logger().info(
+                    "Spiral: reached the maximum radius without entry"
+                )
+                self.note(
+                    "spiral",
+                    entered=False,
+                    radius_mm=1000 * self.spiral_radius,
+                    turns=angle / (2 * np.pi),
+                )
                 return False, plug
             goal = center.copy()
             goal[:2, 3] += offset
@@ -881,14 +1092,27 @@ class PortInsertion(Policy):
                     f"Spiral: entered at radius {1000 * np.linalg.norm(offset):.1f} mm after "
                     f"{angle / (2 * np.pi):.1f} turns"
                 )
-                self.note("spiral", entered=True, radius_mm=1000 * np.linalg.norm(offset), turns=angle / (2 * np.pi))
+                self.note(
+                    "spiral",
+                    entered=True,
+                    radius_mm=1000 * np.linalg.norm(offset),
+                    turns=angle / (2 * np.pi),
+                )
                 return True, plug
             angle = spiral_step(
-                angle, self.settings["spiral_pitch_m"], self.settings["spiral_speed_m_s"], self.settings["control_period_s"]
+                angle,
+                self.settings["spiral_pitch_m"],
+                self.settings["spiral_speed_m_s"],
+                self.settings["control_period_s"],
             )
 
     def press_until_seated(
-        self, move_robot: MoveRobotCallback, get_observation: GetObservationCallback, entry: np.ndarray, reference_z: float, plug_type: str
+        self,
+        move_robot: MoveRobotCallback,
+        get_observation: GetObservationCallback,
+        entry: np.ndarray,
+        reference_z: float,
+        plug_type: str,
     ) -> float:
         """Press with soft axial impedance until seated, recovering from snags.
 
@@ -907,17 +1131,28 @@ class PortInsertion(Policy):
         mode, duration = "search", self.settings["insert_max_duration_s"]
         for attempt in range(self.settings["recovery_attempts"] + 1):
             plug, reason = self.ramp_descend(
-                move_robot, get_observation, start, extra, self.settings["insert_speed_m_s"], mode, duration, None
+                move_robot,
+                get_observation,
+                start,
+                extra,
+                self.settings["insert_speed_m_s"],
+                mode,
+                duration,
+                None,
             )
             depth = reference_z - plug[2, 3]
             if depth > self.settings["max_seat_depth_m"][plug_type]:
-                raise InsertionFailed(f"Plug went {1000 * depth:.1f} mm deep, deeper than the port: not in the port")
+                raise InsertionFailed(
+                    f"Plug went {1000 * depth:.1f} mm deep, deeper than the port: not in the port"
+                )
             if depth >= seat:
                 self.get_logger().info(f"Seated at {1000 * depth:.1f} mm ({reason})")
                 return depth
             if attempt == self.settings["recovery_attempts"]:
                 break
-            self.get_logger().info(f"Snag {attempt + 1} at {1000 * depth:.1f} mm ({reason}); retrying with soft rotation")
+            self.get_logger().info(
+                f"Snag {attempt + 1} at {1000 * depth:.1f} mm ({reason}); retrying with soft rotation"
+            )
             mode, duration = "recovery", self.settings["recovery_duration_s"]
             start = plug.copy()
             if attempt + 1 == self.settings["recovery_attempts_before_spiral"]:
@@ -925,20 +1160,34 @@ class PortInsertion(Policy):
                 lifted[2, 3] += self.settings["recovery_retract_m"]
                 self.move_plug(move_robot, lifted, 1.0, mode="descent")
                 surface, _ = self.ramp_descend(
-                    move_robot, get_observation, lifted, 2 * self.settings["recovery_retract_m"],
-                    self.settings["descent_speed_m_s"], "descent", self.settings["insert_max_duration_s"],
+                    move_robot,
+                    get_observation,
+                    lifted,
+                    2 * self.settings["recovery_retract_m"],
+                    self.settings["descent_speed_m_s"],
+                    "descent",
+                    self.settings["insert_max_duration_s"],
                     self.settings["contact_force_n"],
                 )
                 _, start = self.spiral_search(
-                    move_robot, get_observation, surface, plug[2, 3] - self.settings["unstick_margin_m"]
+                    move_robot,
+                    get_observation,
+                    surface,
+                    plug[2, 3] - self.settings["unstick_margin_m"],
                 )
-        self.get_logger().info(f"Not seated: {1000 * depth:.1f} mm of {1000 * seat:.1f} mm")
+        self.get_logger().info(
+            f"Not seated: {1000 * depth:.1f} mm of {1000 * seat:.1f} mm"
+        )
         return depth
 
     # Evaluation logging ------------------------------------------------------------
 
     def log_truth(
-        self, label: str, task: Task, plug: np.ndarray | None = None, port: np.ndarray | None = None
+        self,
+        label: str,
+        task: Task,
+        plug: np.ndarray | None = None,
+        port: np.ndarray | None = None,
     ) -> dict[str, float]:
         """Log errors against simulator ground truth when it is published.
 
@@ -957,22 +1206,35 @@ class PortInsertion(Policy):
 
         if not self.settings["log_ground_truth"]:
             return {}
-        entrance = self.lookup("base_link", f"task_board/{task.target_module_name}/{task.port_name}_link_entrance")
+        entrance = self.lookup(
+            "base_link",
+            f"task_board/{task.target_module_name}/{task.port_name}_link_entrance",
+        )
         if entrance is None:
             return {}
         values: dict[str, float] = {}
         if port is not None:
-            values["port_error_mm"] = 1000 * float(np.linalg.norm(port[:3, 3] - entrance[:3, 3]))
-            values["port_lateral_error_mm"] = 1000 * float(np.linalg.norm(port[:2, 3] - entrance[:2, 3]))
+            values["port_error_mm"] = 1000 * float(
+                np.linalg.norm(port[:3, 3] - entrance[:3, 3])
+            )
+            values["port_lateral_error_mm"] = 1000 * float(
+                np.linalg.norm(port[:2, 3] - entrance[:2, 3])
+            )
         true_plug = self.lookup("base_link", f"{task.cable_name}/{task.plug_name}_link")
         if true_plug is not None:
             offset = true_plug[:3, 3] - entrance[:3, 3]
             values["plug_off_axis_mm"] = 1000 * float(np.linalg.norm(offset[:2]))
             values["plug_above_entrance_mm"] = 1000 * float(offset[2])
             relative = entrance[:3, :3].T @ true_plug[:3, :3]
-            values["plug_rotation_deg"] = float(np.degrees(np.arccos(np.clip((np.trace(relative) - 1.0) / 2.0, -1.0, 1.0))))
+            values["plug_rotation_deg"] = float(
+                np.degrees(
+                    np.arccos(np.clip((np.trace(relative) - 1.0) / 2.0, -1.0, 1.0))
+                )
+            )
             if plug is not None:
-                values["plug_estimate_error_mm"] = 1000 * float(np.linalg.norm(plug[:3, 3] - true_plug[:3, 3]))
+                values["plug_estimate_error_mm"] = 1000 * float(
+                    np.linalg.norm(plug[:3, 3] - true_plug[:3, 3])
+                )
         text = {
             "port_error_mm": "perceived port error {:.2f} mm",
             "port_lateral_error_mm": "({:.2f} mm sideways)",
@@ -981,7 +1243,10 @@ class PortInsertion(Policy):
             "plug_rotation_deg": "true plug rotation {:.2f} deg from port;",
             "plug_estimate_error_mm": "plug estimate error {:.2f} mm",
         }
-        self.get_logger().info(f"[ground truth] {label}: " + " ".join(text[k].format(v) for k, v in values.items()))
+        self.get_logger().info(
+            f"[ground truth] {label}: "
+            + " ".join(text[k].format(v) for k, v in values.items())
+        )
         self.note(f"truth {label}", **values)
         return values
 
@@ -1018,7 +1283,15 @@ class PortInsertion(Policy):
             "refiner": self.refiner is not None,
             "task": {
                 key: getattr(task, key)
-                for key in ("cable_name", "plug_type", "plug_name", "port_type", "port_name", "target_module_name", "time_limit")
+                for key in (
+                    "cable_name",
+                    "plug_type",
+                    "plug_name",
+                    "port_type",
+                    "port_name",
+                    "target_module_name",
+                    "time_limit",
+                )
             },
             "phases": [],
         }
@@ -1029,11 +1302,20 @@ class PortInsertion(Policy):
             failure = str(error)
             self.get_logger().error(f"{type(self).__name__} stopped: {error}")
         finally:
-            self.record |= {"success": seated, "failure": failure, "duration_s": round(self.now() - self.started, 2)}
+            self.record |= {
+                "success": seated,
+                "failure": failure,
+                "duration_s": round(self.now() - self.started, 2),
+            }
             self.write_record()
         return bool(seated)
 
-    def run_phases(self, task: Task, get_observation: GetObservationCallback, move_robot: MoveRobotCallback) -> bool:
+    def run_phases(
+        self,
+        task: Task,
+        get_observation: GetObservationCallback,
+        move_robot: MoveRobotCallback,
+    ) -> bool:
         """Approach, servo, descend, search, and press; raises ``InsertionFailed`` on failure.
 
         Returns:
@@ -1043,8 +1325,12 @@ class PortInsertion(Policy):
 
         grasp = self.grasps.get(task.plug_type)
         if grasp is None:
-            raise InsertionFailed(f"No plug_grasp calibration for '{task.plug_type}'; run CalibratePlugGrasp")
-        self.tcp_from_plug = from_xyz_quaternion_xyzw(tuple(grasp["translation"]), tuple(grasp["quaternion_xyzw"]))
+            raise InsertionFailed(
+                f"No plug_grasp calibration for '{task.plug_type}'; run CalibratePlugGrasp"
+            )
+        self.tcp_from_plug = from_xyz_quaternion_xyzw(
+            tuple(grasp["translation"]), tuple(grasp["quaternion_xyzw"])
+        )
         settings = self.settings
         target_id = self.resolve_target(task)
         self.target_id = target_id
@@ -1061,7 +1347,9 @@ class PortInsertion(Policy):
             # re-estimate there, then down to pre-contact over the new estimate.
             coarse = port.copy()
             coarse[2, 3] += settings["coarse_height_m"]
-            self.move_plug(move_robot, coarse, settings["approach_duration_s"], mode="descent")
+            self.move_plug(
+                move_robot, coarse, settings["approach_duration_s"], mode="descent"
+            )
             self.log_truth("coarse hover", task, plug=self.plug_pose())
             pre_contact = port.copy()
             pre_contact[2, 3] += settings["pre_contact_height_m"]
@@ -1071,10 +1359,16 @@ class PortInsertion(Policy):
                 self.move_plug(move_robot, pre_contact, 2.0, mode="descent")
         self.log_truth("pre-contact", task, plug=self.plug_pose())
         if self.refiner is not None:
-            port, pre_contact, converged = self.servo(move_robot, get_observation, task, port)
+            port, pre_contact, converged = self.servo(
+                move_robot, get_observation, task, port
+            )
             if converged:
                 self.spiral_radius = self.servo_settings["spiral_max_radius_m"]
-            self.note("servo_result", converged=converged, spiral_radius_mm=1000 * self.spiral_radius)
+            self.note(
+                "servo_result",
+                converged=converged,
+                spiral_radius_mm=1000 * self.spiral_radius,
+            )
         entrance_z = port[2, 3]
         self.port_xy = port[:2, 3].copy()
         self.log_truth("aligned", task, plug=self.plug_pose(), port=port)
@@ -1083,27 +1377,47 @@ class PortInsertion(Policy):
 
         depth = settings["pre_contact_height_m"] + settings["descent_below_entrance_m"]
         contact, reason = self.ramp_descend(
-            move_robot, get_observation, pre_contact, depth, settings["descent_speed_m_s"], "descent",
-            depth / settings["descent_speed_m_s"] + 5.0, settings["contact_force_n"],
+            move_robot,
+            get_observation,
+            pre_contact,
+            depth,
+            settings["descent_speed_m_s"],
+            "descent",
+            depth / settings["descent_speed_m_s"] + 5.0,
+            settings["contact_force_n"],
         )
         inside = contact[2, 3] <= entrance_z - settings["inside_depth_m"]
         self.get_logger().info(
             f"Descent stopped ({reason}) {1000 * (contact[2, 3] - entrance_z):+.1f} mm from the entrance: "
             f"{'inside' if inside else 'on the surface'}"
         )
-        self.note("descent", reason=reason, height_above_entrance_mm=1000 * (contact[2, 3] - entrance_z), inside=inside)
+        self.note(
+            "descent",
+            reason=reason,
+            height_above_entrance_mm=1000 * (contact[2, 3] - entrance_z),
+            inside=inside,
+        )
         self.log_truth("contact", task, plug=contact)
         reference_z = entrance_z
         entry = contact
         if not inside:
             reference_z = contact[2, 3]
             entered, entry = self.spiral_search(
-                move_robot, get_observation, contact, contact[2, 3] - settings["entry_depth_m"]
+                move_robot,
+                get_observation,
+                contact,
+                contact[2, 3] - settings["entry_depth_m"],
             )
             self.log_truth("search", task, plug=entry)
             if not entered:
                 self.get_logger().info("Pressing from the last spiral position")
-        depth = self.press_until_seated(move_robot, get_observation, entry, reference_z, task.plug_type)
-        self.note("press", depth_mm=1000 * depth, seat_mm=1000 * settings["min_seat_depth_m"][task.plug_type])
+        depth = self.press_until_seated(
+            move_robot, get_observation, entry, reference_z, task.plug_type
+        )
+        self.note(
+            "press",
+            depth_mm=1000 * depth,
+            seat_mm=1000 * settings["min_seat_depth_m"][task.plug_type],
+        )
         self.log_truth("final", task, plug=self.plug_pose())
         return bool(depth >= settings["min_seat_depth_m"][task.plug_type])

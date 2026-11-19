@@ -36,7 +36,9 @@ def distance_band(scene: dict[str, Any]) -> int:
     return 1 if height >= MID_HEIGHT_M else 2 if height >= CLOSE_HEIGHT_M else 3
 
 
-def read_manifest(config: dict[str, Any], directory: str | Path | None = None) -> dict[str, Any]:
+def read_manifest(
+    config: dict[str, Any], directory: str | Path | None = None
+) -> dict[str, Any]:
     """Read a curated manifest and check it matches the configured schema.
 
     Args:

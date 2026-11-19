@@ -169,7 +169,11 @@ OVERLAY_SCHEMAS: dict[str, dict[str, Any]] = {
         "logging": {"wandb_project": str, "wandb_mode": str, "log_every_steps": int},
     },
     "infer": {
-        "logging": {"trial_directory": str, "estimate_directory": str, "log_estimates": bool},
+        "logging": {
+            "trial_directory": str,
+            "estimate_directory": str,
+            "log_estimates": bool,
+        },
         "refiner": {
             "enabled": bool,
             "checkpoint": str,
@@ -454,7 +458,9 @@ def validate_collect(config: dict[str, Any]) -> None:
     if collection["boards"] <= 0:
         raise ValueError("collection.boards must be positive")
     if collection["views_per_board"] < 1 + config["viewpoints"]["home_view"]:
-        raise ValueError("collection.views_per_board must leave at least one approach view")
+        raise ValueError(
+            "collection.views_per_board must leave at least one approach view"
+        )
     workers = collection["workers"]
     if isinstance(workers, str) and workers != "auto":
         raise ValueError("collection.workers must be a positive integer or 'auto'")
@@ -462,8 +468,14 @@ def validate_collect(config: dict[str, Any]) -> None:
         raise ValueError("collection.workers must be positive")
     if not 1 <= collection["jpeg_quality"] <= 100:
         raise ValueError("collection.jpeg_quality must be in [1, 100]")
-    if not 0.0 < collection["minimum_view_change"] <= collection["minimum_image_change"]:
-        raise ValueError("collection.minimum_view_change must be positive and at most minimum_image_change")
+    if (
+        not 0.0
+        < collection["minimum_view_change"]
+        <= collection["minimum_image_change"]
+    ):
+        raise ValueError(
+            "collection.minimum_view_change must be positive and at most minimum_image_change"
+        )
     docker = config["docker"]
     if docker["rendering"] not in RENDERING_MODES:
         raise ValueError(f"docker.rendering must be one of {RENDERING_MODES}")
@@ -504,7 +516,13 @@ def validate_collect(config: dict[str, Any]) -> None:
     lower, upper = interval(viewpoints["height_m"], "viewpoints.height_m")
     if lower <= 0.0:
         raise ValueError("viewpoints.height_m must keep the plug above the port")
-    for key in ("lateral_m", "lateral_per_height", "yaw_deg", "settle_timeout_s", "position_tolerance_m"):
+    for key in (
+        "lateral_m",
+        "lateral_per_height",
+        "yaw_deg",
+        "settle_timeout_s",
+        "position_tolerance_m",
+    ):
         if viewpoints[key] < 0.0:
             raise ValueError(f"viewpoints.{key} cannot be negative")
     if viewpoints["lateral_power"] <= 0.0:
@@ -514,18 +532,32 @@ def validate_collect(config: dict[str, Any]) -> None:
     if viewpoints["move_speed_m_s"] <= 0.0:
         raise ValueError("viewpoints.move_speed_m_s must be positive")
     for key in ("stiffness", "damping"):
-        if len(viewpoints[key]) != 6 or any(not matches(v, float) or v < 0.0 for v in viewpoints[key]):
+        if len(viewpoints[key]) != 6 or any(
+            not matches(v, float) or v < 0.0 for v in viewpoints[key]
+        ):
             raise ValueError(f"viewpoints.{key} must be six non-negative numbers")
     for plug_type in PLUG_TYPES:
         grasp = viewpoints["plug_grasp"].get(plug_type, {})
-        if set(grasp) != {"translation", "quaternion_xyzw"} or len(grasp["translation"]) != 3 or len(grasp["quaternion_xyzw"]) != 4:
-            raise ValueError(f"viewpoints.plug_grasp.{plug_type} needs a 3D translation and a quaternion_xyzw")
+        if (
+            set(grasp) != {"translation", "quaternion_xyzw"}
+            or len(grasp["translation"]) != 3
+            or len(grasp["quaternion_xyzw"]) != 4
+        ):
+            raise ValueError(
+                f"viewpoints.plug_grasp.{plug_type} needs a 3D translation and a quaternion_xyzw"
+            )
     cable = config["cable"]
-    if set(cable["types"]) != set(PLUG_TYPES) or set(cable["gripper_offsets"]) != set(PLUG_TYPES):
-        raise ValueError(f"cable.types and cable.gripper_offsets need exactly the plug types {PLUG_TYPES}")
+    if set(cable["types"]) != set(PLUG_TYPES) or set(cable["gripper_offsets"]) != set(
+        PLUG_TYPES
+    ):
+        raise ValueError(
+            f"cable.types and cable.gripper_offsets need exactly the plug types {PLUG_TYPES}"
+        )
     for plug_type, offsets in cable["gripper_offsets"].items():
         if not offsets or any(len(offset) != 3 for offset in offsets):
-            raise ValueError(f"cable.gripper_offsets.{plug_type} needs one or more 3D offsets")
+            raise ValueError(
+                f"cable.gripper_offsets.{plug_type} needs one or more 3D offsets"
+            )
     if len(cable["rpy"]) != 3:
         raise ValueError("cable.rpy needs three values")
     mounts = randomization["mounts"]
@@ -534,8 +566,13 @@ def validate_collect(config: dict[str, Any]) -> None:
     interval(mounts["translation"], "mounts.translation")
     interval(mounts["yaw_deg"], "mounts.yaw_deg")
     benchmark = config["benchmark"]
-    if not 0 <= benchmark["sc_trials"] <= benchmark["trials"] or not 0 < benchmark["batches"] <= benchmark["trials"]:
-        raise ValueError("benchmark needs 0 <= sc_trials <= trials and 0 < batches <= trials")
+    if (
+        not 0 <= benchmark["sc_trials"] <= benchmark["trials"]
+        or not 0 < benchmark["batches"] <= benchmark["trials"]
+    ):
+        raise ValueError(
+            "benchmark needs 0 <= sc_trials <= trials and 0 < batches <= trials"
+        )
 
 
 def validate_backbone(model: dict[str, Any]) -> None:
@@ -552,7 +589,9 @@ def validate_backbone(model: dict[str, Any]) -> None:
     if size and (len(size) != 2 or any(not isinstance(v, int) or v <= 0 for v in size)):
         raise ValueError("model.backbone_input must be [] or [width, height] in pixels")
     if model["backbone"] == "dinov2_vits14" and (not size or any(v % 14 for v in size)):
-        raise ValueError("model.backbone_input must be [width, height] in multiples of 14 for DINOv2")
+        raise ValueError(
+            "model.backbone_input must be [width, height] in multiples of 14 for DINOv2"
+        )
     if model["d_model"] % model["heads"]:
         raise ValueError("model.d_model must be divisible by model.heads")
     if not 0.0 <= model["dropout"] < 1.0:
@@ -578,8 +617,13 @@ def validate_optimization(config: dict[str, Any]) -> None:
             raise ValueError(f"optimization.{key} must be positive")
     if optimization["num_workers"] < 0 or optimization["warmup_steps"] < 0:
         raise ValueError("optimization.num_workers and warmup_steps cannot be negative")
-    if optimization["early_stopping_patience"] < 0 or optimization["early_stopping_min_delta"] < 0.0:
-        raise ValueError("optimization.early_stopping_patience and early_stopping_min_delta cannot be negative")
+    if (
+        optimization["early_stopping_patience"] < 0
+        or optimization["early_stopping_min_delta"] < 0.0
+    ):
+        raise ValueError(
+            "optimization.early_stopping_patience and early_stopping_min_delta cannot be negative"
+        )
     if any(value < 0.0 for value in config["loss"].values()):
         raise ValueError("Loss weights and tolerances cannot be negative")
     if config["logging"]["wandb_mode"] not in WANDB_MODES:
@@ -620,7 +664,9 @@ def validate_refine(config: dict[str, Any]) -> None:
         ValueError: On semantic violations.
     """
 
-    if not config["datasets"] or any(not isinstance(d, str) for d in config["datasets"]):
+    if not config["datasets"] or any(
+        not isinstance(d, str) for d in config["datasets"]
+    ):
         raise ValueError("datasets must list one or more curated dataset directories")
     selection = config["selection"]
     if selection["reference_camera"] not in config["schema"]["cameras"]:
@@ -660,19 +706,41 @@ def validate_infer(config: dict[str, Any]) -> None:
         raise ValueError("insertion.track_alpha must be in (0, 1]")
     for target_id, anchor in insertion["search_anchors"].items():
         if len(anchor) != 3 or any(not matches(v, float) for v in anchor):
-            raise ValueError(f"insertion.search_anchors.{target_id} must be three numbers")
+            raise ValueError(
+                f"insertion.search_anchors.{target_id} must be three numbers"
+            )
     viewpoints = insertion["search_viewpoints"]
-    if not viewpoints or any(len(v) != 2 or any(not matches(x, float) for x in v) for v in viewpoints):
-        raise ValueError("insertion.search_viewpoints must be a non-empty list of [shift_m, height_m] pairs")
-    for key in ("estimate_count", "baseline_samples", "recovery_attempts", "settle_corrections", "track_reset_after"):
+    if not viewpoints or any(
+        len(v) != 2 or any(not matches(x, float) for x in v) for v in viewpoints
+    ):
+        raise ValueError(
+            "insertion.search_viewpoints must be a non-empty list of [shift_m, height_m] pairs"
+        )
+    for key in (
+        "estimate_count",
+        "baseline_samples",
+        "recovery_attempts",
+        "settle_corrections",
+        "track_reset_after",
+    ):
         if insertion[key] <= 0:
             raise ValueError(f"insertion.{key} must be positive")
-    if not 0 <= insertion["recovery_attempts_before_spiral"] <= insertion["recovery_attempts"]:
-        raise ValueError("insertion.recovery_attempts_before_spiral must be in [0, recovery_attempts]")
+    if (
+        not 0
+        <= insertion["recovery_attempts_before_spiral"]
+        <= insertion["recovery_attempts"]
+    ):
+        raise ValueError(
+            "insertion.recovery_attempts_before_spiral must be in [0, recovery_attempts]"
+        )
     for key, value in insertion.items():
         if isinstance(value, float) and (not math.isfinite(value) or value <= 0.0):
             raise ValueError(f"insertion.{key} must be finite and positive")
-    for key in (f"{mode}_{kind}" for mode in IMPEDANCE_MODES for kind in ("stiffness", "damping", "feedback_gains")):
+    for key in (
+        f"{mode}_{kind}"
+        for mode in IMPEDANCE_MODES
+        for kind in ("stiffness", "damping", "feedback_gains")
+    ):
         values = insertion[key]
         if len(values) != 6 or any(not matches(v, float) or v < 0.0 for v in values):
             raise ValueError(f"insertion.{key} must be six non-negative numbers")
@@ -683,15 +751,25 @@ def validate_infer(config: dict[str, Any]) -> None:
     if insertion["contact_force_n"] >= insertion["max_force_n"]:
         raise ValueError("insertion.contact_force_n must stay below max_force_n")
     if insertion["max_force_n"] >= SCORING_FORCE_LIMIT_N:
-        raise ValueError(f"insertion.max_force_n must stay below the {SCORING_FORCE_LIMIT_N} N scoring limit")
+        raise ValueError(
+            f"insertion.max_force_n must stay below the {SCORING_FORCE_LIMIT_N} N scoring limit"
+        )
     if insertion["inside_depth_m"] >= insertion["descent_below_entrance_m"]:
-        raise ValueError("insertion.inside_depth_m must be shallower than descent_below_entrance_m")
+        raise ValueError(
+            "insertion.inside_depth_m must be shallower than descent_below_entrance_m"
+        )
     for key in ("insert_extra_depth_m", "min_seat_depth_m", "max_seat_depth_m"):
         if any(not matches(v, float) or v <= 0.0 for v in insertion[key].values()):
             raise ValueError(f"insertion.{key} values must be positive")
     for plug, grasp in config["plug_grasp"].items():
-        if set(grasp) != {"translation", "quaternion_xyzw"} or len(grasp["translation"]) != 3 or len(grasp["quaternion_xyzw"]) != 4:
-            raise ValueError(f"plug_grasp.{plug} needs a 3D translation and a quaternion_xyzw")
+        if (
+            set(grasp) != {"translation", "quaternion_xyzw"}
+            or len(grasp["translation"]) != 3
+            or len(grasp["quaternion_xyzw"]) != 4
+        ):
+            raise ValueError(
+                f"plug_grasp.{plug} needs a 3D translation and a quaternion_xyzw"
+            )
     refiner = config["refiner"]
     for key in ("iterations", "samples"):
         if refiner[key] <= 0:

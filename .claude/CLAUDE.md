@@ -29,6 +29,14 @@ training run, or design decision.
 - Git: only `origin` (ensembl-ai/aic) and only the working branch. Never
   push, PR, or merge against `parent` (intrinsic-dev/aic) or other branches.
   Commit a policy change only when it beats the current best benchmark.
+- Before every commit run the system `black --check .` from the repo root
+  (CI's Python style check uses the Ubuntu `black` package, default line
+  length 88) and the tests (`pixi run --locked python -m pytest -q` in
+  `aic_utils/aic_perception`).
+- Keep the dev environment clean: nothing outside the repo (no saved
+  patches, backups or scratch runners). Run logs and tooling go in the
+  gitignored `aic_utils/aic_perception/runs/`; `runs/benchmark/run_trials.sh
+  <trials.yaml> <log_dir>` runs one engine config and cleans up.
 - Keep answers short; give the immediate next step, not everything at once.
 
 ## Running the six-trial benchmark

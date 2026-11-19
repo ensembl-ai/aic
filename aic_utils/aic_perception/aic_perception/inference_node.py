@@ -84,10 +84,16 @@ class SceneEstimatorNode(Node):
         if config["logging"]["log_estimates"]:
             directory = Path(config["logging"]["estimate_directory"])
             directory.mkdir(parents=True, exist_ok=True)
-            self.estimate_log = (directory / time.strftime("estimates_%Y%m%d_%H%M%S.jsonl")).open("a", encoding="utf-8")
+            self.estimate_log = (
+                directory / time.strftime("estimates_%Y%m%d_%H%M%S.jsonl")
+            ).open("a", encoding="utf-8")
         self.get_logger().info(
             f"Loaded {settings['checkpoint']}: {self.runtime.describe()}"
-            + (f"; logging estimates to {self.estimate_log.name}" if self.estimate_log else "")
+            + (
+                f"; logging estimates to {self.estimate_log.name}"
+                if self.estimate_log
+                else ""
+            )
         )
 
     def store(self, message: Observation) -> None:

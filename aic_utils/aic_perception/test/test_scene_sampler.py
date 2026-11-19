@@ -90,8 +90,13 @@ def test_rail_order_names_renames_out_of_order_ports() -> None:
         "sc_port_1": {"translation": -0.04, "yaw": 0.0},
         "nic_card_mount_1": {"translation": 0.0, "yaw": 0.0},
     }
-    assert rail_order_names(swapped) == {"sc_port_1": "sc_port_0", "sc_port_0": "sc_port_1"}
-    assert rail_order_names({"sc_port_1": {"translation": -0.055, "yaw": 0.0}}) == {"sc_port_1": "sc_port_0"}
+    assert rail_order_names(swapped) == {
+        "sc_port_1": "sc_port_0",
+        "sc_port_0": "sc_port_1",
+    }
+    assert rail_order_names({"sc_port_1": {"translation": -0.055, "yaw": 0.0}}) == {
+        "sc_port_1": "sc_port_0"
+    }
 
 
 def test_tasks_match_aic_trials() -> None:
@@ -99,13 +104,17 @@ def test_tasks_match_aic_trials() -> None:
 
     from aic_perception.schema import BoardSchema
 
-    frames = {target.frame: target for target in BoardSchema.from_config(CONFIG).targets}
+    frames = {
+        target.frame: target for target in BoardSchema.from_config(CONFIG).targets
+    }
     scenes = [sample_scene(CONFIG, board_id) for board_id in range(2000)]
     sc_tasks = 0
     for scene in scenes:
         task, components = scene["task"], scene["components"]
         assert task["target_module_name"] in components
-        frame = f"task_board/{task['target_module_name']}/{task['port_name']}_link_entrance"
+        frame = (
+            f"task_board/{task['target_module_name']}/{task['port_name']}_link_entrance"
+        )
         target = frames[frame]
         if task["port_type"] == "sfp":
             assert task["target_module_name"] in NIC_MOUNTS
@@ -125,7 +134,9 @@ def test_xacro_arguments_list_every_slot() -> None:
     """Every slot is explicit, so xacro defaults never leak in."""
 
     arguments = xacro_arguments(sample_scene(CONFIG, 3))
-    for name in NIC_MOUNTS + SC_PORTS + ("sc_port_2", "sc_port_3", "sc_port_4") + FIXTURE_MOUNTS:
+    for name in (
+        NIC_MOUNTS + SC_PORTS + ("sc_port_2", "sc_port_3", "sc_port_4") + FIXTURE_MOUNTS
+    ):
         assert (
             sum(argument.startswith(f"{name}_present:=") for argument in arguments) == 1
         )
@@ -150,9 +161,13 @@ def test_approach_descends_toward_one_port(home_view: bool) -> None:
         assert (views[0] == {"mode": "home"}) == home_view
         close = views[1:] if home_view else views
         assert all(view["mode"] == "close" for view in close)
-        assert [view["height"] for view in close] == sorted((view["height"] for view in close), reverse=True)
+        assert [view["height"] for view in close] == sorted(
+            (view["height"] for view in close), reverse=True
+        )
         for view in close:
-            reach = settings["lateral_m"] + settings["lateral_per_height"] * view["height"]
+            reach = (
+                settings["lateral_m"] + settings["lateral_per_height"] * view["height"]
+            )
             assert math.hypot(*view["offset"]) <= reach + 1e-12
         heights += [view["height"] for view in close]
     assert low <= min(heights) and max(heights) <= high
@@ -169,7 +184,11 @@ def test_lateral_power_concentrates_views_near_the_port_axis() -> None:
         config["viewpoints"]["lateral_power"] = power
         config["viewpoints"]["on_axis_fraction"] = 0.0
         offsets = [
-            math.hypot(*view["offset"]) / (config["viewpoints"]["lateral_m"] + config["viewpoints"]["lateral_per_height"] * view["height"])
+            math.hypot(*view["offset"])
+            / (
+                config["viewpoints"]["lateral_m"]
+                + config["viewpoints"]["lateral_per_height"] * view["height"]
+            )
             for board_id in range(300)
             for view in sample_approach(config, board_id)
             if view["mode"] == "close"
@@ -185,6 +204,11 @@ def test_on_axis_views_have_zero_planned_offset() -> None:
 
     from aic_perception.scene_sampler import sample_approach
 
-    views = [view for board_id in range(500) for view in sample_approach(CONFIG, board_id) if view["mode"] == "close"]
+    views = [
+        view
+        for board_id in range(500)
+        for view in sample_approach(CONFIG, board_id)
+        if view["mode"] == "close"
+    ]
     on_axis = sum(view["offset"] == [0.0, 0.0] for view in views) / len(views)
     assert abs(on_axis - CONFIG["viewpoints"]["on_axis_fraction"]) < 0.03

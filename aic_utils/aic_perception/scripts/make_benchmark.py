@@ -25,7 +25,11 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from aic_perception.config import load_config  # noqa: E402
-from aic_perception.scene_sampler import FIXTURE_MOUNTS, NIC_MOUNTS, sample_scene  # noqa: E402
+from aic_perception.scene_sampler import (
+    FIXTURE_MOUNTS,
+    NIC_MOUNTS,
+    sample_scene,
+)  # noqa: E402
 
 ENGINE_SC_SLOT = {"sc_port_0": "sc_port_1", "sc_port_1": "sc_port_0"}
 PLUG_NAMES = {"sfp": "sfp_tip", "sc": "sc_tip"}
@@ -39,15 +43,31 @@ def entity(name: str, component: dict[str, float] | None) -> dict[str, Any]:
     return {
         "entity_present": True,
         "entity_name": name,
-        "entity_pose": {"translation": round(component["translation"], 5), "roll": 0.0, "pitch": 0.0, "yaw": round(component["yaw"], 5)},
+        "entity_pose": {
+            "translation": round(component["translation"], 5),
+            "roll": 0.0,
+            "pitch": 0.0,
+            "yaw": round(component["yaw"], 5),
+        },
     }
 
 
-def engine_trial(config: dict[str, Any], scene: dict[str, Any], rng: np.random.Generator) -> dict[str, Any]:
+def engine_trial(
+    config: dict[str, Any], scene: dict[str, Any], rng: np.random.Generator
+) -> dict[str, Any]:
     """Convert a sampled scene into one aic_engine trial."""
 
     components = scene["components"]
-    board = {"pose": {"x": round(scene["board"]["x"], 5), "y": round(scene["board"]["y"], 5), "z": scene["board"]["z"], "roll": 0.0, "pitch": 0.0, "yaw": round(scene["board"]["yaw"], 5)}}
+    board = {
+        "pose": {
+            "x": round(scene["board"]["x"], 5),
+            "y": round(scene["board"]["y"], 5),
+            "z": scene["board"]["z"],
+            "roll": 0.0,
+            "pitch": 0.0,
+            "yaw": round(scene["board"]["yaw"], 5),
+        }
+    }
     for index, mount in enumerate(NIC_MOUNTS):
         board[f"nic_rail_{index}"] = entity(f"nic_card_{index}", components.get(mount))
     for rank_name, slot in ENGINE_SC_SLOT.items():
@@ -63,13 +83,22 @@ def engine_trial(config: dict[str, Any], scene: dict[str, Any], rng: np.random.G
     x, y, z = offsets[int(rng.integers(len(offsets)))]
     roll, pitch, yaw = cable["rpy"]
     cable_name = f"cable_{int(plug_type == 'sc')}"
-    target = ENGINE_SC_SLOT[task["target_module_name"]] if plug_type == "sc" else task["target_module_name"]
+    target = (
+        ENGINE_SC_SLOT[task["target_module_name"]]
+        if plug_type == "sc"
+        else task["target_module_name"]
+    )
     return {
         "scene": {
             "task_board": board,
             "cables": {
                 cable_name: {
-                    "pose": {"gripper_offset": {"x": x, "y": y, "z": z}, "roll": roll, "pitch": pitch, "yaw": yaw},
+                    "pose": {
+                        "gripper_offset": {"x": x, "y": y, "z": z},
+                        "roll": roll,
+                        "pitch": pitch,
+                        "yaw": yaw,
+                    },
                     "attach_cable_to_gripper": True,
                     "cable_type": cable["types"][plug_type],
                 }
@@ -96,7 +125,10 @@ def main() -> None:
     config = load_config("collect")
     settings = config["benchmark"]
     config["collection"]["seed"] = settings["seed"]
-    quota = {"sc": settings["sc_trials"], "sfp": settings["trials"] - settings["sc_trials"]}
+    quota = {
+        "sc": settings["sc_trials"],
+        "sfp": settings["trials"] - settings["sc_trials"],
+    }
     rng = np.random.default_rng(settings["seed"])
     chosen: dict[str, list[dict[str, Any]]] = {"sc": [], "sfp": []}
     board_id = 0
@@ -114,12 +146,16 @@ def main() -> None:
         trials = {}
         for index in range(batch, len(ordered), settings["batches"]):
             scene = ordered[index]
-            trials[f"bench_{index:02d}_{scene['task']['port_type']}"] = engine_trial(config, scene, rng)
+            trials[f"bench_{index:02d}_{scene['task']['port_type']}"] = engine_trial(
+                config, scene, rng
+            )
         output = {**template, "trials": trials}
         path = directory / f"batch_{batch}.yaml"
         path.write_text(yaml.safe_dump(output, sort_keys=False))
         kinds = [name.rsplit("_", 1)[1] for name in trials]
-        print(f"{path}: {len(trials)} trials ({kinds.count('sfp')} SFP, {kinds.count('sc')} SC)")
+        print(
+            f"{path}: {len(trials)} trials ({kinds.count('sfp')} SFP, {kinds.count('sc')} SC)"
+        )
 
 
 if __name__ == "__main__":

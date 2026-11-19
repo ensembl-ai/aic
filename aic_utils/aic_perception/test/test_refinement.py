@@ -8,7 +8,13 @@ import numpy as np
 import torch
 
 from aic_perception.config import load_config
-from aic_perception.refinement import Refiner, crop, crop_windows, label_sample, refiner_losses
+from aic_perception.refinement import (
+    Refiner,
+    crop,
+    crop_windows,
+    label_sample,
+    refiner_losses,
+)
 from aic_perception.utils.geometry import from_xyz_rpy, invert
 
 CONFIG = load_config("refine")
@@ -23,7 +29,10 @@ def synthetic_label(plug: np.ndarray, port: np.ndarray, camera: np.ndarray) -> d
         "scene": {"viewpoint": {"mode": "close", "height": 0.02}, "target": "port"},
         "held_plug": {"plug_type": "sfp", "base_from_plug": plug.tolist()},
         "targets": {"port": {"spawned": True, "base_from_target": port.tolist()}},
-        "cameras": {name: {"base_from_camera": camera.tolist(), "intrinsics": intrinsics} for name in CAMERAS},
+        "cameras": {
+            name: {"base_from_camera": camera.tolist(), "intrinsics": intrinsics}
+            for name in CAMERAS
+        },
     }
 
 
@@ -40,13 +49,18 @@ def test_targets_are_expressed_in_the_reference_camera() -> None:
     turned = rotation @ sample["rotation"]
     axis = turned / np.linalg.norm(turned)
     angle = np.linalg.norm(turned)
-    skew = np.array([[0, -axis[2], axis[1]], [axis[2], 0, -axis[0]], [-axis[1], axis[0], 0]])
+    skew = np.array(
+        [[0, -axis[2], axis[1]], [axis[2], 0, -axis[0]], [-axis[1], axis[0], 0]]
+    )
     rodrigues = np.eye(3) + math.sin(angle) * skew + (1 - math.cos(angle)) * skew @ skew
     assert np.allclose(rodrigues @ plug[:3, :3], port[:3, :3], atol=1e-6)
     assert math.isclose(sample["height"], 0.02, abs_tol=1e-9)
     assert math.isclose(sample["lateral"], math.hypot(0.005, 0.004), abs_tol=1e-9)
     point = invert(camera) @ np.append(plug[:3, 3], 1.0)
-    assert np.allclose(sample["pixels"]["center"], [500 * point[0] / point[2] + 288, 500 * point[1] / point[2] + 256])
+    assert np.allclose(
+        sample["pixels"]["center"],
+        [500 * point[0] / point[2] + 288, 500 * point[1] / point[2] + 256],
+    )
 
 
 def test_samples_without_a_plug_or_at_home_are_skipped() -> None:
@@ -72,15 +86,30 @@ def test_crop_windows_centre_the_plug_and_stay_inside() -> None:
     assert windows["sfp"]["center"] == [250, 210]
     image = torch.zeros(3, 512, 576, dtype=torch.uint8)
     assert crop(image, [476, 412], 100).shape == (3, 100, 100)
-    tall = [{"plug_type": t, "pixels": {name: [300.0, 500.0] for name in CAMERAS}} for t in ("sfp", "sc")]
+    tall = [
+        {"plug_type": t, "pixels": {name: [300.0, 500.0] for name in CAMERAS}}
+        for t in ("sfp", "sc")
+    ]
     assert crop_windows(tall, CAMERAS, 576, 512, 100)["sc"]["left"] == [250, 412]
 
 
 def test_refiner_forward_and_backward() -> None:
     """The refiner trains end to end and outputs metric targets."""
 
-    settings = dict(CONFIG["model"], pretrained_backbone=False, backbone_input=[56, 56], d_model=32, heads=4, feedforward=64)
-    statistics = {"offset_mean": [0.0, -0.015, 0.02], "offset_std": [0.01] * 3, "plug_mean": [0.0, 0.03, 0.27], "plug_std": [0.01] * 3}
+    settings = dict(
+        CONFIG["model"],
+        pretrained_backbone=False,
+        backbone_input=[56, 56],
+        d_model=32,
+        heads=4,
+        feedforward=64,
+    )
+    statistics = {
+        "offset_mean": [0.0, -0.015, 0.02],
+        "offset_std": [0.01] * 3,
+        "plug_mean": [0.0, 0.03, 0.27],
+        "plug_std": [0.01] * 3,
+    }
     model = Refiner(settings, len(CAMERAS), 56, statistics)
     batch = {
         "crops": torch.randint(0, 255, (2, len(CAMERAS), 3, 56, 56), dtype=torch.uint8),

@@ -171,7 +171,9 @@ class ErrorAccumulator:
             visible = present[:, query]
             self.translation[query] += translation[visible, query].tolist()
             self.rotation[query] += rotation[visible, query].tolist()
-            self.band_of[query] += [band for band, seen in zip(bands, visible.tolist()) if seen]
+            self.band_of[query] += [
+                band for band, seen in zip(bands, visible.tolist()) if seen
+            ]
             self.presence_correct[query] += correct[query]
             self.true_positive[query] += true_positive[query]
             self.false_positive[query] += false_positive[query]
@@ -192,7 +194,9 @@ class ErrorAccumulator:
                 {
                     "confidence": f"{low:.2f}-{min(high, 1.0):.2f}",
                     "samples": int(inside.sum()),
-                    "accurate_fraction": accurate[inside].mean().item() if inside.any() else float("nan"),
+                    "accurate_fraction": (
+                        accurate[inside].mean().item() if inside.any() else float("nan")
+                    ),
                 }
             )
         return table
@@ -214,7 +218,10 @@ class ErrorAccumulator:
             }
 
         per_target = {
-            target_id: {**describe(self.translation[query], self.rotation[query]), **presence([query])}
+            target_id: {
+                **describe(self.translation[query], self.rotation[query]),
+                **presence([query]),
+            }
             for query, target_id in enumerate(self.target_ids)
         }
         per_type, per_band = {}, {band: {} for band in self.bands}
@@ -229,8 +236,18 @@ class ErrorAccumulator:
             }
             for index, band in enumerate(self.bands):
                 per_band[band][target_type] = describe(
-                    [e for q in queries for e, b in zip(self.translation[q], self.band_of[q]) if b == index],
-                    [e for q in queries for e, b in zip(self.rotation[q], self.band_of[q]) if b == index],
+                    [
+                        e
+                        for q in queries
+                        for e, b in zip(self.translation[q], self.band_of[q])
+                        if b == index
+                    ],
+                    [
+                        e
+                        for q in queries
+                        for e, b in zip(self.rotation[q], self.band_of[q])
+                        if b == index
+                    ],
                 )
         return {
             "scenes": self.count,

@@ -167,7 +167,9 @@ def evaluate(
     """
 
     model.eval()
-    errors = ErrorAccumulator(schema.ids, [target.type for target in schema.targets], tolerance)
+    errors = ErrorAccumulator(
+        schema.ids, [target.type for target in schema.targets], tolerance
+    )
     for batch in loader:
         batch = to_device(batch, device)
         with torch.autocast(device.type, dtype=torch.bfloat16, enabled=bf16):
@@ -206,7 +208,9 @@ def flatten_summary(summary: dict[str, Any], prefix: str) -> dict[str, float]:
     for band, types in summary["per_band"].items():
         for kind, metrics in types.items():
             if metrics["samples"]:
-                flat[f"{prefix}/{band}/{kind}/translation_mean_mm"] = metrics["translation_mean_mm"]
+                flat[f"{prefix}/{band}/{kind}/translation_mean_mm"] = metrics[
+                    "translation_mean_mm"
+                ]
     return flat
 
 
@@ -214,7 +218,9 @@ def confidence_tolerance(config: dict[str, Any]) -> tuple[float, float]:
     """Translation (m) and rotation (rad) tolerance that the confidence predicts."""
 
     loss = config["loss"]
-    return loss["confidence_translation_m"], math.radians(loss["confidence_rotation_deg"])
+    return loss["confidence_translation_m"], math.radians(
+        loss["confidence_rotation_deg"]
+    )
 
 
 def train(config: dict[str, Any]) -> Path:
@@ -320,7 +326,13 @@ def train(config: dict[str, Any]) -> Path:
                 )
                 append_history(
                     history,
-                    {"kind": "train", "epoch": epoch, "step": step, "learning_rate": scheduler.get_last_lr()[1], **values},
+                    {
+                        "kind": "train",
+                        "epoch": epoch,
+                        "step": step,
+                        "learning_rate": scheduler.get_last_lr()[1],
+                        **values,
+                    },
                 )
                 print(
                     f"epoch {epoch} step {step}/{total_steps} loss {values['loss/total']:.4f} "
@@ -328,7 +340,9 @@ def train(config: dict[str, Any]) -> Path:
                     flush=True,
                 )
 
-        summary = evaluate(model, validation_loader, schema, device, bf16, confidence_tolerance(config))
+        summary = evaluate(
+            model, validation_loader, schema, device, bf16, confidence_tolerance(config)
+        )
         error = port_error_mm(summary)
         wandb.log(
             {
@@ -339,7 +353,13 @@ def train(config: dict[str, Any]) -> Path:
         )
         append_history(
             history,
-            {"kind": "validation", "epoch": epoch, "step": step, "port_error_mm": error, **{k: v for k, v in summary.items() if k != "per_target"}},
+            {
+                "kind": "validation",
+                "epoch": epoch,
+                "step": step,
+                "port_error_mm": error,
+                **{k: v for k, v in summary.items() if k != "per_target"},
+            },
         )
         print(f"epoch {epoch} validation port error {error:.2f} mm", flush=True)
         state = {
@@ -358,9 +378,18 @@ def train(config: dict[str, Any]) -> Path:
                 encoding="utf-8",
             )
         errors.append(error)
-        if should_stop(errors, optimization["early_stopping_patience"], optimization["early_stopping_min_delta"]):
-            print(f"Early stop after epoch {epoch}: no {optimization['early_stopping_min_delta']} mm gain in {optimization['early_stopping_patience']} epochs; best {best:.2f} mm", flush=True)
-            append_history(history, {"kind": "early_stop", "epoch": epoch, "best_mm": best})
+        if should_stop(
+            errors,
+            optimization["early_stopping_patience"],
+            optimization["early_stopping_min_delta"],
+        ):
+            print(
+                f"Early stop after epoch {epoch}: no {optimization['early_stopping_min_delta']} mm gain in {optimization['early_stopping_patience']} epochs; best {best:.2f} mm",
+                flush=True,
+            )
+            append_history(
+                history, {"kind": "early_stop", "epoch": epoch, "best_mm": best}
+            )
             break
     wandb.finish()
     return checkpoints / "best.pt"

@@ -76,8 +76,12 @@ class SceneEstimator(nn.Module):
 
         super().__init__()
         d_model = model_config["d_model"]
-        self.backbone = build_backbone(model_config).to(memory_format=torch.channels_last)
-        self.input_projection = nn.Conv2d(self.backbone.channels, d_model, kernel_size=1)
+        self.backbone = build_backbone(model_config).to(
+            memory_format=torch.channels_last
+        )
+        self.input_projection = nn.Conv2d(
+            self.backbone.channels, d_model, kernel_size=1
+        )
         self.ray_embedding = nn.Sequential(
             nn.Linear(6, d_model), nn.GELU(), nn.Linear(d_model, d_model)
         )

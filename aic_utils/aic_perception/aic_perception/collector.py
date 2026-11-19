@@ -131,9 +131,13 @@ class SceneCollector(Node):
             Observation, "/observations", self.store_observation, 2
         )
         self.create_subscription(TFMessage, "/scoring/tf", self.store_ground_truth, 20)
-        self.motion_publisher = self.create_publisher(MotionUpdate, "/aic_controller/pose_commands", 10)
+        self.motion_publisher = self.create_publisher(
+            MotionUpdate, "/aic_controller/pose_commands", 10
+        )
         self.tcp_from_plug = {
-            plug_type: from_xyz_quaternion_xyzw(tuple(grasp["translation"]), tuple(grasp["quaternion_xyzw"]))
+            plug_type: from_xyz_quaternion_xyzw(
+                tuple(grasp["translation"]), tuple(grasp["quaternion_xyzw"])
+            )
             for plug_type, grasp in config["viewpoints"]["plug_grasp"].items()
         }
         self.held: dict[str, Any] = {}
@@ -266,19 +270,32 @@ class SceneCollector(Node):
 
         cable = self.config["cable"]
         world_from_tcp = matrix_from_transform(
-            self.tf_buffer.lookup_transform("world", "gripper/tcp", Time(), Duration(seconds=5.0)).transform
+            self.tf_buffer.lookup_transform(
+                "world", "gripper/tcp", Time(), Duration(seconds=5.0)
+            ).transform
         )
         self.call(self.delete_client, DeleteEntity.Request(entity=CABLE_NAME))
         sdf = subprocess.run(
-            ["xacro", cable["xacro"], "attach_cable_to_gripper:=true", f"cable_type:={cable_type}"],
+            [
+                "xacro",
+                cable["xacro"],
+                "attach_cable_to_gripper:=true",
+                f"cable_type:={cable_type}",
+            ],
             check=True,
             capture_output=True,
             text=True,
         ).stdout
-        request = SpawnEntity.Request(name=CABLE_NAME, allow_renaming=False, resource_string=sdf)
+        request = SpawnEntity.Request(
+            name=CABLE_NAME, allow_renaming=False, resource_string=sdf
+        )
         request.initial_pose.header.frame_id = "world"
         position = world_from_tcp[:3, 3] + np.asarray(gripper_offset)
-        request.initial_pose.pose.position.x, request.initial_pose.pose.position.y, request.initial_pose.pose.position.z = map(float, position)
+        (
+            request.initial_pose.pose.position.x,
+            request.initial_pose.pose.position.y,
+            request.initial_pose.pose.position.z,
+        ) = map(float, position)
         w, x, y, z = euler2quat(*cable["rpy"], axes="sxyz")
         request.initial_pose.pose.orientation.x = float(x)
         request.initial_pose.pose.orientation.y = float(y)
@@ -288,7 +305,11 @@ class SceneCollector(Node):
         if response.result.result != Result.RESULT_OK:
             raise RuntimeError(f"Cable spawn failed: {response.result.error_message}")
         settle_until = self.sim_time() + cable["settle_s"]
-        self.wait_until(lambda: self.sim_time() >= settle_until, self.timing["observation_timeout_s"], "cable to settle")
+        self.wait_until(
+            lambda: self.sim_time() >= settle_until,
+            self.timing["observation_timeout_s"],
+            "cable to settle",
+        )
 
     def command_tcp(self, goal: np.ndarray) -> None:
         """Publish one Cartesian TCP target to the AIC controller."""
@@ -297,16 +318,23 @@ class SceneCollector(Node):
         x, y, z, w = quaternion_xyzw(goal)
         self.motion_publisher.publish(
             MotionUpdate(
-                header=Header(frame_id=self.schema.base_frame, stamp=self.get_clock().now().to_msg()),
+                header=Header(
+                    frame_id=self.schema.base_frame,
+                    stamp=self.get_clock().now().to_msg(),
+                ),
                 pose=Pose(
-                    position=Point(x=float(goal[0, 3]), y=float(goal[1, 3]), z=float(goal[2, 3])),
+                    position=Point(
+                        x=float(goal[0, 3]), y=float(goal[1, 3]), z=float(goal[2, 3])
+                    ),
                     orientation=Quaternion(x=x, y=y, z=z, w=w),
                 ),
                 target_stiffness=np.diag(viewpoints["stiffness"]).flatten().tolist(),
                 target_damping=np.diag(viewpoints["damping"]).flatten().tolist(),
                 feedforward_wrench_at_tip=Wrench(force=Vector3(), torque=Vector3()),
                 wrench_feedback_gains_at_tip=[0.0] * 6,
-                trajectory_generation_mode=TrajectoryGenerationMode(mode=TrajectoryGenerationMode.MODE_POSITION),
+                trajectory_generation_mode=TrajectoryGenerationMode(
+                    mode=TrajectoryGenerationMode.MODE_POSITION
+                ),
             )
         )
 
@@ -329,13 +357,24 @@ class SceneCollector(Node):
             target[:3, 3] = (1.0 - fraction) * start[:3, 3] + fraction * goal[:3, 3]
             self.command_tcp(target)
             until = self.sim_time() + period
-            self.wait_until(lambda: self.sim_time() >= until, self.timing["observation_timeout_s"], "the arm to move")
+            self.wait_until(
+                lambda: self.sim_time() >= until,
+                self.timing["observation_timeout_s"],
+                "the arm to move",
+            )
         deadline = self.sim_time() + viewpoints["settle_timeout_s"]
         while self.sim_time() < deadline:
             self.command_tcp(goal)
             until = self.sim_time() + period
-            self.wait_until(lambda: self.sim_time() >= until, self.timing["observation_timeout_s"], "the arm to settle")
-            if np.linalg.norm(self.current_tcp()[:3, 3] - goal[:3, 3]) < viewpoints["position_tolerance_m"]:
+            self.wait_until(
+                lambda: self.sim_time() >= until,
+                self.timing["observation_timeout_s"],
+                "the arm to settle",
+            )
+            if (
+                np.linalg.norm(self.current_tcp()[:3, 3] - goal[:3, 3])
+                < viewpoints["position_tolerance_m"]
+            ):
                 break
 
     def go_home(self) -> None:
@@ -358,7 +397,9 @@ class SceneCollector(Node):
             RuntimeError: If the schema has no target for the port.
         """
 
-        frame = f"task_board/{task['target_module_name']}/{task['port_name']}_link_entrance"
+        frame = (
+            f"task_board/{task['target_module_name']}/{task['port_name']}_link_entrance"
+        )
         for target in self.schema.targets:
             if target.frame == frame:
                 return target
@@ -383,16 +424,27 @@ class SceneCollector(Node):
         if viewpoint["mode"] == "home":
             return
         board_frame = next(t.frame for t in self.schema.targets if t.type == "board")
-        self.wait_until(lambda: board_frame in self.edges, self.timing["observation_timeout_s"], "ground truth")
+        self.wait_until(
+            lambda: board_frame in self.edges,
+            self.timing["observation_timeout_s"],
+            "ground truth",
+        )
         world_from_port = world_pose(target.frame, self.edges)
         if world_from_port is None:
             raise RuntimeError(f"Target {target.id} was not spawned")
         world_from_base = matrix_from_transform(
-            self.tf_buffer.lookup_transform("world", self.schema.base_frame, Time(), Duration(seconds=1.0)).transform
+            self.tf_buffer.lookup_transform(
+                "world", self.schema.base_frame, Time(), Duration(seconds=1.0)
+            ).transform
         )
         entrance = invert(world_from_base) @ world_from_port
-        rotation = level_rotation(entrance[:3, :3]) @ from_xyz_rpy((0, 0, 0), (0.0, 0.0, viewpoint["yaw"]))[:3, :3]
-        position = entrance[:3, 3] + np.array([viewpoint["offset"][0], viewpoint["offset"][1], viewpoint["height"]])
+        rotation = (
+            level_rotation(entrance[:3, :3])
+            @ from_xyz_rpy((0, 0, 0), (0.0, 0.0, viewpoint["yaw"]))[:3, :3]
+        )
+        position = entrance[:3, 3] + np.array(
+            [viewpoint["offset"][0], viewpoint["offset"][1], viewpoint["height"]]
+        )
         tcp_from_plug = self.tcp_from_plug[self.held["plug_type"]]
         self.move_tcp(tcp_target(transform(rotation, position), tcp_from_plug))
         self.away_from_home = True
@@ -538,7 +590,11 @@ class SceneCollector(Node):
         label["held_plug"] = {
             **self.held,
             "frame": plug_frame,
-            "base_from_plug": None if world_from_plug is None else (invert(world_from_base) @ world_from_plug).tolist(),
+            "base_from_plug": (
+                None
+                if world_from_plug is None
+                else (invert(world_from_base) @ world_from_plug).tolist()
+            ),
         }
         return label, images
 
@@ -584,7 +640,9 @@ class SceneCollector(Node):
         collection = self.config["collection"]
         views = collection["views_per_board"]
         pending = {}
-        for board_id in range(self.worker_index, collection["boards"], self.worker_count):
+        for board_id in range(
+            self.worker_index, collection["boards"], self.worker_count
+        ):
             split = split_of(self.config, board_id)
             missing = [
                 view
@@ -632,7 +690,9 @@ class SceneCollector(Node):
 
         limit = threshold if after_spawn else collection["minimum_view_change"]
         if unchanged(self.previous_thumbnails, limit):
-            raise FrozenRendererError("Camera images did not change after a new spawn or camera move")
+            raise FrozenRendererError(
+                "Camera images did not change after a new spawn or camera move"
+            )
         if board_visible and unchanged(self.empty_thumbnails, threshold):
             raise FrozenRendererError(
                 "Camera images show the empty scene after a spawn"
@@ -667,7 +727,9 @@ class SceneCollector(Node):
                 return code
         return 0
 
-    def collect(self, pending: dict[int, list[int]], views_per_board: int, board_target: str) -> int:
+    def collect(
+        self, pending: dict[int, list[int]], views_per_board: int, board_target: str
+    ) -> int:
         """Collect the missing views of each pending board.
 
         Args:
@@ -682,7 +744,13 @@ class SceneCollector(Node):
         failures = 0
         boards = {board_id: sample_scene(self.config, board_id) for board_id in pending}
         # SFP tasks first, then SC tasks, so the cable changes at most once per pass.
-        for board_id in sorted(pending, key=lambda board_id: (boards[board_id]["task"]["port_type"] != "sfp", board_id)):
+        for board_id in sorted(
+            pending,
+            key=lambda board_id: (
+                boards[board_id]["task"]["port_type"] != "sfp",
+                board_id,
+            ),
+        ):
             board = boards[board_id]
             views = pending[board_id]
             approach = sample_approach(self.config, board_id)
@@ -696,11 +764,27 @@ class SceneCollector(Node):
                 for view in views:
                     scene_id = board_id * views_per_board + view
                     self.move_to_viewpoint(approach[view], target)
-                    viewpoint = approach[view] | ({"target": target.id} if approach[view]["mode"] == "close" else {})
-                    ready_time = spawn_time if viewpoint["mode"] == "home" else self.sim_time()
-                    scene = {**board, "scene_id": scene_id, "view": view, "viewpoint": viewpoint, "target": target.id}
+                    viewpoint = approach[view] | (
+                        {"target": target.id}
+                        if approach[view]["mode"] == "close"
+                        else {}
+                    )
+                    ready_time = (
+                        spawn_time if viewpoint["mode"] == "home" else self.sim_time()
+                    )
+                    scene = {
+                        **board,
+                        "scene_id": scene_id,
+                        "view": view,
+                        "viewpoint": viewpoint,
+                        "target": target.id,
+                    }
                     label, images = self.capture(scene, ready_time)
-                    self.check_rendering(images, label["targets"][board_target]["visible"], view == views[0])
+                    self.check_rendering(
+                        images,
+                        label["targets"][board_target]["visible"],
+                        view == views[0],
+                    )
                     self.save(scene_id, split, label, images)
                 failures = 0
             except FrozenRendererError as error:

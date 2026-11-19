@@ -96,7 +96,9 @@ def test_rays_use_separate_strides_per_axis() -> None:
 
     intrinsics = torch.tensor([[[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]])
     _, directions = camera_rays(intrinsics, torch.eye(4)[None], 1, 2, (4.0, 2.0))
-    expected = torch.nn.functional.normalize(torch.tensor([[1.5, 0.5, 1.0], [5.5, 0.5, 1.0]]), dim=-1)
+    expected = torch.nn.functional.normalize(
+        torch.tensor([[1.5, 0.5, 1.0], [5.5, 0.5, 1.0]]), dim=-1
+    )
     assert torch.allclose(directions[0], expected)
 
 
@@ -128,13 +130,20 @@ def test_error_accumulator_reports_every_target() -> None:
     with torch.no_grad():
         outputs = model(data["images"], data["intrinsics"], data["base_from_camera"])
     types = [target["type"] for target in CONFIG["schema"]["targets"]]
-    errors = ErrorAccumulator([t["id"] for t in CONFIG["schema"]["targets"]], types, (0.005, math.radians(5.0)))
+    errors = ErrorAccumulator(
+        [t["id"] for t in CONFIG["schema"]["targets"]],
+        types,
+        (0.005, math.radians(5.0)),
+    )
     errors.add(outputs, data)
     summary = errors.summary()
     assert summary["scenes"] == 4
     assert set(summary["per_type"]) == set(types)
     assert summary["per_target"]["task_board"]["samples"] == 4
-    assert {band: summary["per_band"][band]["board"]["samples"] for band in summary["per_band"]} == {
+    assert {
+        band: summary["per_band"][band]["board"]["samples"]
+        for band in summary["per_band"]
+    } == {
         "home": 1,
         "far": 1,
         "mid": 1,
@@ -157,7 +166,11 @@ def test_old_checkpoints_load_into_the_selectable_backbone(tmp_path) -> None:
     }
     state["image_mean"] = torch.zeros(1, 3, 1, 1)
     state["image_std"] = torch.ones(1, 3, 1, 1)
-    old_model = {k: v for k, v in CONFIG["model"].items() if k not in ("backbone", "backbone_input")}
+    old_model = {
+        k: v
+        for k, v in CONFIG["model"].items()
+        if k not in ("backbone", "backbone_input")
+    }
     old_model |= {"d_model": 32, "heads": 4, "feedforward": 64}
     torch.save(
         {

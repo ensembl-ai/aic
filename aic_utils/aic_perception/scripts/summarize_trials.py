@@ -42,24 +42,49 @@ def main() -> None:
     if not logs:
         print(f"No trial logs in {directory}")
         return
-    records = [json.loads(line) for line in logs[-1].read_text(encoding="utf-8").splitlines() if line.strip()]
-    print(f"{logs[-1]} ({len(records)} trials; {len(logs) - 1} older logs in {directory})\n")
-    print("Columns in mm: perception = port error of the scene estimator; servo = port offset the refiner measured")
-    print("first and last; aligned = true plug off the port axis before the descent; depth = final insertion depth.\n")
+    records = [
+        json.loads(line)
+        for line in logs[-1].read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    print(
+        f"{logs[-1]} ({len(records)} trials; {len(logs) - 1} older logs in {directory})\n"
+    )
+    print(
+        "Columns in mm: perception = port error of the scene estimator; servo = port offset the refiner measured"
+    )
+    print(
+        "first and last; aligned = true plug off the port axis before the descent; depth = final insertion depth.\n"
+    )
     header = f"{'#':>2} {'type':4} {'target':28} {'ok':3} {'time s':>6} {'percept':>7} {'servo 1st':>9} {'last':>6} {'iters':>5} {'aligned':>7} {'descent':>14} {'spiral':>10} {'depth':>6}  failure"
     print(header)
     totals: dict[str, Counter] = {}
     for index, record in enumerate(records, 1):
         task = record["task"]
         servo = [p for p in record["phases"] if p["phase"] == "servo"]
-        first = (sum(v * v for v in servo[0]["offset_mm"][:2]) ** 0.5) if servo else None
-        last = (sum(v * v for v in servo[-1]["offset_mm"][:2]) ** 0.5) if servo else None
+        first = (
+            (sum(v * v for v in servo[0]["offset_mm"][:2]) ** 0.5) if servo else None
+        )
+        last = (
+            (sum(v * v for v in servo[-1]["offset_mm"][:2]) ** 0.5) if servo else None
+        )
         descent = phase(record, "descent")
         spiral = phase(record, "spiral", last=True)
         press = phase(record, "press")
-        target = phase(record, "target").get("target_id", f"{task['target_module_name']}/{task['port_name']}")
-        descent_text = f"{descent['reason']} {'in' if descent['inside'] else 'surf'}" if descent else "-"
-        spiral_text = ("in r" if spiral.get("entered") else "miss r") + number(spiral.get("radius_mm"), 1) if spiral else "-"
+        target = phase(record, "target").get(
+            "target_id", f"{task['target_module_name']}/{task['port_name']}"
+        )
+        descent_text = (
+            f"{descent['reason']} {'in' if descent['inside'] else 'surf'}"
+            if descent
+            else "-"
+        )
+        spiral_text = (
+            ("in r" if spiral.get("entered") else "miss r")
+            + number(spiral.get("radius_mm"), 1)
+            if spiral
+            else "-"
+        )
         print(
             f"{index:2d} {task['plug_type']:4} {target:28} {'yes' if record['success'] else 'no':3} {record['duration_s']:6.1f} "
             f"{number(phase(record, 'truth perception').get('port_error_mm')):>7} {number(first):>9} {number(last):>6} {len(servo):5d} "

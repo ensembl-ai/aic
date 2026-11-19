@@ -7,7 +7,12 @@ import math
 import numpy as np
 
 from aic_perception.utils.geometry import from_xyz_rpy
-from aic_perception.utils.motion import level_rotation, spiral_point, spiral_step, tcp_target
+from aic_perception.utils.motion import (
+    level_rotation,
+    spiral_point,
+    spiral_step,
+    tcp_target,
+)
 
 
 def test_level_rotation_removes_tilt_and_keeps_yaw() -> None:
@@ -67,8 +72,12 @@ def test_funnel_target_descends_only_near_the_port() -> None:
     from aic_perception.utils.motion import funnel_target
 
     port = np.array([0.1, 0.2, 0.03])
-    assert np.allclose(funnel_target(port, port + [0.0, 0.0, 0.2], 0.01), port + [0.0, 0.0, 0.01])
-    assert np.isclose(funnel_target(port, port + [0.05, 0.0, 0.2], 0.01)[2], 0.03 + 0.01 + 0.05)
+    assert np.allclose(
+        funnel_target(port, port + [0.0, 0.0, 0.2], 0.01), port + [0.0, 0.0, 0.01]
+    )
+    assert np.isclose(
+        funnel_target(port, port + [0.05, 0.0, 0.2], 0.01)[2], 0.03 + 0.01 + 0.05
+    )
 
 
 def test_speed_limited_step_ramps_brakes_and_arrives() -> None:
