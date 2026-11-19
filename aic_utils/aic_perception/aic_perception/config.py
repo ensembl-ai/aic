@@ -108,6 +108,14 @@ OVERLAY_SCHEMAS: dict[str, dict[str, Any]] = {
             "sc_ports": {**RANGE_SCHEMA, "minimum_spacing": float},
             "mounts": {"probability": float, "translation": list, "yaw_deg": list},
         },
+        "benchmark": {
+            "seed": int,
+            "trials": int,
+            "sc_trials": int,
+            "batches": int,
+            "template": str,
+            "directory": str,
+        },
     },
     "train": {
         "curation": {"preview_count": int},
@@ -517,6 +525,9 @@ def validate_collect(config: dict[str, Any]) -> None:
         raise ValueError("randomization.mounts.probability must be in [0, 1]")
     interval(mounts["translation"], "mounts.translation")
     interval(mounts["yaw_deg"], "mounts.yaw_deg")
+    benchmark = config["benchmark"]
+    if not 0 <= benchmark["sc_trials"] <= benchmark["trials"] or not 0 < benchmark["batches"] <= benchmark["trials"]:
+        raise ValueError("benchmark needs 0 <= sc_trials <= trials and 0 < batches <= trials")
 
 
 def validate_backbone(model: dict[str, Any]) -> None:
@@ -724,6 +735,8 @@ def load_config(kind: str, config_dir: str | Path = CONFIG_DIR) -> dict[str, Any
             config["collection"]["task_board_xacro"]
         )
         config["cable"]["xacro"] = resolve(config["cable"]["xacro"])
+        for key in ("template", "directory"):
+            config["benchmark"][key] = resolve(config["benchmark"][key])
     if kind in ("train", "refine"):
         config["run"]["directory"] = resolve(config["run"]["directory"])
     if kind == "refine":

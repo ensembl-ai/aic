@@ -71,3 +71,26 @@ estimates instead of stopping at the 5 cm hover.
   the patch is kept outside the repo.
 - Next: a larger randomized benchmark, so changes are judged on a real
   success rate instead of six trials.
+
+## 2026-11-18: benchmark generator and presentation clips
+
+- `scripts/make_benchmark.py` (config `benchmark` in `collect.json`) writes
+  40 randomized trials (26 SFP, 14 SC, seed 2026) as four engine configs of
+  10 into `runs/benchmark/batch_{0..3}.yaml`. Trials come from the
+  collector's scene sampler, so they follow the training ranges but are new
+  boards. With two SC ports present, the lower-translation port is written
+  as `sc_port_1`, matching `sc_rank_for_slot` and the phase-1 eval trials;
+  the policy cannot tell the two apart any other way (known risk).
+  Estimated run time: about 7 minutes per batch of 10.
+- Presentation clips of five SFP trials (staged policy, all full
+  insertions, about 95 each) are in `runs/videos/sfp_successes/<trial>/`:
+  close-up isometric on the target port, medium isometric, side, wide shot
+  of the cell, and the robot's center wrist camera. Recording tooling is
+  in `runs/videos/tooling/` (`run.sh`): static Gazebo cameras spawned at run
+  time with the CameraVideoRecorder system; the close-up is moved onto each
+  trial's port from ground-truth TF. Gazebo cannot move its temp video onto
+  a bind mount, so clips are saved inside the container and copied out.
+- Staged is not immune to the partial-insertion timing issue: in one
+  recording take, sample1 and bench_16 scored about 70 ("partial
+  insertion" at full depth); in the next take all five scored about 95.
+  The seat hold should be added to staged and checked on the benchmark.

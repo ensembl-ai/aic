@@ -179,5 +179,13 @@
       1.3303
     ],
     "settle_s": 3.0
+  },
+  "benchmark": {
+    "seed": 2026,
+    "trials": 40,
+    "sc_trials": 14,
+    "batches": 4,
+    "template": "engine_trials.yaml",
+    "directory": "../runs/benchmark"
   }
 }
