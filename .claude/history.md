@@ -167,3 +167,26 @@ are fixed and that board sits elsewhere.
   Plain-English captions, plus a "Plugged in" badge on the last frame. Each
   clip ends before the engine deletes the board. Of the four SC trials
   recorded, bench_07 was partial (70) and bench_12 failed (1).
+
+## 2026-11-19: seat hold on the 40 trials; smarter search
+
+- Seat hold (keep pressing 2.5 s after seating): 40-trial total 2743, below
+  2956. It fixed every partial (about +220), but six other trials failed
+  before seating (search not finding the port, a bad viewpoint estimate, the
+  plug knocked in the gripper, two off-limit contacts with a NIC card). The
+  start-pose detection and search vary run to run by about ±200, so a single
+  40-trial run cannot judge a change of this size. Reverted, not committed.
+- Search rework (`find_port`): expected pose from the sibling port when
+  seen, else the board; the plug takes the orientation of the nearest seen
+  SFP port; each viewpoint is reached through a 15 cm transit height; four
+  viewpoints (`search_viewpoints`); detections more than 30 mm from expected
+  are rejected. On the five trials that failed in the hold run (bench_18,
+  23, 24, 27, 39): -19 -> 384, all at full depth, no contacts; three
+  partials (the timing issue). Not yet run on all 40.
+- **40-trial benchmark with the new search: 3078** (new best, was 2956).
+  Batches 850, 782, 659, 786. SFP 2349 (was 2258): 23 full (two at 89.5),
+  3 partial at full depth (bench_16, 27, 32: the timing issue), 0 failed.
+  The search ran 9 times; all found the port at the first viewpoint, the
+  position always from the board estimate. SC 730 (search not used for SC;
+  6 failures as before: bench_01, 02, 03, 06, 10, and 09 at 37).
+  Committed. Next: seat hold (partials), then SC entry.

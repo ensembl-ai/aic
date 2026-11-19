@@ -44,12 +44,15 @@
     "estimate_timeout_s": 30.0,
     "search_after_s": 4.0,
     "search_timeout_s": 4.0,
-    "search_height_m": 0.08,
     "search_move_s": 3.0,
-    "search_shifts_m": [
-      0.0,
-      0.015,
-      -0.015
+    "search_snapshot_s": 1.5,
+    "search_transit_height_m": 0.15,
+    "search_max_offset_m": 0.03,
+    "search_viewpoints": [
+      [0.0, 0.08],
+      [0.0, 0.12],
+      [0.015, 0.08],
+      [-0.015, 0.08]
     ],
     "search_anchors": {
       "nic_card_mount_0/sfp_port_0": [

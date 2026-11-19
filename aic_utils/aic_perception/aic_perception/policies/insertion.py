@@ -257,21 +257,83 @@ class PortInsertion(Policy):
         position = np.median([pose[:3, 3] for pose in poses], axis=0)
         return transform(level_rotation(poses[-1][:3, :3]), position)
 
+    def visible_targets(self, duration: float) -> dict[str, np.ndarray]:
+        """Every target present in the fresh estimates of the next ``duration`` seconds.
+
+        Returns:
+            Target ID mapped to its pose in ``base_link`` (median position,
+            level orientation of the latest estimate).
+        """
+
+        started = self.now()
+        self.estimates.clear()
+        poses: dict[str, list[np.ndarray]] = {}
+        while self.now() - started < duration:
+            while self.estimates:
+                message = self.estimates.pop(0)
+                if stamp_seconds(message.header.stamp) < started:
+                    continue
+                for target in message.targets:
+                    if target.present:
+                        p, q = target.pose.position, target.pose.orientation
+                        pose = from_xyz_quaternion_xyzw((p.x, p.y, p.z), (q.x, q.y, q.z, q.w))
+                        poses.setdefault(target.id, []).append(pose)
+            self.sleep_for(0.1)
+        return {
+            target_id: transform(level_rotation(found[-1][:3, :3]), np.median([pose[:3, 3] for pose in found], axis=0))
+            for target_id, found in poses.items()
+        }
+
+    def expected_port(self, target_id: str, seen: dict[str, np.ndarray]) -> tuple[np.ndarray, str]:
+        """Where the unseen target port should be, from what the start pose does see.
+
+        Position: from the sibling port on the same card when it is seen
+        (the two differ by a fixed offset on the card), else from the board
+        estimate and the target's ``search_anchors`` entry. Orientation: that
+        of the nearest seen SFP port (all SFP ports face the same way up to the
+        card yaw), so the viewpoint looks at the card as the hover pose would,
+        else the plug's current orientation.
+
+        Returns:
+            Expected entrance pose in ``base_link`` and the source of its position.
+        """
+
+        anchors = self.settings["search_anchors"]
+        anchor = np.array(anchors[target_id])
+        board = seen["task_board"] if "task_board" in seen else self.perceived_port("task_board")
+        module, port_name = target_id.split("/")
+        sibling = f"{module}/{'sfp_port_1' if port_name == 'sfp_port_0' else 'sfp_port_0'}"
+        if sibling in seen and sibling in anchors:
+            position = seen[sibling][:3, 3] + board[:3, :3] @ (anchor - np.array(anchors[sibling]))
+            source = "sibling port"
+        else:
+            position = (board @ np.append(anchor, 1.0))[:3]
+            source = "board"
+        ports = [pose for name, pose in seen.items() if name in anchors]
+        if ports:
+            nearest = min(ports, key=lambda pose: float(np.linalg.norm(pose[:2, 3] - position[:2])))
+            rotation = nearest[:3, :3]
+        else:
+            rotation = self.plug_pose()[:3, :3]
+        return transform(rotation, position), source
+
     def find_port(self, move_robot: MoveRobotCallback, task: Task, target_id: str) -> np.ndarray:
         """Perceive the target port, moving closer over the board when it is not seen at first.
 
         If the start pose yields no present estimate within ``search_after_s``,
-        the plug moves to ``search_height_m`` above where the port should be
-        (``search_anchors``, its expected position in the board frame, placed
-        with the board estimate) and looks again, then at ``search_shifts_m``
-        along the board's slot axis. The board itself is reliably seen from
-        the start pose, and closer views see the ports far more reliably.
+        the port's expected pose is inferred from what is seen (``expected_port``)
+        and the plug visits ``search_viewpoints`` (shift along the board's slot
+        axis, height above the expected entrance). Each viewpoint is reached
+        through ``search_transit_height_m`` so the plug turns and crosses the
+        board high, then drops straight down; it faces the card as at the
+        hover pose. A detection farther than ``search_max_offset_m`` from the
+        expected position is rejected as a wrong match.
 
         Returns:
             Entrance pose in ``base_link``.
 
         Raises:
-            InsertionFailed: If no viewpoint yields a present estimate.
+            InsertionFailed: If no viewpoint yields a plausible detection.
         """
 
         settings = self.settings
@@ -281,21 +343,30 @@ class PortInsertion(Policy):
         except InsertionFailed:
             if anchor is None:
                 raise
-        board = self.perceived_port("task_board")
-        for index, shift in enumerate(settings["search_shifts_m"]):
-            expected = board @ np.array([anchor[0] + shift, anchor[1], anchor[2], 1.0])
-            goal = self.plug_pose()
-            goal[:3, 3] = expected[:3] + np.array([0.0, 0.0, settings["search_height_m"]])
-            self.get_logger().info(f"{target_id} not seen; searching from viewpoint {index + 1} over its expected position")
+        seen = self.visible_targets(settings["search_snapshot_s"])
+        expected, source = self.expected_port(target_id, seen)
+        board_x = (seen["task_board"] if "task_board" in seen else self.perceived_port("task_board"))[:3, 0]
+        self.get_logger().info(f"{target_id} not seen; expected from the {source}, searching")
+        self.log_truth(f"search expectation ({source})", task, port=expected)
+        for index, (shift, height) in enumerate(settings["search_viewpoints"], start=1):
+            point = expected[:3, 3] + shift * board_x
+            transit = transform(expected[:3, :3], point + np.array([0.0, 0.0, settings["search_transit_height_m"]]))
+            self.move_plug(move_robot, transit, settings["search_move_s"], mode="descent")
+            goal = transform(expected[:3, :3], point + np.array([0.0, 0.0, height]))
             self.move_plug(move_robot, goal, settings["search_move_s"], mode="descent")
             try:
                 port = self.perceived_port(target_id, settings["search_timeout_s"])
             except InsertionFailed:
+                self.get_logger().info(f"Search viewpoint {index}: not seen")
                 continue
-            self.note("search", viewpoint=index + 1, expected=expected[:3], port=port[:3, 3])
-            self.log_truth(f"found at search viewpoint {index + 1}", task, port=port)
+            offset = float(np.linalg.norm(port[:2, 3] - expected[:2, 3]))
+            if offset > settings["search_max_offset_m"]:
+                self.get_logger().info(f"Search viewpoint {index}: rejected a detection {1000 * offset:.1f} mm from expected")
+                continue
+            self.note("search", viewpoint=index, source=source, expected=expected[:3, 3], port=port[:3, 3])
+            self.log_truth(f"found at search viewpoint {index}", task, port=port)
             return port
-        raise InsertionFailed(f"{target_id} not seen from the start pose or {index + 1} search viewpoints")
+        raise InsertionFailed(f"{target_id} not seen from the start pose or {index} search viewpoints")
 
     def resolve_target(self, task: Task) -> str:
         """Schema target ID of the task's port.
