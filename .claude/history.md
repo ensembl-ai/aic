@@ -143,3 +143,27 @@ the slot. SFP targets only (SC rank resolution happens before this).
     (bench_09, -11).
 - Committed. Next: the seat hold for the partial insertions (~13 trials of
   about 25 points each), then SC entry.
+
+## 2026-11-19: presentation clips re-recorded (policy `5e79dc3`)
+
+Old clips deleted and re-recorded. First take: three trials full (about 95),
+but sample1 and eval1 scored 70 (the partial-insertion timing issue), and
+bench_16's clips were lost: the copy ran 5 s after the last stop, before
+Gazebo had finalized the files. The wait before the copy in
+`tooling/run.sh` is now 20 s. Those three trials were retaken: all about 95.
+All five trials now have full insertions in `runs/videos/sfp_successes/`,
+plus a contact sheet. bench_16's side camera misses its board: the cameras
+are fixed and that board sits elsewhere.
+- Clips re-shot for the presentation on harder boards: bench_29, 38, 16, 18,
+  31 (3 to 5 NIC cards, board yaws from -179 to +150 degrees), all full
+  insertions (92 to 96; bench_16 and bench_18 retaken after partials). The
+  wide camera moved right to (2.175, -0.379, 2.05) so the cell pillar no
+  longer blocks the view. `sfp_successes/all_trials.mp4` combines them:
+  wide view as the main panel, plus the close-up, the wrist camera and a
+  text box.
+- LinkedIn story cut `runs/videos/linkedin_story.mp4` (2:08; problem, why it is hard, solution captions): title card, three SFP
+  clips (bench_38, 16, 18), two SC clips (bench_00 and bench_04, newly
+  recorded at 94 and 95 and kept in `runs/videos/sc_successes/`), end card.
+  Plain-English captions, plus a "Plugged in" badge on the last frame. Each
+  clip ends before the engine deletes the board. Of the four SC trials
+  recorded, bench_07 was partial (70) and bench_12 failed (1).
