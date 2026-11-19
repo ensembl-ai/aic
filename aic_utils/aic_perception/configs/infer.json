@@ -1,6 +1,11 @@
 {
+  "logging": {
+    "trial_directory": "../runs/trials",
+    "estimate_directory": "../runs/estimates",
+    "log_estimates": true
+  },
   "inference": {
-    "checkpoint": "../runs/scene_estimator_v1/checkpoints/best.pt",
+    "checkpoint": "../runs/scene_estimator_v5/checkpoints/best.pt",
     "device": "cuda",
     "observation_topic": "/observations",
     "estimate_topic": "/aic_perception/scene_estimate",
@@ -8,11 +13,239 @@
     "presence_threshold": 0.5,
     "tf_prefix": "aic_perception"
   },
-  "far_approach": {
+  "refiner": {
+    "enabled": false,
+    "checkpoint": "../runs/refiner_v1/checkpoints/best.pt",
+    "device": "cuda",
+    "iterations": 3,
+    "samples": 3,
+    "tolerance_m": 0.0005,
+    "max_step_m": 0.008,
+    "max_yaw_deg": 8.0,
+    "min_yaw_deg": 0.5,
+    "move_duration_s": 2.0,
+    "settle_time_s": 0.5,
+    "still_tolerance_m": 0.0002,
+    "max_settle_s": 4.0,
+    "consistency_m": 0.0005,
+    "measure_retries": 2,
+    "max_offset_m": 0.008,
+    "observation_timeout_s": 2.0,
+    "spiral_max_radius_m": 0.002,
+    "update_grasp": true,
+    "max_grasp_change_m": 0.006
+  },
+  "sc_rank_for_slot": {
+    "sc_port_0": 1,
+    "sc_port_1": 0
+  },
+  "insertion": {
     "estimate_count": 5,
     "estimate_timeout_s": 30.0,
-    "hover_height_m": 0.01,
+    "control_period_s": 0.05,
     "approach_duration_s": 5.0,
-    "settle_time_s": 2.0
+    "coarse_height_m": 0.05,
+    "tracking_approach": true,
+    "track_alpha": 0.2,
+    "track_gate_m": 0.008,
+    "track_reset_after": 5,
+    "track_speed_m_s": 0.06,
+    "track_accel_m_s2": 0.15,
+    "track_dwell_s": 1.0,
+    "track_final_move_s": 0.5,
+    "track_timeout_s": 25.0,
+    "pre_contact_height_m": 0.01,
+    "still_tolerance_m": 0.0002,
+    "still_timeout_s": 2.0,
+    "settle_corrections": 4,
+    "max_correction_m": 0.008,
+    "position_tolerance_m": 0.0005,
+    "tracking_gain": 0.8,
+    "baseline_samples": 20,
+    "refine_at_pre_contact": true,
+    "refine_timeout_s": 5.0,
+    "max_refine_shift_m": 0.03,
+    "free_stiffness": [
+      90.0,
+      90.0,
+      90.0,
+      50.0,
+      50.0,
+      50.0
+    ],
+    "free_damping": [
+      50.0,
+      50.0,
+      50.0,
+      20.0,
+      20.0,
+      20.0
+    ],
+    "free_feedback_gains": [
+      0.5,
+      0.5,
+      0.5,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "descent_stiffness": [
+      300.0,
+      300.0,
+      300.0,
+      200.0,
+      200.0,
+      200.0
+    ],
+    "descent_damping": [
+      40.0,
+      40.0,
+      35.0,
+      30.0,
+      30.0,
+      30.0
+    ],
+    "descent_feedback_gains": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "servo_stiffness": [
+      300.0,
+      300.0,
+      300.0,
+      200.0,
+      200.0,
+      200.0
+    ],
+    "servo_damping": [
+      60.0,
+      60.0,
+      60.0,
+      35.0,
+      35.0,
+      35.0
+    ],
+    "servo_feedback_gains": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "search_stiffness": [
+      800.0,
+      800.0,
+      120.0,
+      200.0,
+      200.0,
+      200.0
+    ],
+    "search_damping": [
+      80.0,
+      80.0,
+      15.0,
+      30.0,
+      30.0,
+      30.0
+    ],
+    "search_feedback_gains": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "recovery_stiffness": [
+      300.0,
+      300.0,
+      300.0,
+      40.0,
+      40.0,
+      40.0
+    ],
+    "recovery_damping": [
+      40.0,
+      40.0,
+      15.0,
+      12.0,
+      12.0,
+      12.0
+    ],
+    "recovery_feedback_gains": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "descent_speed_m_s": 0.02,
+    "descent_below_entrance_m": 0.01,
+    "inside_depth_m": 0.005,
+    "contact_force_n": 10.0,
+    "max_force_n": 18.0,
+    "stall_window_s": 0.75,
+    "stall_epsilon_m": 0.0003,
+    "stall_grace_s": 2.0,
+    "press_margin_m": 0.007,
+    "entry_depth_m": 0.004,
+    "spiral_pitch_m": 0.001,
+    "spiral_max_radius_m": 0.006,
+    "spiral_speed_m_s": 0.008,
+    "insert_speed_m_s": 0.04,
+    "insert_max_duration_s": 30.0,
+    "insert_extra_depth_m": {
+      "sfp": 0.05,
+      "sc": 0.02
+    },
+    "min_seat_depth_m": {
+      "sfp": 0.043,
+      "sc": 0.012
+    },
+    "max_seat_depth_m": {
+      "sfp": 0.05,
+      "sc": 0.02
+    },
+    "max_lateral_drift_m": 0.015,
+    "recovery_attempts": 5,
+    "recovery_attempts_before_spiral": 3,
+    "recovery_duration_s": 5.0,
+    "recovery_retract_m": 0.012,
+    "unstick_margin_m": 0.001,
+    "log_ground_truth": true
+  },
+  "plug_grasp": {
+    "sfp": {
+      "translation": [
+        4e-06,
+        -0.020691,
+        0.052431
+      ],
+      "quaternion_xyzw": [
+        0.177817,
+        0.005098,
+        -0.027397,
+        0.983669
+      ]
+    },
+    "sc": {
+      "translation": [
+        -0.000388,
+        -0.013142,
+        0.016003
+      ],
+      "quaternion_xyzw": [
+        0.159242,
+        -0.166164,
+        0.694551,
+        0.681638
+      ]
+    }
   }
 }

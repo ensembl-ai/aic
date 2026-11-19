@@ -3,13 +3,18 @@
     "preview_count": 16
   },
   "run": {
-    "name": "scene_estimator_v1",
+    "name": "scene_estimator_v5",
     "directory": "../runs",
     "seed": 0,
     "device": "cuda"
   },
   "model": {
+    "backbone": "dinov2_vits14",
     "pretrained_backbone": true,
+    "backbone_input": [
+      560,
+      504
+    ],
     "d_model": 256,
     "heads": 8,
     "encoder_layers": 3,
@@ -19,14 +24,16 @@
   },
   "optimization": {
     "epochs": 60,
-    "batch_size": 64,
-    "learning_rate": 0.0006,
-    "backbone_learning_rate": 0.0002,
+    "batch_size": 16,
+    "learning_rate": 0.0002,
+    "backbone_learning_rate": 2e-05,
     "weight_decay": 0.05,
-    "warmup_steps": 250,
+    "warmup_steps": 1000,
     "gradient_clip": 1.0,
     "bf16": true,
-    "num_workers": 12
+    "num_workers": 12,
+    "early_stopping_patience": 10,
+    "early_stopping_min_delta": 0.02
   },
   "loss": {
     "presence": 1.0,

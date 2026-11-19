@@ -58,10 +58,51 @@ def load_checkpoint(
 
     checkpoint = torch.load(path, map_location=device, weights_only=False)
     config = checkpoint["config"]
+    state = checkpoint["model"]
+    if "backbone" not in config["model"]:
+        # Trained before backbones became selectable: a ResNet-18 at the stored
+        # image size, stored directly under ``backbone`` with its own image
+        # normalization buffers.
+        config["model"] |= {"backbone": "resnet18", "backbone_input": []}
+        state = {
+            key.replace("backbone.", "backbone.encoder.", 1): value
+            for key, value in state.items()
+            if key not in ("image_mean", "image_std")
+        }
     config["model"]["pretrained_backbone"] = False
     model = build_model(config, checkpoint["normalization"])
-    model.load_state_dict(checkpoint["model"])
+    for key in ("backbone.mean", "backbone.std"):
+        state.setdefault(key, model.state_dict()[key])
+    model.load_state_dict(state)
     return model.to(device).eval(), config
+
+
+def should_stop(errors: list[float], patience: int, min_delta: float) -> bool:
+    """Whether validation stopped improving: no gain of ``min_delta`` in the last ``patience`` epochs.
+
+    Args:
+        errors: Validation error of every epoch so far, oldest first.
+        patience: Epochs without improvement to tolerate; 0 disables stopping.
+        min_delta: Smallest decrease that counts as an improvement.
+
+    Returns:
+        True when training should end.
+    """
+
+    if patience <= 0 or len(errors) <= patience:
+        return False
+    return min(errors[-patience:]) > min(errors[:-patience]) - min_delta
+
+
+def append_history(path: Path, record: dict[str, Any]) -> None:
+    """Append one JSON line to a run's ``history.jsonl``.
+
+    Training curves and per-epoch validation live next to the checkpoints,
+    so plots never depend on W&B.
+    """
+
+    with path.open("a", encoding="utf-8") as stream:
+        stream.write(json.dumps(record) + "\n")
 
 
 def to_device(
@@ -108,8 +149,9 @@ def evaluate(
     schema: BoardSchema,
     device: torch.device,
     bf16: bool,
+    tolerance: tuple[float, float],
 ) -> dict[str, Any]:
-    """Compute per-target and per-type errors over a split.
+    """Compute per-target, per-type, and per-distance errors over a split.
 
     Args:
         model: Estimator.
@@ -117,13 +159,15 @@ def evaluate(
         schema: Board schema.
         device: Torch device.
         bf16: Whether to run under bfloat16 autocast.
+        tolerance: Translation (m) and rotation (rad) tolerance that counts
+            as accurate for the confidence calibration.
 
     Returns:
         Error summary from ``ErrorAccumulator``.
     """
 
     model.eval()
-    errors = ErrorAccumulator(schema.ids, [target.type for target in schema.targets])
+    errors = ErrorAccumulator(schema.ids, [target.type for target in schema.targets], tolerance)
     for batch in loader:
         batch = to_device(batch, device)
         with torch.autocast(device.type, dtype=torch.bfloat16, enabled=bf16):
@@ -152,13 +196,25 @@ def port_error_mm(summary: dict[str, Any]) -> float:
 
 
 def flatten_summary(summary: dict[str, Any], prefix: str) -> dict[str, float]:
-    """Flatten the per-type part of an error summary for W&B."""
+    """Flatten the per-type and per-distance parts of an error summary for W&B."""
 
-    return {
+    flat = {
         f"{prefix}/{kind}/{metric}": value
         for kind, metrics in summary["per_type"].items()
         for metric, value in metrics.items()
     }
+    for band, types in summary["per_band"].items():
+        for kind, metrics in types.items():
+            if metrics["samples"]:
+                flat[f"{prefix}/{band}/{kind}/translation_mean_mm"] = metrics["translation_mean_mm"]
+    return flat
+
+
+def confidence_tolerance(config: dict[str, Any]) -> tuple[float, float]:
+    """Translation (m) and rotation (rad) tolerance that the confidence predicts."""
+
+    loss = config["loss"]
+    return loss["confidence_translation_m"], math.radians(loss["confidence_rotation_deg"])
 
 
 def train(config: dict[str, Any]) -> Path:
@@ -229,7 +285,9 @@ def train(config: dict[str, Any]) -> Path:
         f"{len(manifest['val'])}, {total_steps} steps, run directory {run_directory}"
     )
 
+    history = run_directory / "history.jsonl"
     best = math.inf
+    errors: list[float] = []
     step = 0
     for epoch in range(optimization["epochs"]):
         model.train()
@@ -260,13 +318,17 @@ def train(config: dict[str, Any]) -> Path:
                     },
                     step=step,
                 )
+                append_history(
+                    history,
+                    {"kind": "train", "epoch": epoch, "step": step, "learning_rate": scheduler.get_last_lr()[1], **values},
+                )
                 print(
                     f"epoch {epoch} step {step}/{total_steps} loss {values['loss/total']:.4f} "
                     f"translation {values['loss/translation_cm']:.3f} cm ({elapsed:.0f} s)",
                     flush=True,
                 )
 
-        summary = evaluate(model, validation_loader, schema, device, bf16)
+        summary = evaluate(model, validation_loader, schema, device, bf16, confidence_tolerance(config))
         error = port_error_mm(summary)
         wandb.log(
             {
@@ -274,6 +336,10 @@ def train(config: dict[str, Any]) -> Path:
                 "validation/port_error_mm": error,
             },
             step=step,
+        )
+        append_history(
+            history,
+            {"kind": "validation", "epoch": epoch, "step": step, "port_error_mm": error, **{k: v for k, v in summary.items() if k != "per_target"}},
         )
         print(f"epoch {epoch} validation port error {error:.2f} mm", flush=True)
         state = {
@@ -291,5 +357,10 @@ def train(config: dict[str, Any]) -> Path:
                 json.dumps({"epoch": epoch, **summary}, indent=2) + "\n",
                 encoding="utf-8",
             )
+        errors.append(error)
+        if should_stop(errors, optimization["early_stopping_patience"], optimization["early_stopping_min_delta"]):
+            print(f"Early stop after epoch {epoch}: no {optimization['early_stopping_min_delta']} mm gain in {optimization['early_stopping_patience']} epochs; best {best:.2f} mm", flush=True)
+            append_history(history, {"kind": "early_stop", "epoch": epoch, "best_mm": best})
+            break
     wandb.finish()
     return checkpoints / "best.pt"

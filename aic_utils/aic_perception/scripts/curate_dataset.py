@@ -1,7 +1,8 @@
 """Validate collected scenes, split them, and write label previews.
 
-Configured by ``configs/base.json`` and the ``curation`` section of
-``configs/train.json``.
+Curates the scene estimator's dataset (``configs/base.json``) and every
+refiner dataset listed in ``configs/refine.json``, with the ``curation``
+section of ``configs/train.json``.
 """
 
 from __future__ import annotations
@@ -17,7 +18,13 @@ from aic_perception.curation import curate  # noqa: E402
 
 if __name__ == "__main__":
     config = load_config("train")
-    manifest = curate(config)
-    print(json.dumps(manifest["statistics"], indent=2))
-    print(f"Usable scenes: train {len(manifest['train'])}, val {len(manifest['val'])}")
-    print(f"Previews: {Path(config['dataset']['directory']) / 'previews'}")
+    directories = dict.fromkeys([config["dataset"]["directory"], *load_config("refine")["datasets"]])
+    for directory in directories:
+        if not Path(directory).is_dir():
+            print(f"Skipping {directory}: not collected yet")
+            continue
+        manifest = curate({**config, "dataset": {**config["dataset"], "directory": directory}})
+        print(f"== {directory}")
+        print(json.dumps(manifest["statistics"], indent=2))
+        print(f"Usable scenes: train {len(manifest['train'])}, val {len(manifest['val'])}")
+        print(f"Previews: {Path(directory) / 'previews'}")

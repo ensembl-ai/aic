@@ -1,19 +1,25 @@
 {
+  "dataset": {
+    "directory": "../data/aic_v4_close",
+    "validation_fraction": 0.1
+  },
   "collection": {
-    "scenes": 20000,
-    "seed": 0,
+    "boards": 3000,
+    "views_per_board": 8,
+    "seed": 1,
     "workers": "auto",
     "jpeg_quality": 95,
     "minimum_image_change": 1.0,
-    "task_board_xacro": "../../../aic_description/urdf/task_board.urdf.xacro",
+    "minimum_view_change": 0.05,
+    "task_board_xacro": "/ws_aic/install/share/aic_description/urdf/task_board.urdf.xacro",
     "progress_interval_s": 10.0
   },
   "docker": {
-    "image": "ghcr.io/intrinsic-dev/aic/aic_eval:latest",
+    "image": "aic_eval:phase1",
     "container_prefix": "aic_perception_worker",
     "rendering": "wsl_gpu",
-    "cpus_per_worker": 2.0,
-    "memory_per_worker_gb": 1.5,
+    "cpus_per_worker": 3.5,
+    "memory_per_worker_gb": 6.0,
     "max_gpu_workers": 6,
     "launch_interval_s": 30.0,
     "max_restarts": 20
@@ -25,25 +31,153 @@
     "settle_time_s": 0.25
   },
   "randomization": {
-    "board_x": [0.10, 0.25],
-    "board_y": [-0.25, 0.10],
+    "sc_task_probability": 0.35,
+    "board_x": [
+      0.1,
+      0.25
+    ],
+    "board_y": [
+      -0.25,
+      0.1
+    ],
     "board_z": 1.14,
-    "board_yaw": [-3.14159, 3.14159],
+    "board_yaw": [
+      -3.14159,
+      3.14159
+    ],
     "nic_cards": {
-      "count": [1, 5],
-      "translation": [-0.0215, 0.0234],
-      "yaw_deg": [-10.0, 10.0]
+      "count": [
+        0,
+        5
+      ],
+      "translation": [
+        -0.0215,
+        0.0234
+      ],
+      "yaw_deg": [
+        -10.0,
+        10.0
+      ]
     },
     "sc_ports": {
-      "count": [0, 5],
-      "translation": [-0.06, 0.055],
-      "yaw_deg": [-6.0, 6.0],
+      "count": [
+        0,
+        2
+      ],
+      "translation": [
+        -0.06,
+        0.055
+      ],
+      "yaw_deg": [
+        -6.0,
+        6.0
+      ],
       "minimum_spacing": 0.035
     },
     "mounts": {
       "probability": 0.5,
-      "translation": [-0.09425, 0.09425],
-      "yaw_deg": [-60.0, 60.0]
+      "translation": [
+        -0.09425,
+        0.09425
+      ],
+      "yaw_deg": [
+        -60.0,
+        60.0
+      ]
     }
+  },
+  "viewpoints": {
+    "home_view": false,
+    "height_m": [
+      0.003,
+      0.04
+    ],
+    "lateral_m": 0.002,
+    "lateral_per_height": 0.15,
+    "lateral_power": 1.0,
+    "on_axis_fraction": 0.3,
+    "yaw_deg": 5.0,
+    "move_speed_m_s": 0.25,
+    "settle_timeout_s": 2.0,
+    "position_tolerance_m": 0.002,
+    "stiffness": [
+      300.0,
+      300.0,
+      300.0,
+      60.0,
+      60.0,
+      60.0
+    ],
+    "damping": [
+      60.0,
+      60.0,
+      60.0,
+      25.0,
+      25.0,
+      25.0
+    ],
+    "plug_grasp": {
+      "sfp": {
+        "translation": [
+          4e-06,
+          -0.020691,
+          0.052431
+        ],
+        "quaternion_xyzw": [
+          0.177817,
+          0.005098,
+          -0.027397,
+          0.983669
+        ]
+      },
+      "sc": {
+        "translation": [
+          -0.000388,
+          -0.013142,
+          0.016003
+        ],
+        "quaternion_xyzw": [
+          0.159242,
+          -0.166164,
+          0.694551,
+          0.681638
+        ]
+      }
+    }
+  },
+  "cable": {
+    "spawn": true,
+    "xacro": "/ws_aic/install/share/aic_description/urdf/cable.sdf.xacro",
+    "types": {
+      "sfp": "sfp_sc_cable",
+      "sc": "sfp_sc_cable_reversed"
+    },
+    "gripper_offsets": {
+      "sfp": [
+        [
+          0.0,
+          0.015385,
+          0.04245
+        ],
+        [
+          0.0,
+          0.015385,
+          0.04545
+        ]
+      ],
+      "sc": [
+        [
+          0.0,
+          0.015385,
+          0.04045
+        ]
+      ]
+    },
+    "rpy": [
+      0.4432,
+      -0.4838,
+      1.3303
+    ],
+    "settle_s": 3.0
   }
 }

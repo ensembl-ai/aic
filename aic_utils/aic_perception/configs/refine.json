@@ -1,0 +1,62 @@
+{
+  "datasets": [
+    "../data/aic_v3",
+    "../data/aic_v4_close"
+  ],
+  "run": {
+    "name": "refiner_v1",
+    "directory": "../runs",
+    "seed": 0,
+    "device": "cuda"
+  },
+  "selection": {
+    "reference_camera": "center",
+    "max_height_m": 0.06,
+    "max_lateral_m": 0.03,
+    "max_rotation_deg": 15.0
+  },
+  "crop": {
+    "size": 336
+  },
+  "model": {
+    "backbone": "dinov2_vits14",
+    "pretrained_backbone": true,
+    "backbone_input": [
+      336,
+      336
+    ],
+    "d_model": 256,
+    "heads": 8,
+    "layers": 2,
+    "feedforward": 1024,
+    "dropout": 0.1
+  },
+  "optimization": {
+    "epochs": 60,
+    "batch_size": 32,
+    "learning_rate": 0.0003,
+    "backbone_learning_rate": 3e-05,
+    "weight_decay": 0.05,
+    "warmup_steps": 500,
+    "gradient_clip": 1.0,
+    "bf16": true,
+    "num_workers": 12,
+    "early_stopping_patience": 10,
+    "early_stopping_min_delta": 0.005
+  },
+  "loss": {
+    "offset": 1.0,
+    "plug": 0.5,
+    "rotation": 0.2
+  },
+  "augmentation": {
+    "brightness": 0.2,
+    "contrast": 0.2,
+    "saturation": 0.2
+  },
+  "logging": {
+    "wandb_project": "aic-perception",
+    "wandb_mode": "online",
+    "log_every_steps": 20
+  }
+}

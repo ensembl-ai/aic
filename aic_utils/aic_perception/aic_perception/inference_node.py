@@ -4,11 +4,16 @@ Subscribes to the synchronized ``/observations`` topic published by
 ``aic_adapter``, reads each camera pose from TF at the image stamp, and
 publishes every schema target in the robot base frame. Present targets are
 also broadcast as TF frames ``<tf_prefix>/<target id>`` for RViz and
-TF-based planners.
+TF-based planners. With ``logging.log_estimates``, every estimate is also
+appended as one JSON line (stamp, latency, and each target's presence,
+confidence, and position) to a file in ``logging.estimate_directory``.
 """
 
 from __future__ import annotations
 
+import json
+import time
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -75,8 +80,14 @@ class SceneEstimatorNode(Node):
             Observation, settings["observation_topic"], self.store, 2
         )
         self.create_timer(1.0 / settings["rate_hz"], self.estimate)
+        self.estimate_log = None
+        if config["logging"]["log_estimates"]:
+            directory = Path(config["logging"]["estimate_directory"])
+            directory.mkdir(parents=True, exist_ok=True)
+            self.estimate_log = (directory / time.strftime("estimates_%Y%m%d_%H%M%S.jsonl")).open("a", encoding="utf-8")
         self.get_logger().info(
             f"Loaded {settings['checkpoint']}: {self.runtime.describe()}"
+            + (f"; logging estimates to {self.estimate_log.name}" if self.estimate_log else "")
         )
 
     def store(self, message: Observation) -> None:
@@ -118,7 +129,24 @@ class SceneEstimatorNode(Node):
             )
             return
         self.processed_stamp = stamp
+        started = time.perf_counter()
         estimates = self.runtime.predict(images, intrinsics, poses)
+        latency_ms = 1000.0 * (time.perf_counter() - started)
+        if self.estimate_log is not None:
+            record = {
+                "stamp": stamp.sec + stamp.nanosec * 1e-9,
+                "latency_ms": round(latency_ms, 1),
+                "targets": {
+                    e.id: {
+                        "presence": round(e.presence_probability, 4),
+                        "confidence": round(e.confidence, 4),
+                        "xyz": np.round(e.base_from_target[:3, 3], 5).tolist(),
+                    }
+                    for e in estimates
+                },
+            }
+            self.estimate_log.write(json.dumps(record) + "\n")
+            self.estimate_log.flush()
 
         message = SceneEstimate(schema=self.schema.name)
         message.header.stamp = stamp

@@ -15,18 +15,39 @@ from torchvision.transforms import v2
 from aic_perception.layout import image_path, label_path
 from aic_perception.schema import BoardSchema
 
+DISTANCE_BANDS = ("home", "far", "mid", "close")
+CLOSE_HEIGHT_M = 0.03
+MID_HEIGHT_M = 0.10
 
-def read_manifest(config: dict[str, Any]) -> dict[str, Any]:
-    """Read the curated manifest and check it matches the configured schema.
+
+def distance_band(scene: dict[str, Any]) -> int:
+    """Index into ``DISTANCE_BANDS`` of a scene's viewpoint.
+
+    ``home`` is the trial start pose; close viewpoints are split by the
+    planned plug height above the target port: ``far`` from 10 cm, ``mid``
+    from 3 cm, and ``close`` below. Scenes without a viewpoint were captured
+    at HOME.
+    """
+
+    viewpoint = scene.get("viewpoint", {"mode": "home"})
+    if viewpoint["mode"] == "home":
+        return 0
+    height = viewpoint["height"]
+    return 1 if height >= MID_HEIGHT_M else 2 if height >= CLOSE_HEIGHT_M else 3
+
+
+def read_manifest(config: dict[str, Any], directory: str | Path | None = None) -> dict[str, Any]:
+    """Read a curated manifest and check it matches the configured schema.
 
     Args:
-        config: Validated training configuration.
+        config: Validated configuration.
+        directory: Dataset directory; defaults to ``dataset.directory``.
 
     Returns:
         Parsed manifest.
     """
 
-    path = Path(config["dataset"]["directory"]) / "manifest.json"
+    path = Path(directory or config["dataset"]["directory"]) / "manifest.json"
     if not path.is_file():
         raise FileNotFoundError(
             f"{path} is missing; run scripts/curate_dataset.py first"
@@ -83,8 +104,9 @@ class SceneDataset(Dataset):
 
         Returns:
             ``images`` (C, 3, H, W) uint8, ``intrinsics`` (C, 3, 3),
-            ``base_from_camera`` (C, 4, 4), ``present`` (Q,), and
-            ``base_from_target`` (Q, 4, 4; identity where not present).
+            ``base_from_camera`` (C, 4, 4), ``present`` (Q,),
+            ``base_from_target`` (Q, 4, 4; identity where not present), and
+            ``band`` (index into ``DISTANCE_BANDS``).
         """
 
         scene_id = self.scene_ids[index]
@@ -115,4 +137,5 @@ class SceneDataset(Dataset):
             ),
             "present": torch.tensor([float(t["visible"]) for t in targets]),
             "base_from_target": torch.from_numpy(poses).float(),
+            "band": torch.tensor(distance_band(label["scene"])),
         }

@@ -1,6 +1,7 @@
 """Multiview scene estimator: shared image encoder plus a geometry-aware transformer.
 
-Each camera image is encoded by the same pretrained ResNet-18. Every feature
+Each camera image is encoded by the same pretrained backbone (ResNet-18 or
+DINOv2 ViT-S/14, see ``aic_perception.backbones``). Every feature
 token receives a ray embedding computed from the camera intrinsics and the
 camera pose in the robot base frame, so calibration is an explicit input
 rather than something memorized. A transformer encoder fuses the tokens of
@@ -14,13 +15,10 @@ from typing import Any
 
 import torch
 from torch import nn
-from torchvision.models import ResNet18_Weights, resnet18
 
+from aic_perception.backbones import build_backbone
 from aic_perception.utils.rotations import matrix_from_6d
 
-IMAGENET_MEAN = (0.485, 0.456, 0.406)
-IMAGENET_STD = (0.229, 0.224, 0.225)
-BACKBONE_CHANNELS = 512
 OUTPUTS_PER_QUERY = 1 + 3 + 6 + 1
 
 
@@ -29,7 +27,7 @@ def camera_rays(
     base_from_camera: torch.Tensor,
     height: int,
     width: int,
-    stride: float,
+    stride: tuple[float, float],
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Compute base-frame ray origins and directions for every feature token.
 
@@ -38,15 +36,16 @@ def camera_rays(
         base_from_camera: ``(N, 4, 4)`` optical-frame poses.
         height: Feature map height.
         width: Feature map width.
-        stride: Input pixels per feature cell.
+        stride: Input pixels per feature cell along ``(u, v)``; they differ
+            when the backbone resizes the image to another aspect ratio.
 
     Returns:
         ``(N, H*W, 3)`` origins and unit directions.
     """
 
     device = intrinsics.device
-    rows = (torch.arange(height, device=device) + 0.5) * stride - 0.5
-    columns = (torch.arange(width, device=device) + 0.5) * stride - 0.5
+    rows = (torch.arange(height, device=device) + 0.5) * stride[1] - 0.5
+    columns = (torch.arange(width, device=device) + 0.5) * stride[0] - 0.5
     v, u = torch.meshgrid(rows, columns, indexing="ij")
     pixels = torch.stack((u, v, torch.ones_like(u)), dim=-1).reshape(1, -1, 3)
     directions = pixels @ torch.linalg.inv(intrinsics).transpose(1, 2)
@@ -77,16 +76,8 @@ class SceneEstimator(nn.Module):
 
         super().__init__()
         d_model = model_config["d_model"]
-        weights = (
-            ResNet18_Weights.IMAGENET1K_V1
-            if model_config["pretrained_backbone"]
-            else None
-        )
-        backbone = resnet18(weights=weights)
-        self.backbone = nn.Sequential(*list(backbone.children())[:-2]).to(
-            memory_format=torch.channels_last
-        )
-        self.input_projection = nn.Conv2d(BACKBONE_CHANNELS, d_model, kernel_size=1)
+        self.backbone = build_backbone(model_config).to(memory_format=torch.channels_last)
+        self.input_projection = nn.Conv2d(self.backbone.channels, d_model, kernel_size=1)
         self.ray_embedding = nn.Sequential(
             nn.Linear(6, d_model), nn.GELU(), nn.Linear(d_model, d_model)
         )
@@ -115,8 +106,6 @@ class SceneEstimator(nn.Module):
         self.head = nn.Sequential(
             nn.LayerNorm(d_model), nn.Linear(d_model, OUTPUTS_PER_QUERY)
         )
-        self.register_buffer("image_mean", torch.tensor(IMAGENET_MEAN).view(1, 3, 1, 1))
-        self.register_buffer("image_std", torch.tensor(IMAGENET_STD).view(1, 3, 1, 1))
         self.register_buffer("translation_mean", torch.tensor(translation_mean))
         self.register_buffer("translation_std", torch.tensor(translation_std))
 
@@ -149,12 +138,8 @@ class SceneEstimator(nn.Module):
             ``rotation`` (B, Q, 3, 3), and ``confidence_logit`` (B, Q).
         """
 
-        batch, cameras, _, height, _ = images.shape
-        pixels = images.flatten(0, 1).float().div(255.0)
-        pixels = ((pixels - self.image_mean) / self.image_std).contiguous(
-            memory_format=torch.channels_last
-        )
-        features = self.input_projection(self.backbone(pixels))
+        batch, cameras, _, height, width = images.shape
+        features = self.input_projection(self.backbone(images.flatten(0, 1)))
         feature_height, feature_width = features.shape[-2:]
         tokens = features.flatten(2).transpose(1, 2)
         origins, directions = camera_rays(
@@ -162,7 +147,7 @@ class SceneEstimator(nn.Module):
             base_from_camera.flatten(0, 1).float(),
             feature_height,
             feature_width,
-            height / feature_height,
+            (width / feature_width, height / feature_height),
         )
         origins = (origins - self.translation_mean) / self.translation_std
         tokens = tokens + self.ray_embedding(torch.cat((origins, directions), dim=-1))

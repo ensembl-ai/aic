@@ -57,6 +57,7 @@ imageio = "==2.37.3"
 imageio-ffmpeg = "==0.6.0"
 pynput = ">=1.7.6,<2"
 pyspacemouse = ">=2.0.0, <3"
+timm = "==1.0.15"
 
 [activation]
 scripts = ["pixi_env_setup.sh"]

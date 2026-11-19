@@ -1,1 +1,5 @@
 .pixi
+aic_utils/aic_perception/data
+aic_utils/aic_perception/runs
+**/wandb
+log

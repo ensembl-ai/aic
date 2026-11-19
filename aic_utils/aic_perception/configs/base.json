@@ -1,6 +1,6 @@
 {
   "schema": {
-    "name": "aic_v1",
+    "name": "aic_v2",
     "base_frame": "base_link",
     "cameras": [
       "left",
@@ -69,29 +69,14 @@
         "frame": "task_board/nic_card_mount_4/sfp_port_1_link_entrance"
       },
       {
-        "id": "sc_port_0",
+        "id": "sc_port_rank_0",
         "type": "sc_port",
         "frame": "task_board/sc_port_0/sc_port_base_link_entrance"
       },
       {
-        "id": "sc_port_1",
+        "id": "sc_port_rank_1",
         "type": "sc_port",
         "frame": "task_board/sc_port_1/sc_port_base_link_entrance"
-      },
-      {
-        "id": "sc_port_2",
-        "type": "sc_port",
-        "frame": "task_board/sc_port_2/sc_port_base_link_entrance"
-      },
-      {
-        "id": "sc_port_3",
-        "type": "sc_port",
-        "frame": "task_board/sc_port_3/sc_port_base_link_entrance"
-      },
-      {
-        "id": "sc_port_4",
-        "type": "sc_port",
-        "frame": "task_board/sc_port_4/sc_port_base_link_entrance"
       }
     ]
   },
@@ -100,7 +85,7 @@
     "height": 512
   },
   "dataset": {
-    "directory": "../data/aic_v1",
+    "directory": "../data/aic_v3",
     "validation_fraction": 0.1
   }
 }

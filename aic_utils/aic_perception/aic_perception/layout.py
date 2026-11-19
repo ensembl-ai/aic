@@ -10,8 +10,10 @@
   val/labels/...
 ```
 
-The split of a scene is a pure function of ``(seed, scene_id)``, so workers
-write directly into their split and resumed collections stay consistent.
+Scene ``board_id * views_per_board + view`` is one view of one board. The
+split is a pure function of ``(seed, board_id)``, so every view of a board
+lands in the same split, workers write directly into their split, and resumed
+collections stay consistent.
 """
 
 from __future__ import annotations
@@ -37,20 +39,20 @@ def scene_id_from_name(name: str) -> int:
     return int(name.split("_")[1].split(".")[0])
 
 
-def split_of(config: dict[str, Any], scene_id: int) -> str:
-    """Assign a scene to ``train`` or ``val`` deterministically.
+def split_of(config: dict[str, Any], board_id: int) -> str:
+    """Assign a board, with all its views, to ``train`` or ``val`` deterministically.
 
     Args:
         config: Configuration with ``collection.seed`` and
             ``dataset.validation_fraction``.
-        scene_id: Global scene index.
+        board_id: Global board index.
 
     Returns:
         Split name.
     """
 
     draw = np.random.default_rng(
-        [config["collection"]["seed"], scene_id, SPLIT_STREAM]
+        [config["collection"]["seed"], board_id, SPLIT_STREAM]
     ).uniform()
     return "val" if draw < config["dataset"]["validation_fraction"] else "train"
 

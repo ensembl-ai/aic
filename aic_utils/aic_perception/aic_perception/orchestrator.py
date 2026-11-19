@@ -42,7 +42,7 @@ RENDERING_FLAGS = {
     "nvidia_gpu": ["--gpus", "all", "-e", "NVIDIA_DRIVER_CAPABILITIES=all"],
     "cpu": [],
 }
-PROVENANCE_KEYS = ("schema", "images", "randomization")
+PROVENANCE_KEYS = ("schema", "images", "randomization", "viewpoints", "cable")
 
 
 def total_memory_gb() -> float:
@@ -62,7 +62,7 @@ def worker_count(config: dict[str, Any]) -> int:
         config: Validated collection configuration.
 
     Returns:
-        Worker count, never more than the number of scenes.
+        Worker count, never more than the number of boards.
     """
 
     configured = config["collection"]["workers"]
@@ -76,7 +76,7 @@ def worker_count(config: dict[str, Any]) -> int:
             count = min(count, docker["max_gpu_workers"])
     else:
         count = configured
-    return max(1, min(count, config["collection"]["scenes"]))
+    return max(1, min(count, config["collection"]["boards"]))
 
 
 def provenance(config: dict[str, Any]) -> dict[str, Any]:
@@ -84,6 +84,7 @@ def provenance(config: dict[str, Any]) -> dict[str, Any]:
 
     return {
         "seed": config["collection"]["seed"],
+        "views_per_board": config["collection"]["views_per_board"],
         "validation_fraction": config["dataset"]["validation_fraction"],
         **{key: config[key] for key in PROVENANCE_KEYS},
     }
@@ -142,6 +143,12 @@ def container_command(config: dict[str, Any], index: int, count: int) -> list[st
         f"{docker['container_prefix']}_{index}",
         "--cpus",
         str(docker["cpus_per_worker"]),
+        # A hard memory cap: a worker whose simulator grows past it is killed and
+        # relaunched (finished scenes are kept) instead of pushing the host into swap.
+        "--memory",
+        f"{docker['memory_per_worker_gb']}g",
+        "--memory-swap",
+        f"{docker['memory_per_worker_gb']}g",
         "--user",
         f"{os.getuid()}:{os.getgid()}",
         "-e",
@@ -163,8 +170,8 @@ def container_command(config: dict[str, Any], index: int, count: int) -> list[st
     ]
 
 
-def container_states(names: list[str]) -> dict[str, tuple[str, int]]:
-    """Return ``(status, exit_code)`` for each container.
+def container_states(names: list[str]) -> dict[str, tuple[str, int, bool]]:
+    """Return ``(status, exit_code, oom_killed)`` for each container.
 
     Args:
         names: Container names.
@@ -178,7 +185,7 @@ def container_states(names: list[str]) -> dict[str, tuple[str, int]]:
             "docker",
             "inspect",
             "-f",
-            "{{.Name}} {{.State.Status}} {{.State.ExitCode}}",
+            "{{.Name}} {{.State.Status}} {{.State.ExitCode}} {{.State.OOMKilled}}",
             *names,
         ],
         capture_output=True,
@@ -186,8 +193,8 @@ def container_states(names: list[str]) -> dict[str, tuple[str, int]]:
     ).stdout
     states = {}
     for line in output.splitlines():
-        name, status, code = line.split()
-        states[name.lstrip("/")] = (status, int(code))
+        name, status, code, oom = line.split()
+        states[name.lstrip("/")] = (status, int(code), oom == "true")
     return states
 
 
@@ -222,7 +229,7 @@ def run_collection(config: dict[str, Any]) -> int:
         f"{config['docker']['container_prefix']}_{index}" for index in range(count)
     ]
     remove_containers(names)
-    total = config["collection"]["scenes"]
+    total = config["collection"]["boards"] * config["collection"]["views_per_board"]
     initial = completed_scenes(config)
     print(f"Dataset: {dataset}")
     print(f"Config: {CONFIG_DIR}")
@@ -242,15 +249,18 @@ def run_collection(config: dict[str, Any]) -> int:
             time.sleep(config["collection"]["progress_interval_s"])
             states = container_states(names)
             for index, name in enumerate(names):
-                status, code = states[name]
+                status, code, oom = states[name]
+                # Hitting the memory cap is routine (the simulator grows over time)
+                # and loses nothing, so only other crashes count against the budget.
                 if (
                     status == "exited"
                     and code != 0
-                    and restarts[name] < config["docker"]["max_restarts"]
+                    and (oom or restarts[name] < config["docker"]["max_restarts"])
                 ):
-                    restarts[name] += 1
+                    restarts[name] += not oom
+                    reason = "hit the memory cap" if oom else f"exited with code {code}"
                     print(
-                        f"Worker {name} exited with code {code}; restart {restarts[name]}",
+                        f"Worker {name} {reason}; restarting ({restarts[name]} crashes)",
                         flush=True,
                     )
                     remove_containers([name])
@@ -259,12 +269,12 @@ def run_collection(config: dict[str, Any]) -> int:
                         check=True,
                         capture_output=True,
                     )
-                    states[name] = ("running", 0)
+                    states[name] = ("running", 0, False)
             done = completed_scenes(config)
             elapsed = time.monotonic() - started
             rate = (done - initial) / elapsed
             remaining = (total - done) / rate if rate > 0 else float("inf")
-            running = sum(status == "running" for status, _ in states.values())
+            running = sum(state[0] == "running" for state in states.values())
             print(
                 f"[{elapsed / 60:6.1f} min] {done}/{total} scenes, "
                 f"{rate * 60:.1f} scenes/min, ETA {remaining / 60:.1f} min, "
@@ -277,7 +287,7 @@ def run_collection(config: dict[str, Any]) -> int:
         print("\nStopping workers; completed scenes are kept and the next run resumes.")
         remove_containers(names)
         return 130
-    failed = [name for name, (_, code) in container_states(names).items() if code != 0]
+    failed = [name for name, state in container_states(names).items() if state[1] != 0]
     for name in failed:
         print(f"Worker {name} failed; inspect with: docker logs {name}")
     remove_containers([name for name in names if name not in failed])

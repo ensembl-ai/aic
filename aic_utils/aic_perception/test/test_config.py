@@ -11,7 +11,7 @@ import pytest
 from aic_perception.config import CONFIG_DIR, load_config
 
 
-@pytest.mark.parametrize("kind", ["collect", "train", "infer"])
+@pytest.mark.parametrize("kind", ["collect", "train", "refine", "infer"])
 def test_shipped_configs_load(kind: str) -> None:
     """Every shipped configuration validates and resolves absolute paths."""
 
@@ -61,4 +61,24 @@ def test_duplicate_target_ids_are_rejected(tmp_path: Path) -> None:
 
     directory = edited_copy(tmp_path, "base.json", duplicate)
     with pytest.raises(ValueError, match="unique"):
+        load_config("infer", directory)
+
+
+def test_dinov2_input_must_be_multiples_of_14(tmp_path: Path) -> None:
+    """DINOv2 patches are 14 pixels, so its input size must divide evenly."""
+
+    directory = edited_copy(
+        tmp_path, "train.json", lambda d: d["model"].update(backbone="dinov2_vits14", backbone_input=[576, 512])
+    )
+    with pytest.raises(ValueError, match="multiples of 14"):
+        load_config("train", directory)
+
+
+def test_sc_rank_rule_must_be_a_permutation(tmp_path: Path) -> None:
+    """Both SC slots map onto distinct ranks."""
+
+    directory = edited_copy(
+        tmp_path, "infer.json", lambda d: d.update(sc_rank_for_slot={"sc_port_0": 0, "sc_port_1": 0})
+    )
+    with pytest.raises(ValueError, match="sc_rank_for_slot"):
         load_config("infer", directory)

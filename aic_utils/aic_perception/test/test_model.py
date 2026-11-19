@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 
+import pytest
 import torch
 
 from aic_perception.config import load_config
@@ -15,11 +16,20 @@ CONFIG = load_config("train")
 TARGETS = len(CONFIG["schema"]["targets"])
 
 
-def small_model() -> SceneEstimator:
+BACKBONE_INPUTS = {"resnet18": [], "dinov2_vits14": [56, 70]}
+
+
+def small_model(backbone: str = "resnet18") -> SceneEstimator:
     """A tiny untrained estimator for shape and gradient checks."""
 
     settings = dict(
-        CONFIG["model"], pretrained_backbone=False, d_model=32, heads=4, feedforward=64
+        CONFIG["model"],
+        backbone=backbone,
+        backbone_input=BACKBONE_INPUTS[backbone],
+        pretrained_backbone=False,
+        d_model=32,
+        heads=4,
+        feedforward=64,
     )
     return SceneEstimator(settings, TARGETS, [-0.4, 0.3, 0.1], [0.1, 0.1, 0.05])
 
@@ -38,6 +48,7 @@ def batch(size: int = 2) -> dict[str, torch.Tensor]:
         "base_from_camera": torch.eye(4).repeat(size, 3, 1, 1),
         "present": present,
         "base_from_target": poses,
+        "band": torch.arange(size) % 4,
     }
 
 
@@ -75,15 +86,25 @@ def test_center_ray_follows_optical_axis() -> None:
     intrinsics = torch.tensor([[[100.0, 0.0, 0.5], [0.0, 100.0, 0.5], [0.0, 0.0, 1.0]]])
     pose = torch.eye(4)[None]
     pose[0, :3, 3] = torch.tensor([1.0, 2.0, 3.0])
-    origins, directions = camera_rays(intrinsics, pose, 1, 1, 2.0)
+    origins, directions = camera_rays(intrinsics, pose, 1, 1, (2.0, 2.0))
     assert torch.allclose(directions[0, 0], torch.tensor([0.0, 0.0, 1.0]))
     assert torch.allclose(origins[0, 0], torch.tensor([1.0, 2.0, 3.0]))
 
 
-def test_forward_shapes_and_backward() -> None:
+def test_rays_use_separate_strides_per_axis() -> None:
+    """Cell centres follow the horizontal and vertical stride independently."""
+
+    intrinsics = torch.tensor([[[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]])
+    _, directions = camera_rays(intrinsics, torch.eye(4)[None], 1, 2, (4.0, 2.0))
+    expected = torch.nn.functional.normalize(torch.tensor([[1.5, 0.5, 1.0], [5.5, 0.5, 1.0]]), dim=-1)
+    assert torch.allclose(directions[0], expected)
+
+
+@pytest.mark.parametrize("backbone", sorted(BACKBONE_INPUTS))
+def test_forward_shapes_and_backward(backbone: str) -> None:
     """Outputs cover every query and the loss trains every parameter group."""
 
-    model = small_model()
+    model = small_model(backbone)
     data = batch()
     outputs = model(data["images"], data["intrinsics"], data["base_from_camera"])
     assert outputs["presence_logit"].shape == (2, TARGETS)
@@ -107,9 +128,60 @@ def test_error_accumulator_reports_every_target() -> None:
     with torch.no_grad():
         outputs = model(data["images"], data["intrinsics"], data["base_from_camera"])
     types = [target["type"] for target in CONFIG["schema"]["targets"]]
-    errors = ErrorAccumulator([t["id"] for t in CONFIG["schema"]["targets"]], types)
+    errors = ErrorAccumulator([t["id"] for t in CONFIG["schema"]["targets"]], types, (0.005, math.radians(5.0)))
     errors.add(outputs, data)
     summary = errors.summary()
     assert summary["scenes"] == 4
     assert set(summary["per_type"]) == set(types)
     assert summary["per_target"]["task_board"]["samples"] == 4
+    assert {band: summary["per_band"][band]["board"]["samples"] for band in summary["per_band"]} == {
+        "home": 1,
+        "far": 1,
+        "mid": 1,
+        "close": 1,
+    }
+    calibration = summary["confidence_calibration"]
+    assert sum(row["samples"] for row in calibration) == int(data["present"].sum())
+
+
+def test_old_checkpoints_load_into_the_selectable_backbone(tmp_path) -> None:
+    """Checkpoints saved before selectable backbones keep loading as ResNet-18."""
+
+    from aic_perception.training import load_checkpoint
+
+    model = small_model()
+    state = {
+        key.replace("backbone.encoder.", "backbone.", 1): value
+        for key, value in model.state_dict().items()
+        if key not in ("backbone.mean", "backbone.std")
+    }
+    state["image_mean"] = torch.zeros(1, 3, 1, 1)
+    state["image_std"] = torch.ones(1, 3, 1, 1)
+    old_model = {k: v for k, v in CONFIG["model"].items() if k not in ("backbone", "backbone_input")}
+    old_model |= {"d_model": 32, "heads": 4, "feedforward": 64}
+    torch.save(
+        {
+            "model": state,
+            "config": {**CONFIG, "model": old_model},
+            "normalization": {"mean": [-0.4, 0.3, 0.1], "std": [0.1, 0.1, 0.05]},
+        },
+        tmp_path / "old.pt",
+    )
+    loaded, config = load_checkpoint(tmp_path / "old.pt", "cpu")
+    assert config["model"]["backbone"] == "resnet18"
+    for key, value in model.state_dict().items():
+        assert torch.equal(loaded.state_dict()[key], value)
+
+
+def test_early_stopping_waits_for_a_real_plateau() -> None:
+    """Stopping needs `patience` epochs without a `min_delta` gain; 0 disables it."""
+
+    from aic_perception.training import should_stop
+
+    improving = [10.0 - 0.5 * i for i in range(15)]
+    assert not should_stop(improving, 10, 0.02)
+    plateau = [5.0, 4.0, 3.0] + [3.01] * 10
+    assert should_stop(plateau, 10, 0.02)
+    assert not should_stop(plateau[:-1], 10, 0.02)
+    assert should_stop([3.0] + [2.99] * 10, 10, 0.02)
+    assert not should_stop(plateau, 0, 0.02)
