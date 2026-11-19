@@ -205,6 +205,12 @@ OVERLAY_SCHEMAS: dict[str, dict[str, Any]] = {
         "insertion": {
             "estimate_count": int,
             "estimate_timeout_s": float,
+            "search_after_s": float,
+            "search_timeout_s": float,
+            "search_height_m": float,
+            "search_move_s": float,
+            "search_shifts_m": list,
+            "search_anchors": dict,
             "control_period_s": float,
             "approach_duration_s": float,
             "coarse_height_m": float,
@@ -650,6 +656,11 @@ def validate_infer(config: dict[str, Any]) -> None:
     insertion = config["insertion"]
     if not 0.0 < insertion["track_alpha"] <= 1.0:
         raise ValueError("insertion.track_alpha must be in (0, 1]")
+    for target_id, anchor in insertion["search_anchors"].items():
+        if len(anchor) != 3 or any(not matches(v, float) for v in anchor):
+            raise ValueError(f"insertion.search_anchors.{target_id} must be three numbers")
+    if not insertion["search_shifts_m"] or any(not matches(v, float) for v in insertion["search_shifts_m"]):
+        raise ValueError("insertion.search_shifts_m must be a non-empty list of numbers")
     for key in ("estimate_count", "baseline_samples", "recovery_attempts", "settle_corrections", "track_reset_after"):
         if insertion[key] <= 0:
             raise ValueError(f"insertion.{key} must be positive")

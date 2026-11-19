@@ -257,6 +257,46 @@ class PortInsertion(Policy):
         position = np.median([pose[:3, 3] for pose in poses], axis=0)
         return transform(level_rotation(poses[-1][:3, :3]), position)
 
+    def find_port(self, move_robot: MoveRobotCallback, task: Task, target_id: str) -> np.ndarray:
+        """Perceive the target port, moving closer over the board when it is not seen at first.
+
+        If the start pose yields no present estimate within ``search_after_s``,
+        the plug moves to ``search_height_m`` above where the port should be
+        (``search_anchors``, its expected position in the board frame, placed
+        with the board estimate) and looks again, then at ``search_shifts_m``
+        along the board's slot axis. The board itself is reliably seen from
+        the start pose, and closer views see the ports far more reliably.
+
+        Returns:
+            Entrance pose in ``base_link``.
+
+        Raises:
+            InsertionFailed: If no viewpoint yields a present estimate.
+        """
+
+        settings = self.settings
+        anchor = settings["search_anchors"].get(target_id)
+        try:
+            return self.perceived_port(target_id, settings["search_after_s"] if anchor else None)
+        except InsertionFailed:
+            if anchor is None:
+                raise
+        board = self.perceived_port("task_board")
+        for index, shift in enumerate(settings["search_shifts_m"]):
+            expected = board @ np.array([anchor[0] + shift, anchor[1], anchor[2], 1.0])
+            goal = self.plug_pose()
+            goal[:3, 3] = expected[:3] + np.array([0.0, 0.0, settings["search_height_m"]])
+            self.get_logger().info(f"{target_id} not seen; searching from viewpoint {index + 1} over its expected position")
+            self.move_plug(move_robot, goal, settings["search_move_s"], mode="descent")
+            try:
+                port = self.perceived_port(target_id, settings["search_timeout_s"])
+            except InsertionFailed:
+                continue
+            self.note("search", viewpoint=index + 1, expected=expected[:3], port=port[:3, 3])
+            self.log_truth(f"found at search viewpoint {index + 1}", task, port=port)
+            return port
+        raise InsertionFailed(f"{target_id} not seen from the start pose or {index + 1} search viewpoints")
+
     def resolve_target(self, task: Task) -> str:
         """Schema target ID of the task's port.
 
@@ -937,7 +977,7 @@ class PortInsertion(Policy):
         settings = self.settings
         target_id = self.resolve_target(task)
         self.target_id = target_id
-        port = self.perceived_port(target_id)
+        port = self.find_port(move_robot, task, target_id)
         self.note("perception", target_id=target_id, port=port[:3, 3])
         self.log_truth("perception", task, port=port)
         self.port_xy = port[:2, 3].copy()

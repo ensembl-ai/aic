@@ -123,3 +123,23 @@ Failure causes:
   spiral search did not find the opening.
 - **SC drift or wrong depth: 2 trials** (plug drifted 15 mm sideways; plug
   went 35 mm deep, i.e. beside the port).
+
+## 2026-11-19: search when the target is not seen at the start pose
+
+Change: if the target port has no present estimate within 4 s at the start
+pose, the plug moves 8 cm above the port's expected position (mean
+board-frame position from the aic_v3 labels, placed with the board
+estimate, which is always detected) and looks again; then ±1.5 cm along
+the slot. SFP targets only (SC rank resolution happens before this).
+
+- The 9 SFP trials that failed on presence: 9 -> 751 (6 full, 3 partial).
+  The first search viewpoint found the port every time; its first estimate
+  was 1.5 to 14.7 mm off, corrected by the 5 cm re-estimate.
+- **40-trial benchmark: 2125 -> 2956** (74 per trial). Batches: 911, 607,
+  695, 744.
+  - SFP 26: none failed; 17 full, 9 below 90 (mostly partial insertions
+    at 65 to 70, i.e. seated but not counted).
+  - SC 14: 6 full, 2 partial, 5 failed (1 point), 1 wrong port
+    (bench_09, -11).
+- Committed. Next: the seat hold for the partial insertions (~13 trials of
+  about 25 points each), then SC entry.
