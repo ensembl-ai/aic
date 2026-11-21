@@ -207,3 +207,15 @@ are fixed and that board sits elsewhere.
 - Decks (exec, technical, model deep dive) and a long-form article published
   as private artifacts; charts in `runs/figures/` (training curve, accuracy
   by distance, confidence calibration). Inference latency: 44 ms median.
+
+## 2026-11-21: seat hold re-tested on the current search (branch rmalhan/seat_hold)
+
+- 40 trials: 3030 vs 3078 (SFP 2290 vs 2349, SC 740 vs 730). Not committed.
+  The hold fixed all three SFP partials (bench_16, 27, 32: about +75).
+  Losses were elsewhere: bench_31 went in beside the port after contact
+  6 mm above the entrance (before seating), SC trials swung both ways
+  (bench_06 +87, bench_11 -93). bench_24 stayed partial: seated 0.5 mm
+  short (46.2 mm), so holding cannot help it.
+- Refiner v1 validation, within 2 cm of the port: SC offset 0.18 mm median,
+  rotation 0.20° mean (scene estimator up close: ~1.6°). Live accuracy not
+  yet measured. Training data (aic_v3, aic_v4_close) is no longer on disk.
