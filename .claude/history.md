@@ -190,3 +190,20 @@ are fixed and that board sits elsewhere.
   position always from the board estimate. SC 730 (search not used for SC;
   6 failures as before: bench_01, 02, 03, 06, 10, and 09 at 37).
   Committed. Next: seat hold (partials), then SC entry.
+
+## 2026-11-20: presentation content campaign
+
+- Rich recorder (wrist images, camera poses, estimates, wrench, ground truth
+  for logging) and renderers for annotated overlay and 3D videos, in
+  `runs/videos/tooling/`; content in `runs/videos/content/` (README there).
+- Failure modes re-created with their code: tracking jams SC at 2.0° (yaw
+  locked from far away while the close-range estimate was 0.2° off); before
+  the search the target card's presence stays 0 and the robot never moves;
+  continuous correction while moving makes the plug swing 50-110 mm over
+  the port. The old search's plug knock did not reproduce (4 of 4 inserted).
+- Current policy, 15 showcase trials: 996; SC failures seen: spiral misses
+  at 1.8 and 3.1 mm off axis (sample_trial_3, bench_06), arm stops 46 mm
+  short (bench_02), drift after entry (bench_09).
+- Decks (exec, technical, model deep dive) and a long-form article published
+  as private artifacts; charts in `runs/figures/` (training curve, accuracy
+  by distance, confidence calibration). Inference latency: 44 ms median.
