@@ -219,3 +219,46 @@ are fixed and that board sits elsewhere.
 - Refiner v1 validation, within 2 cm of the port: SC offset 0.18 mm median,
   rotation 0.20° mean (scene estimator up close: ~1.6°). Live accuracy not
   yet measured. Training data (aic_v3, aic_v4_close) is no longer on disk.
+
+## 2026-11-21: reliability study setup (branch rmalhan/reliability_v1_test)
+
+- Goal: the 40-trial benchmark 20 times on main's code (7809494) to measure
+  per-trial reliability and the true score spread.
+- Parallel sims tried and rejected. Each instance was isolated (own network
+  namespace; policy, inference and recorder in a sidecar container sharing
+  it). At 4 instances (load 39 on 24 cores) and even at 2 (load ~18), trials
+  were corrupted: stale state at trial start (plug logged 45 to 175 mm below
+  the entrance, board estimates 149 to 424 mm off) and extra partials.
+  Hypothesis: TF arrives late after the trial reset under load. Never seen
+  in 80 single-instance trials. Results from parallel runs were discarded;
+  the study runs one instance at a time (about 13 h).
+- Robustness note for later: the policy should check that TF and estimates
+  are fresh after a reset; slower evaluation hardware could trigger the
+  same failure.
+- Data per trial: engine score breakdown, policy log (ground truth per
+  phase), trial record, every scene estimate, 10 Hz wrench, joints, TCP,
+  plug and true target poses (no images; the camera-image recorder alone
+  used 1.3 cores).
+
+## 2026-11-21: reliability study results (main 7809494, 20 x 40 trials, one instance)
+
+Report and per-trial CSV: `runs/benchmark/reliability_v1/study/{report.md,trials.csv}`
+(analysis: `runs/benchmark/reliability_v1/analyze.py`).
+
+- Total per run: mean 2876, sd 141 (2608 to 3118). The 3078 single run was
+  a lucky draw. Detecting a change needs about 14 runs per version for
+  +150 and 56 for +75; 4 runs suffice for +300.
+- Points lost per run, biggest first: SC stalled on the surface 192; SFP
+  partial at full depth 173 (26% of SFP trials, depth identical to counted
+  insertions: pure timing, i.e. what the seat hold fixes); SC slid off after
+  contact 157; SC port not detected 92; SC arm stops short of the hover 80.
+- Four SC trials fail in 20 of 20 runs (systematic, not noise):
+  bench_01 SC port never detected (no SC search exists); bench_02 arm stalls
+  46 mm short of the pre-contact pose every time (reach or collision); bench_03
+  and bench_09 arrive 3 to 7 mm off and 2 to 2.7° rotated with a hover
+  estimate only 2 to 3 mm off, so plug pose in the grasp plus rotation is
+  the problem (exactly what the refiner measures: 0.2 mm, 0.2°).
+- SC entry vs ground-truth plug pose at contact: under 1.5 mm off, 79 to 100%
+  full; 1.5 to 2.5 mm, 67% (32% if rotated 1° or more); over 2.5 mm and 1° or
+  more, 0 of 47.
+- Board search used in 179 trials: 115 full, 59 partial (timing), 5 failures.
