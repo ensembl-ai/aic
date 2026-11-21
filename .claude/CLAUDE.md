@@ -1,7 +1,9 @@
 # AIC cable insertion: working notes for Claude
 
 Team prototype for the AI for Industry Challenge (cable insertion in Gazebo).
-Our code lives in `aic_utils/aic_perception` on branch `rmalhan/far_approach`.
+Our code lives in `aic_utils/aic_perception` on `main` (the
+`rmalhan/far_approach` work was fast-forwarded into `main` on 2026-11-20
+and the branch deleted).
 The running history of results and decisions is in [history.md](history.md);
 read it at the start of a session and append to it after every benchmark,
 training run, or design decision.
@@ -26,8 +28,9 @@ training run, or design decision.
   processes. Kill by PID found with a bracketed grep
   (`ps -eo pid,cmd | grep -E "lib/aic_mode[l]|run_infer[e]nce"`); never
   `pkill -f` with a pattern that appears in the same command.
-- Git: only `origin` (ensembl-ai/aic) and only the working branch. Never
-  push, PR, or merge against `parent` (intrinsic-dev/aic) or other branches.
+- Git: only `origin` (ensembl-ai/aic) and only the current working branch
+  (now `main`). Never push, PR, or merge against `parent` (intrinsic-dev/aic);
+  touch other branches only when the user asks.
   Commit a policy change only when it beats the current best benchmark.
 - Before every commit run the system `black --check .` from the repo root
   (CI's Python style check uses the Ubuntu `black` package, default line
