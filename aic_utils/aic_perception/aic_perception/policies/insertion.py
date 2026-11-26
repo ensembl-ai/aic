@@ -438,12 +438,51 @@ class PortInsertion(Policy):
             f"{target_id} not seen from the start pose or {index} search viewpoints"
         )
 
-    def resolve_target(self, task: Task) -> str:
+    def sc_presence(self, duration: float) -> dict[str, float]:
+        """Presence rate of each SC rank over the last ``sc_vote_window_s`` of a watch.
+
+        Args:
+            duration: Seconds to watch the fresh estimates.
+
+        Raises:
+            InsertionFailed: If no estimate arrives.
+        """
+
+        started = self.now()
+        self.estimates.clear()
+        seen: list[tuple[float, set[str]]] = []
+        while self.now() - started < duration:
+            while self.estimates:
+                message = self.estimates.pop(0)
+                stamp = stamp_seconds(message.header.stamp)
+                if stamp < started:
+                    continue
+                present = {
+                    target.id
+                    for target in message.targets
+                    if target.id in SC_RANK_IDS and target.present
+                }
+                seen.append((stamp, present))
+            self.sleep_for(0.1)
+        if not seen:
+            raise InsertionFailed("No scene estimates; is run_inference.py running?")
+        window_start = seen[-1][0] - self.settings["sc_vote_window_s"]
+        recent = [present for stamp, present in seen if stamp >= window_start]
+        return {
+            rank: sum(rank in present for present in recent) / len(recent)
+            for rank in SC_RANK_IDS
+        }
+
+    def resolve_target(self, task: Task, move_robot: MoveRobotCallback) -> str:
         """Schema target ID of the task's port.
 
         SFP ports are named as in the task. SC ports are reported by rank
-        along their rail: with one present it is the target; with two,
-        ``sc_rank_for_slot`` maps the task's slot onto a rank.
+        along their rail, so both must be in view: the plug first moves to
+        ``sc_view_point`` (board frame, above the SC rail and clear of the
+        card tops), the estimates are watched for ``sc_watch_s`` and the
+        ranks voted on over the last ``sc_vote_window_s``. With one SC port
+        present it is the target; with two, ``sc_rank_for_slot`` maps the
+        task's slot onto a rank.
 
         Raises:
             InsertionFailed: If no SC port is present in the estimates.
@@ -451,31 +490,20 @@ class PortInsertion(Policy):
 
         if task.port_type != "sc":
             return f"{task.target_module_name}/{task.port_name}"
-        started = self.now()
-        self.estimates.clear()
-        votes = dict.fromkeys(SC_RANK_IDS, 0)
-        messages = 0
-        deadline = started + self.settings["estimate_timeout_s"]
-        while messages < self.settings["estimate_count"]:
-            if self.now() > deadline:
-                raise InsertionFailed(
-                    "No scene estimates; is run_inference.py running?"
-                )
-            while self.estimates:
-                message = self.estimates.pop(0)
-                if stamp_seconds(message.header.stamp) < started:
-                    continue
-                messages += 1
-                for target in message.targets:
-                    if target.id in votes and target.present:
-                        votes[target.id] += 1
-            self.sleep_for(0.1)
-        present = [
-            target_id for target_id, count in votes.items() if 2 * count > messages
-        ]
+        settings = self.settings
+        board = self.perceived_port("task_board")
+        view = (board @ np.append(settings["sc_view_point"], 1.0))[:3]
+        self.move_plug(
+            move_robot,
+            transform(self.plug_pose()[:3, :3], view),
+            settings["search_move_s"],
+            mode="descent",
+        )
+        votes = self.sc_presence(settings["sc_watch_s"])
+        present = [target_id for target_id, rate in votes.items() if rate > 0.5]
         if not present:
             raise InsertionFailed(
-                f"No SC port is present in the estimates (votes {votes})"
+                f"No SC port is present in the estimates (presence {votes})"
             )
         if len(present) == 1:
             target_id = present[0]
@@ -658,6 +686,15 @@ class PortInsertion(Policy):
                     )
             refined = port.copy()
             refined[:3, 3] = reading["port"]
+            # Aim off the port axis by lip_bias_m along the plug's y axis (the
+            # port's, once aligned): the side of the channel the plug can slide
+            # under the SC port's internal lip from.
+            current = tcp @ self.tcp_from_plug
+            bias = current[:3, :3] @ np.array(
+                [0.0, self.settings["lip_bias_m"][task.plug_type], 0.0]
+            )
+            aim = offset[:2] + bias[:2]
+            remaining = float(np.linalg.norm(aim))
             self.get_logger().info(
                 f"Servo {iteration}: port {1000 * offset[0]:+.2f}, {1000 * offset[1]:+.2f} mm sideways, "
                 f"{1000 * offset[2]:+.2f} mm vertically, yaw {np.degrees(yaw):+.2f} deg from the plug "
@@ -675,19 +712,18 @@ class PortInsertion(Policy):
                 truth=truth,
             )
             if (
-                lateral < settings["tolerance_m"]
+                remaining < settings["tolerance_m"]
                 and abs(np.degrees(yaw)) < settings["min_yaw_deg"]
             ):
                 return refined, goal, True
             if iteration == settings["iterations"]:
                 break
             plug = reading["plug"]
-            step = offset[:2] * min(1.0, settings["max_step_m"] / max(lateral, 1e-9))
+            step = aim * min(1.0, settings["max_step_m"] / max(remaining, 1e-9))
             turn = np.clip(
                 np.degrees(yaw), -settings["max_yaw_deg"], settings["max_yaw_deg"]
             )
             turn = turn if abs(turn) >= settings["min_yaw_deg"] else 0.0
-            current = tcp @ self.tcp_from_plug
             rotation = level_rotation(
                 from_xyz_rpy((0, 0, 0), (0.0, 0.0, np.radians(turn)))[:3, :3]
                 @ current[:3, :3]
@@ -699,7 +735,7 @@ class PortInsertion(Policy):
                 ),
             )
             self.move_plug(move_robot, goal, settings["move_duration_s"], mode="servo")
-        return refined, goal, lateral < settings["tolerance_m"]
+        return refined, goal, remaining < settings["tolerance_m"]
 
     # Trial record ---------------------------------------------------------------
 
@@ -825,6 +861,42 @@ class PortInsertion(Policy):
         self.wait_until_still(settings["still_timeout_s"], 0.0)
 
     # Phases ------------------------------------------------------------------
+
+    def return_home(self, move_robot: MoveRobotCallback) -> None:
+        """Bring the arm to the home pose when a trial starts elsewhere.
+
+        The engine homes the arm between trials, but after a simulator fault
+        on reset (physics entities of the deleted board left behind) the joint
+        reset fails and the arm starts where the last trial left it, often low
+        among the cards. Perception from there is out of distribution, so
+        rise vertically to home height, then move to the home pose.
+        """
+
+        tcp = self.lookup("base_link", "gripper/tcp")
+        if tcp is None:
+            raise InsertionFailed("gripper/tcp is not in TF")
+        home_settings = self.settings["home_tcp"]
+        home = from_xyz_quaternion_xyzw(
+            tuple(home_settings["translation"]),
+            tuple(home_settings["quaternion_xyzw"]),
+        )
+        distance = float(np.linalg.norm(tcp[:3, 3] - home[:3, 3]))
+        self.note("start", home_distance_mm=1000 * distance, tcp=tcp[:3, 3])
+        if distance <= self.settings["home_tolerance_m"]:
+            return
+        self.get_logger().warning(
+            f"Trial started {1000 * distance:.0f} mm from home; returning home first"
+        )
+        rise = tcp.copy()
+        rise[2, 3] = max(tcp[2, 3], home[2, 3])
+        duration = self.settings["search_move_s"]
+        self.move_plug(move_robot, rise @ self.tcp_from_plug, duration)
+        self.move_plug(move_robot, home @ self.tcp_from_plug, duration)
+        moved = self.lookup("base_link", "gripper/tcp")
+        self.note(
+            "returned_home",
+            home_distance_mm=1000 * float(np.linalg.norm(moved[:3, 3] - home[:3, 3])),
+        )
 
     def track_approach(
         self, move_robot: MoveRobotCallback, task: Task, port: np.ndarray
@@ -1155,7 +1227,16 @@ class PortInsertion(Policy):
             )
             mode, duration = "recovery", self.settings["recovery_duration_s"]
             start = plug.copy()
-            if attempt + 1 == self.settings["recovery_attempts_before_spiral"]:
+            lift = self.settings["jam_lift_m"][plug_type]
+            if lift > 0.0 and depth >= self.settings["inside_depth_m"]:
+                # Jammed inside the port (the SC lip): stay in the channel, back
+                # off the lip edge and press again from the lip_bias_m side.
+                start[2, 3] += lift
+                start[:3, 3] += start[:3, :3] @ np.array(
+                    [0.0, self.settings["lip_bias_m"][plug_type], 0.0]
+                )
+                self.move_plug(move_robot, start, 1.0, mode="recovery")
+            elif attempt + 1 == self.settings["recovery_attempts_before_spiral"]:
                 lifted = plug.copy()
                 lifted[2, 3] += self.settings["recovery_retract_m"]
                 self.move_plug(move_robot, lifted, 1.0, mode="descent")
@@ -1225,6 +1306,9 @@ class PortInsertion(Policy):
             offset = true_plug[:3, 3] - entrance[:3, 3]
             values["plug_off_axis_mm"] = 1000 * float(np.linalg.norm(offset[:2]))
             values["plug_above_entrance_mm"] = 1000 * float(offset[2])
+            in_port = entrance[:3, :3].T @ offset
+            values["plug_port_x_mm"] = 1000 * float(in_port[0])
+            values["plug_port_y_mm"] = 1000 * float(in_port[1])
             relative = entrance[:3, :3].T @ true_plug[:3, :3]
             values["plug_rotation_deg"] = float(
                 np.degrees(
@@ -1240,6 +1324,8 @@ class PortInsertion(Policy):
             "port_lateral_error_mm": "({:.2f} mm sideways)",
             "plug_off_axis_mm": "true plug {:.2f} mm off axis,",
             "plug_above_entrance_mm": "{:+.2f} mm from entrance;",
+            "plug_port_x_mm": "port frame x {:+.2f},",
+            "plug_port_y_mm": "y {:+.2f} mm;",
             "plug_rotation_deg": "true plug rotation {:.2f} deg from port;",
             "plug_estimate_error_mm": "plug estimate error {:.2f} mm",
         }
@@ -1332,7 +1418,8 @@ class PortInsertion(Policy):
             tuple(grasp["translation"]), tuple(grasp["quaternion_xyzw"])
         )
         settings = self.settings
-        target_id = self.resolve_target(task)
+        self.return_home(move_robot)
+        target_id = self.resolve_target(task, move_robot)
         self.target_id = target_id
         port = self.find_port(move_robot, task, target_id)
         self.note("perception", target_id=target_id, port=port[:3, 3])
@@ -1342,11 +1429,20 @@ class PortInsertion(Policy):
         if settings["tracking_approach"]:
             port, pre_contact = self.track_approach(move_robot, task, port)
         else:
-            # Staged: straight to a coarse hover above the port (the entrance is
-            # the highest point of its card, so the path stays clear),
-            # re-estimate there, then down to pre-contact over the new estimate.
+            # Staged: to a coarse hover above the port, re-estimate there, then
+            # down to pre-contact over the new estimate. An SFP entrance is the
+            # highest point of its card, so the straight path stays clear; an
+            # SC port sits low beside the cards, so the plug crosses over at
+            # ``approach_transit_height_m`` above it and descends vertically.
             coarse = port.copy()
             coarse[2, 3] += settings["coarse_height_m"]
+            transit_height = settings["approach_transit_height_m"][task.plug_type]
+            if transit_height > 0.0:
+                transit = port.copy()
+                transit[2, 3] += transit_height
+                self.move_plug(
+                    move_robot, transit, settings["search_move_s"], mode="descent"
+                )
             self.move_plug(
                 move_robot, coarse, settings["approach_duration_s"], mode="descent"
             )
@@ -1419,5 +1515,6 @@ class PortInsertion(Policy):
             depth_mm=1000 * depth,
             seat_mm=1000 * settings["min_seat_depth_m"][task.plug_type],
         )
+        seated = bool(depth >= settings["min_seat_depth_m"][task.plug_type])
         self.log_truth("final", task, plug=self.plug_pose())
-        return bool(depth >= settings["min_seat_depth_m"][task.plug_type])
+        return seated

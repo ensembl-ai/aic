@@ -14,12 +14,12 @@
     "tf_prefix": "aic_perception"
   },
   "refiner": {
-    "enabled": false,
+    "enabled": true,
     "checkpoint": "../runs/refiner_v1/checkpoints/best.pt",
     "device": "cuda",
     "iterations": 3,
     "samples": 3,
-    "tolerance_m": 0.0005,
+    "tolerance_m": 0.0002,
     "max_step_m": 0.008,
     "max_yaw_deg": 8.0,
     "min_yaw_deg": 0.5,
@@ -40,6 +40,20 @@
     "sc_port_1": 0
   },
   "insertion": {
+    "home_tcp": {
+      "translation": [
+        -0.3715,
+        0.1948,
+        0.323
+      ],
+      "quaternion_xyzw": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "home_tolerance_m": 0.05,
     "estimate_count": 5,
     "estimate_timeout_s": 30.0,
     "search_after_s": 4.0,
@@ -48,11 +62,34 @@
     "search_snapshot_s": 1.5,
     "search_transit_height_m": 0.15,
     "search_max_offset_m": 0.03,
+    "sc_view_point": [
+      -0.075,
+      0.0295,
+      0.23
+    ],
+    "sc_watch_s": 3.0,
+    "sc_vote_window_s": 1.5,
+    "approach_transit_height_m": {
+      "sfp": 0.0,
+      "sc": 0.2
+    },
     "search_viewpoints": [
-      [0.0, 0.08],
-      [0.0, 0.12],
-      [0.015, 0.08],
-      [-0.015, 0.08]
+      [
+        0.0,
+        0.08
+      ],
+      [
+        0.0,
+        0.12
+      ],
+      [
+        0.015,
+        0.08
+      ],
+      [
+        -0.015,
+        0.08
+      ]
     ],
     "search_anchors": {
       "nic_card_mount_0/sfp_port_0": [
@@ -154,16 +191,16 @@
       0.0
     ],
     "descent_stiffness": [
-      300.0,
-      300.0,
+      800.0,
+      800.0,
       300.0,
       200.0,
       200.0,
       200.0
     ],
     "descent_damping": [
-      40.0,
-      40.0,
+      80.0,
+      80.0,
       35.0,
       30.0,
       30.0,
@@ -178,16 +215,16 @@
       0.0
     ],
     "servo_stiffness": [
-      300.0,
-      300.0,
+      800.0,
+      800.0,
       300.0,
       200.0,
       200.0,
       200.0
     ],
     "servo_damping": [
-      60.0,
-      60.0,
+      80.0,
+      80.0,
       60.0,
       35.0,
       35.0,
@@ -282,6 +319,14 @@
     "recovery_duration_s": 5.0,
     "recovery_retract_m": 0.012,
     "unstick_margin_m": 0.001,
+    "lip_bias_m": {
+      "sfp": 0.0,
+      "sc": 0.0002
+    },
+    "jam_lift_m": {
+      "sfp": 0.0,
+      "sc": 0.001
+    },
     "log_ground_truth": true
   },
   "plug_grasp": {

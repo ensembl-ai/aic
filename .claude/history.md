@@ -207,3 +207,134 @@ are fixed and that board sits elsewhere.
 - Decks (exec, technical, model deep dive) and a long-form article published
   as private artifacts; charts in `runs/figures/` (training curve, accuracy
   by distance, confidence calibration). Inference latency: 44 ms median.
+
+## 2026-11-21: seat hold on the 20-trial targeted set (branch rmalhan/seat_hold_v2, uncommitted)
+
+Report: `runs/benchmark/seat_hold_v2/report.md` (10 runs vs the 20-run baseline).
+- Partials on the set 30% -> 8%; seated plugs scored partial 30% -> 9%; full
+  insertions 67% -> 84%. Mean score flat (82.3 -> 82.0) because failures rose
+  3% -> 8%, all before seating (the hold never ran in them).
+- Failures cluster in runs 5 and 10 (run 10: 7 failures, 1561 s instead of
+  ~850 s; a "483 mm" drift in run 5), the same stale-state symptoms seen under
+  parallel load. Likely machine load during the day; the baseline ran overnight.
+- Lesson: compare A/B interleaved on the same set, not against a baseline
+  recorded at another time.
+
+## 2026-11-23 to 25: subsystem diagnostics and SC fixes (rmalhan/seat_hold_v2, uncommitted)
+
+Diagnostics report (5 pages): `runs/analysis/insertion_diagnostics.pdf`
+(`report_pdf.py`; metrics from `subsystems.py` over the 800-trial study).
+Experiments in `runs/experiments/` (interleaved A/B via `ab.sh`, report via
+`ab_report.py`), all on the 7 SC trials bench_00/01/02/03/04/09/13.
+- E1 seat hold soft rotation vs stiff: not conclusive. E2 refiner probe live
+  (clean trials): SC 0.19 mm / 0.13 deg median, SFP 0.27 mm / 0.25 deg. The
+  probe harness broke after trial 5 (trials start disturbed); rerun pending.
+- E3 SC viewpoint + high transit (code): resolve SC rank from `sc_view_point`
+  above the SC rail (board frame, 50 mm above card tops), vote over the last
+  `sc_vote_window_s`; SC approach crosses at `approach_transit_height_m` and
+  descends vertically. bench_01 now picks the right port; bench_02/13 reach
+  the hover. bench_04 lands ~1 mm worse at pre-contact (open-loop step).
+- E4 refiner servo on vs off (3 runs each): full 19% -> 67%, mean score per
+  trial 20 -> 60. Servo converges in 2 steps to 0.1-0.4 mm and 0.1-0.2 deg,
+  no oscillation. bench_01/03/13/04 now insert.
+- Remaining SC mechanisms found:
+  1. Lip jam at exactly 10.5 mm depth (12 of 13 entered-not-seated study
+     trials, and E4): the SC port model has a 0.25 mm lip
+     (`cube_collider_box.001`) over the middle 10.8 mm of the channel; plug
+     housing 7.3 mm in an 8.1 mm channel (7.85 under the lip), so it passes
+     only within about -0.4..+0.15 mm of centre, lip side = -y of the entrance
+     frame. After 3 stalls the press retracts out of the correct hole.
+  2. Lateral drift during the 12 mm descent after the servo (bench_09): plug
+     aligned to 0.1-0.2 mm lands 1.3-2.3 mm off. Lateral impedance is 300 N/m.
+     E5 tests 800 N/m lateral for servo and descent.
+  3. bench_02: descent stops by force 1-7 mm above the entrance with the plug
+     aligned to 0.1-0.4 mm: something other than the plug tip touches first
+     (SC port at rail end -55 mm, next to NIC card 4). Not yet diagnosed.
+- Policy logs now include the true plug offset in the port frame (x, y).
+- Decks updated: system chain + root causes (exec), diagnostics section of
+  five slides (technical), live refiner accuracy (model).
+- E5 lateral stiffness 800 vs 300 N/m for servo and descent (servo on in
+  both): full 62% -> 76%, mean 58.6 -> 71.5. bench_09 descent drift 2.6 ->
+  1.1-1.4 mm (halved, not gone). Adopted in infer.json; refiner enabled.
+- E6 lip handling on lip-prone boards (06/10/11/13 + 09/01/00/04): lip stalls
+  6 -> 0, bench_10/11/13 full 4/9 -> 9/9; mean 66.7 -> 72.8, full flat at 71%
+  because of two new losses, neither caused by the change:
+  * bench_06 scores partial (65) exactly when the seated plug rests at port x
+    = -0.35 mm, i.e. against the channel side wall (9.0 mm housing in a
+    9.7 mm channel); full at x = +0.2 / -0.17. Seated-against-the-wall is not
+    counted by the touch sensor. E7 holds the seated plug on the servo's port
+    axis (`seat_hold_on_axis`).
+  * Stale trial start (B run 2): bench_01 began with the plug already slipped
+    in the gripper (66 mm off axis at the first reading, 21-23 deg rotated,
+    kinematic plug estimate 18 mm off); the refiner was out of range and
+    "aligned" it, the plug went in beside the port, and the next two trials
+    (bench_00/04, normally 100%) saw no SC port. Needs a grasp sanity check
+    (refiner plug vs kinematics) and safe abort.
+- bench_02 (SC port at the -55 mm rail limit): the plug tip touches something
+  ~5 mm above the port face and is pushed toward the slot centre; hypothesis:
+  duplex plug body vs the slot end. Open.
+- Refiner servo now runs for SFP too (refiner.enabled is global): SFP must be
+  validated before any of this goes to main.
+- E7 seat hold on the port axis: refuted (plug centred to 0.1 mm, bench_06
+  still partial 2/3; A runs at x = -0.34 counted). Removed. The wall-contact
+  explanation from E6 is wrong; cause of bench_06 never-firing touch unknown.
+- E8 full benchmark x4 with the stack (SC viewpoint + transit, refiner servo
+  at 0.2 mm, 800 N/m lateral servo/descent, lip bias + no retract inside,
+  2.5 s seat hold), `runs/experiments/e8_full/`:
+  * Healthy runs: 3502 and 3430 vs main 2876 +- 141 (study). Per trial over
+    all 150 scored trials: SFP 87% full (main 71%), SC 81% (main 47%).
+  * run 3 batch 1: simulator setup failure (TareFt timeout, board not
+    deleted): infrastructure, excluded.
+  * Collapses in 2 of 15 batches (run 3 batch 2 from bench_22, run 4 batch 3
+    from bench_15): from one trial on, every trial fails; at the start the
+    TF arm pose reads TCP z 0.159 (home ~0.33), plug estimate 14 mm off,
+    board estimate 144 mm off. The engine logged a clean reset (cable
+    deleted, robot homed). Main never collapsed (0 of 80 batches); the
+    seat_hold_v2 runs showed the same signature in 2 of 10 runs, so the
+    seat hold (commands sent while the CablePlugin has locked the end
+    effector static) is the prime suspect. Not resolved: not for main.
+- E9 full benchmark, stack with vs without the 2.5 s seat hold (2 runs each,
+  interleaved; first attempt void: seat_hold_s 0.0 fails validation, used
+  0.05): no hold 3374 / 3350, hold 3248 / 3434. Hold turns partials into
+  fulls (18% -> 4% partial, 79% -> 89% full) but failures rise 4% -> 8% (as
+  in seat_hold_v2): score-neutral (84.1 vs 83.5 per trial). No collapse in
+  these 4 runs nor in the 2 earlier hold runs, so the hold is not shown to
+  cause the E8 collapses; cause still open.
+- Stack totals over 10 full runs: 3502, 3430, 3445, 3189, 3374, 3248, 3434,
+  3350 clean; 2235 and 2703 with a collapsed batch (2235 also lost a batch to
+  a simulator setup failure). Main: 2876 +- 141 over 20 runs.
+
+## 2026-11-25: batch collapses explained (simulator reset fault), return-home fix, seat hold dropped
+
+- Collapse cause: a simulator fault on the post-trial reset. After a
+  successful insertion the CablePlugin holds the cable and end effector with
+  static joints; the engine deletes the board, then the cable. Occasionally
+  physics keeps referencing the deleted board's entities ("Physics.cc:3188
+  physics entity ptr ... does not exist", millions of lines), the
+  ResetJointsPlugin homing fails, and every later trial starts where the
+  previous one ended (bench_30 started at bench_26's final TCP, z 0.14).
+  Perception from that pose is out of distribution (board 144 mm off).
+- Not stack-specific; correction of the earlier claim "main never
+  collapsed": 9 faulty batches across all logs, including main's
+  reliability_v1 (3 of 80; its two corrupted batch_2 runs are that batch's
+  two lowest scores of 20), seat_hold_v2 1/10, e1 1/12, e2 1/1, e6 1/6, e8 2/16.
+- Fix (policy side, competition-legal: TCP from TF only): `return_home` at
+  the start of each trial. If the TCP is more than `home_tolerance_m`
+  (0.05) from `home_tcp`, rise vertically to home height, then move home,
+  then perceive. Start distance is logged in every record ("start" phase).
+- Seat hold removed (code, schema, config): score-neutral in E9.
+- E10: faulty start reproduced by setting the engine's home joints to the
+  pose recorded at bench_30's faulty start (5 trials).
+- E10 result (`runs/experiments/e10_return_home/run_1`): return_home fired on
+  4 of 5 trials (start 276-282 mm off; the first trial began at true home)
+  and brought the TCP back to within 0.6-0.9 mm of home in 14 s (one SC
+  trial 166 mm, still moving); perception afterwards normal (2.5-4 mm port
+  error). All 4 still failed (57 total): the plug sits in the hand far
+  from the calibrated grasp (13-20 mm, ~82 deg in this test). The real
+  faulty batches show the same second effect, smaller: E8 run 3 batch 2
+  plug estimate error 7-15 mm and 12-22 deg after the fault (normal: <2 mm,
+  <1 deg). So a faulty reset breaks two things, the start pose (now
+  handled) and the grasp (the cable spawns at the gripper while the arm is
+  elsewhere). Fixing the second needs a per-trial grasp measurement
+  (position and rotation) from the wrist cameras; the refiner's
+  grasp_update covers <= 6 mm and no rotation.

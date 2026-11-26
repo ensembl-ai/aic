@@ -207,6 +207,8 @@ OVERLAY_SCHEMAS: dict[str, dict[str, Any]] = {
             "tf_prefix": str,
         },
         "insertion": {
+            "home_tcp": dict,
+            "home_tolerance_m": float,
             "estimate_count": int,
             "estimate_timeout_s": float,
             "search_after_s": float,
@@ -215,6 +217,10 @@ OVERLAY_SCHEMAS: dict[str, dict[str, Any]] = {
             "search_snapshot_s": float,
             "search_transit_height_m": float,
             "search_max_offset_m": float,
+            "sc_view_point": list,
+            "sc_watch_s": float,
+            "sc_vote_window_s": float,
+            "approach_transit_height_m": dict,
             "search_viewpoints": list,
             "search_anchors": dict,
             "control_period_s": float,
@@ -279,6 +285,8 @@ OVERLAY_SCHEMAS: dict[str, dict[str, Any]] = {
             "recovery_duration_s": float,
             "recovery_retract_m": float,
             "unstick_margin_m": float,
+            "lip_bias_m": dict,
+            "jam_lift_m": dict,
             "log_ground_truth": bool,
         },
         "plug_grasp": dict,
@@ -761,6 +769,18 @@ def validate_infer(config: dict[str, Any]) -> None:
     for key in ("insert_extra_depth_m", "min_seat_depth_m", "max_seat_depth_m"):
         if any(not matches(v, float) or v <= 0.0 for v in insertion[key].values()):
             raise ValueError(f"insertion.{key} values must be positive")
+    for key in ("lip_bias_m", "jam_lift_m"):
+        if any(not matches(v, float) or v < 0.0 for v in insertion[key].values()):
+            raise ValueError(f"insertion.{key} values must be non-negative")
+    home = insertion["home_tcp"]
+    if (
+        set(home) != {"translation", "quaternion_xyzw"}
+        or len(home["translation"]) != 3
+        or len(home["quaternion_xyzw"]) != 4
+    ):
+        raise ValueError(
+            "insertion.home_tcp needs a 3D translation and a quaternion_xyzw"
+        )
     for plug, grasp in config["plug_grasp"].items():
         if (
             set(grasp) != {"translation", "quaternion_xyzw"}
